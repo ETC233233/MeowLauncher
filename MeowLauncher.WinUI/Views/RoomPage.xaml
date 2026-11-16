@@ -1,0 +1,224 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.RoomPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+
+    <!--
+      联机房间页（开发者测试里开了联机才有入口）。三种状态共用一个页面，靠显隐切换：
+        IdlePanel  没有房间：创建 / 加入 + 在线好友
+        RoomPanel  在房间里：房主（三步引导 + 选世界 + 开放 + 邀请）或成员（房主地址）
+      样式全部写在本页，不依赖别处的页面级资源（之前有页面因为找不到资源在加载时崩过）。
+    -->
+    <Page.Resources>
+        <SolidColorBrush x:Key="RoomGreenBrush" Color="#FF2FA35A" />
+        <SolidColorBrush x:Key="RoomGreenSoftBrush" Color="#252FA35A" />
+        <SolidColorBrush x:Key="RoomWarnSoftBrush" Color="#33F2A93B" />
+        <SolidColorBrush x:Key="RoomDangerBrush" Color="#FFD9534F" />
+
+        <Style x:Key="RoomCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+        <Style x:Key="RoomTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCardTitle}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+        <Style x:Key="RoomHintStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText3Brush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="RoomBodyStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+        <Style x:Key="RoomPillStyle" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="CornerRadius" Value="17" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+        <Style x:Key="RoomPrimaryPillStyle" TargetType="Button" BasedOn="{StaticResource RoomPillStyle}">
+            <Setter Property="Background" Value="{StaticResource RoomGreenBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="RoomDangerPillStyle" TargetType="Button" BasedOn="{StaticResource RoomPillStyle}">
+            <Setter Property="Foreground" Value="{StaticResource RoomDangerBrush}" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="Root" Padding="48,20,48,32" Spacing="14" MaxWidth="940" HorizontalAlignment="Stretch">
+
+            <!-- 页头 -->
+            <Grid x:Name="PageHeader" ColumnSpacing="10" MinHeight="52">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="联机" FontSize="28" FontWeight="SemiBold" Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+                <Border Grid.Column="1" Padding="9,3" CornerRadius="10" Background="{ThemeResource AppChipBrush}" VerticalAlignment="Center">
+                    <TextBlock Text="开发者测试" FontSize="11.5" Foreground="{ThemeResource AppText2Brush}" />
+                </Border>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock x:Name="ComponentText" VerticalAlignment="Center"
+                               Style="{StaticResource RoomHintStyle}" TextWrapping="NoWrap" />
+                    <Button x:Name="UpdateButton" Content="更新" Style="{StaticResource RoomPillStyle}" Height="28" Padding="12,0"
+                            Visibility="Collapsed" Click="UpdateComponent_Click" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 提示条：最近一次的成功 / 失败原因 -->
+            <Border x:Name="StatusBar" Style="{StaticResource RoomCardStyle}" Padding="14,10" Visibility="Collapsed"
+                    Background="{StaticResource RoomGreenSoftBrush}" BorderThickness="0">
+                <TextBlock x:Name="StatusText" Style="{StaticResource RoomBodyStyle}" TextWrapping="Wrap" />
+            </Border>
+
+            <!-- ============ 状态 1：没有房间 ============ -->
+            <StackPanel x:Name="IdlePanel" Spacing="14">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Style="{StaticResource RoomCardStyle}">
+                        <StackPanel Spacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE8FA;" FontSize="18" Foreground="{ThemeResource AppTextBrush}" />
+                                <TextBlock Text="创建房间" Style="{StaticResource RoomTitleStyle}" />
+                            </StackPanel>
+                            <Button x:Name="CreateButton" Content="创建房间" Style="{StaticResource RoomPrimaryPillStyle}" Click="Create_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Style="{StaticResource RoomCardStyle}">
+                        <StackPanel Spacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE716;" FontSize="18" Foreground="{ThemeResource AppTextBrush}" />
+                                <TextBlock Text="加入房间" Style="{StaticResource RoomTitleStyle}" />
+                            </StackPanel>
+                            <TextBox x:Name="JoinCodeBox" PlaceholderText="输入 6 位房间码" MaxLength="7" FontSize="20"
+                                     CharacterSpacing="120" InputScope="Number" KeyDown="JoinCode_KeyDown" />
+                            <Button x:Name="JoinButton" Content="加入" Style="{StaticResource RoomPillStyle}" Click="Join_Click" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border Style="{StaticResource RoomCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="在线好友 · 正在用 MeowLauncher" Style="{StaticResource RoomTitleStyle}" />
+                        <StackPanel x:Name="IdleFriendsList" Spacing="8" />
+                        <TextBlock x:Name="IdleFriendsEmpty" Text="没有好友在线，或好友还没开启联机。" Style="{StaticResource RoomHintStyle}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- ============ 状态 2 / 3：在房间里 ============ -->
+            <StackPanel x:Name="RoomPanel" Spacing="14" Visibility="Collapsed">
+                <Border Style="{StaticResource RoomCardStyle}">
+                    <StackPanel Spacing="12">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="房间码" Style="{StaticResource RoomHintStyle}" />
+                                <TextBlock x:Name="CodeText" FontSize="32" FontWeight="SemiBold" CharacterSpacing="80"
+                                           Foreground="{ThemeResource AppTextBrush}" IsTextSelectionEnabled="True" />
+                            </StackPanel>
+                            <Button x:Name="CopyCodeButton" Grid.Column="1" Style="{StaticResource RoomPillStyle}" VerticalAlignment="Bottom"
+                                    Click="CopyCode_Click" AutomationProperties.Name="复制房间码">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE8C8;" FontSize="12" />
+                                    <TextBlock Text="复制" />
+                                </StackPanel>
+                            </Button>
+                            <Border x:Name="PhaseChip" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Padding="12,4" CornerRadius="12" Background="{StaticResource RoomWarnSoftBrush}">
+                                <TextBlock x:Name="PhaseText" FontSize="12" Foreground="{ThemeResource AppTextBrush}" />
+                            </Border>
+                        </Grid>
+
+                        <!-- 房主：三步引导 -->
+                        <StackPanel x:Name="HostSteps" Spacing="8">
+                            <Border Height="1" Background="{ThemeResource CardStrokeBrush}" />
+                            <TextBlock x:Name="Step1Text" Style="{StaticResource RoomBodyStyle}" />
+                            <TextBlock x:Name="Step2Text" Style="{StaticResource RoomBodyStyle}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="Step3Text" Style="{StaticResource RoomBodyStyle}" />
+                        </StackPanel>
+
+                        <!-- 房主：选世界 + 开放 -->
+                        <StackPanel x:Name="HostOpen" Spacing="10">
+                            <Border Height="1" Background="{ThemeResource CardStrokeBrush}" />
+                            <Grid>
+                                <TextBlock Text="选择要开放的世界" Style="{StaticResource RoomTitleStyle}" VerticalAlignment="Center" />
+                                <Button x:Name="RefreshGamesButton" Content="刷新" HorizontalAlignment="Right" Style="{StaticResource RoomPillStyle}" Click="RefreshGames_Click" />
+                            </Grid>
+                            <StackPanel x:Name="GameList" Spacing="6" />
+                            <TextBlock x:Name="GameEmpty" Text="还没发现正在监听的游戏。先在游戏里打开世界，按 Esc →「对局域网开放」，再点「刷新」。"
+                                       Style="{StaticResource RoomHintStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button x:Name="OpenButton" Content="开放" Style="{StaticResource RoomPrimaryPillStyle}" Click="Open_Click" />
+                                <TextBlock x:Name="OpenHint" Text="开放时会弹出一次管理员授权，用来创建虚拟网卡。" Style="{StaticResource RoomHintStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- 地址：房主开放后显示；成员一直显示（等房主开放前是占位） -->
+                        <StackPanel x:Name="AddrBlock" Spacing="6">
+                            <Border Height="1" Background="{ThemeResource CardStrokeBrush}" />
+                            <TextBlock x:Name="AddrLabel" Text="房主地址" Style="{StaticResource RoomHintStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <TextBlock x:Name="AddrText" FontSize="22" FontWeight="SemiBold" FontFamily="Consolas"
+                                           Foreground="{ThemeResource AppTextBrush}" IsTextSelectionEnabled="True" VerticalAlignment="Center" />
+                                <Button x:Name="CopyAddrButton" Style="{StaticResource RoomPillStyle}" Click="CopyAddr_Click" AutomationProperties.Name="复制地址">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE8C8;" FontSize="12" />
+                                        <TextBlock Text="复制地址" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <TextBlock x:Name="AddrHint" Style="{StaticResource RoomHintStyle}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="InviteColumn" Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Style="{StaticResource RoomCardStyle}">
+                        <StackPanel Spacing="10">
+                            <TextBlock x:Name="MembersTitle" Style="{StaticResource RoomTitleStyle}" />
+                            <StackPanel x:Name="MembersList" Spacing="8" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="InviteCard" Grid.Column="1" Style="{StaticResource RoomCardStyle}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="邀请好友" Style="{StaticResource RoomTitleStyle}" />
+                            <StackPanel x:Name="InviteList" Spacing="8" />
+                            <TextBlock x:Name="InviteEmpty" Text="没有好友在线，或好友还没开启联机。" Style="{StaticResource RoomHintStyle}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Button x:Name="CloseButton" HorizontalAlignment="Right" Style="{StaticResource RoomDangerPillStyle}" Click="Close_Click" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

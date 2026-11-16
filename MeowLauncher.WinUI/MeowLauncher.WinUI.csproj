@@ -1,0 +1,157 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 版本信息的唯一来源（三档 Review / Beta / Release）：../version.props -->
+  <Import Project="../version.props" />
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>MeowLauncher.WinUI</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Icons\AppIcon.ico</ApplicationIcon>
+    <Version>$(MeowVersion)</Version>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- 不再自带 .NET 运行时：发布为框架依赖（framework-dependent），由安装器检测/安装 .NET 8。
+         WindowsAppSDK 运行时仍随包自带（WindowsAppSDKSelfContained），否则 WinUI 需要另装 Windows App Runtime。 -->
+    <SelfContained>false</SelfContained>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained><!-- 依赖系统已装的 Windows App Runtime 1.8；安装器负责检测并静默安装 Redistributable -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <DefaultLanguage>zh-CN</DefaultLanguage>
+  </PropertyGroup>
+
+  <!-- 联机配置入口和验签公钥不写进源码：放在 online.props（不入库）里，或构建时传
+       -p:MeowConfigEntry=... -p:MeowConfigKeys=k1:<公钥>。没有的话联机模块拿不到配置，联机功能就是不可用状态。 -->
+  <Import Project="online.props" Condition="Exists('online.props')" />
+
+  <!-- 联机模块（独立仓库 meow-room-module）：账号握手、邀请推送、房间服务客户端。
+       默认总开关关闭，由「开发者测试 → 联机」三层开关控制；入口 / 公钥通过 AdditionalProperties 传进模块。 -->
+  <ItemGroup Condition="Exists('..\_export\meow-room-module\MeowRoom.Module.csproj')">
+    <!-- 只用来编译：Private=false 不把模块 DLL 复制进启动器，ExcludeAssets=runtime 让 deps.json 里也没有它。
+         运行时由 OnlineComponent 从下载的组件目录里解析（程序集解析器）。 -->
+    <ProjectReference Include="..\_export\meow-room-module\MeowRoom.Module.csproj" Private="false" ExcludeAssets="runtime"
+                      AdditionalProperties="MeowConfigEntry=$(MeowConfigEntry);MeowConfigKeys=$(MeowConfigKeys)" />
+  </ItemGroup>
+
+  <!-- 组件清单入口和验签公钥（公钥不是密钥）写进启动器自己的程序集元数据 -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>MeowConfigEntry</_Parameter1>
+      <_Parameter2>$(MeowConfigEntry)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>MeowConfigKeys</_Parameter1>
+      <_Parameter2>$(MeowConfigKeys)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <!-- 云端组件清单的 Ed25519 验签（下载联机组件之前就要用，所以启动器自己带；联机模块用的是同一个版本） -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- 后端库 ml2 随程序一起发布，放在 Backend\ml2；sidecar.py 先从自己所在目录找它，开发时仍可用仓库根的 ml2。 -->
+    <Content Include="..\ml2\**\*.py" Link="Backend\ml2\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Backend\sidecar.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- 联机组件（联机模块 + RoomAgent + EasyTier）不再随启动器编译 / 分发：首次进入联机页时从云端下载（见 Services/OnlineComponent.cs）。
+       组件包用 tools/pack_online_component.ps1 另行打包。 -->
+
+  <!-- 第三方许可证与声明：随启动器一起安装到 Licenses\（EasyTier / WinDivert / Wintun 等二进制的分发条件之一）。 -->
+  <ItemGroup>
+    <Content Include="Licenses\**\*" Link="Licenses\%(Filename)%(Extension)"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+  </ItemGroup>
+
+  <!-- 发布时 MeowLauncher.WinUI.pri 不会被自动带上，缺了启动即崩；发布后从构建输出补拷。 -->
+  <Target Name="CopyAppPriToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(TargetDir)MeowLauncher.WinUI.pri" DestinationFolder="$(PublishDir)" Condition="Exists('$(TargetDir)MeowLauncher.WinUI.pri')" />
+  </Target>
+
+
+  <!-- 发布时剔除 WindowsAppSDK.ML 带进来的 ONNX/DirectML（~39 MB，本应用未使用）。
+       实测：删掉这四个文件后发布目录仍能正常启动、首页数据正常。 -->
+  <Target Name="TrimMlPayload" AfterTargets="Publish">
+    <ItemGroup>
+      <_MlPayload Include="$(PublishDir)DirectML.dll;$(PublishDir)Microsoft.ML.OnnxRuntime.dll;$(PublishDir)onnxruntime.dll;$(PublishDir)onnxruntime_providers_shared.dll" />
+    </ItemGroup>
+    <Delete Files="@(_MlPayload)" ContinueOnError="true" />
+  </Target>
+  <!--
+    构建号（Review 档每次编译自动 +1 迭代次数）：<年序><月日>-<迭代次数>，例如 01113-7829。
+    - 计数文件 build/review-counter.txt（不入库）：只在「源码比它新」时才 +1，没改代码的重复构建不涨。
+    - 晋升（Beta / Release）用 -p:MeowBuildId=01113-7829 指定原 Review 构建号，不自增（见 tools/promote.ps1）。
+    - 生成 obj 里的 MeowBuildInfo.g.cs（BuildInfo.Channel / VersionText / BuildId）；内容没变时不重写，不触发重新编译。
+  -->
+  <PropertyGroup>
+    <MeowCounterFile>$(MSBuildProjectDirectory)/../build/review-counter.txt</MeowCounterFile>
+  </PropertyGroup>
+
+  <Target Name="_MeowCollectSources">
+    <ItemGroup>
+      <_MeowSrc Include="@(Compile)" />
+      <_MeowSrc Include="@(Page)" />
+      <_MeowSrc Include="@(ApplicationDefinition)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="MeowBumpBuild" DependsOnTargets="_MeowCollectSources" Inputs="@(_MeowSrc)" Outputs="$(MeowCounterFile)"
+          Condition="'$(MeowChannel)' == 'review' And '$(MeowBuildId)' == ''">
+    <ReadLinesFromFile File="$(MeowCounterFile)" Condition="Exists('$(MeowCounterFile)')">
+      <Output TaskParameter="Lines" PropertyName="_MeowPrev" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_MeowPrevN>0</_MeowPrevN>
+      <_MeowPrevN Condition="'$(_MeowPrev)' != '' And $(_MeowPrev.Contains('-'))">$(_MeowPrev.Substring($([MSBuild]::Add($(_MeowPrev.IndexOf('-')), 1))))</_MeowPrevN>
+      <_MeowNextN>$([MSBuild]::Add($(_MeowPrevN), 1))</_MeowNextN>
+      <_MeowYear>$([MSBuild]::Subtract($([System.DateTime]::Now.Year), 2026))</_MeowYear>
+      <_MeowNew>$(_MeowYear)$([System.DateTime]::Now.ToString('MMdd'))-$(_MeowNextN)</_MeowNew>
+    </PropertyGroup>
+    <MakeDir Directories="$(MSBuildProjectDirectory)/../build" />
+    <WriteLinesToFile File="$(MeowCounterFile)" Lines="$(_MeowNew)" Overwrite="true" />
+  </Target>
+
+  <Target Name="MeowGenBuildInfo" DependsOnTargets="MeowBumpBuild" BeforeTargets="BeforeBuild">
+    <ReadLinesFromFile File="$(MeowCounterFile)" Condition="Exists('$(MeowCounterFile)')">
+      <Output TaskParameter="Lines" PropertyName="_MeowFileId" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <MeowBuildInfoFile>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)MeowBuildInfo.g.cs</MeowBuildInfoFile>
+      <_MeowId>$(MeowBuildId)</_MeowId>
+      <_MeowId Condition="'$(_MeowId)' == ''">$(_MeowFileId)</_MeowId>
+      <_MeowId Condition="'$(_MeowId)' == ''">00000-0</_MeowId>
+    </PropertyGroup>
+    <ItemGroup>
+      <_MeowLine Include="// &lt;auto-generated/&gt;" />
+      <_MeowLine Include="namespace MeowLauncher.WinUI%3B" />
+      <_MeowLine Include="public static partial class BuildInfo" />
+      <_MeowLine Include="{" />
+      <_MeowLine Include="    public const string Channel = &quot;$(MeowChannel)&quot;%3B" />
+      <_MeowLine Include="    public const string VersionText = &quot;$(MeowVersion)&quot;%3B" />
+      <_MeowLine Include="    public const string BuildId = &quot;$(_MeowId)&quot;%3B" />
+      <_MeowLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(MeowBuildInfoFile)" Lines="@(_MeowLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(MeowBuildInfoFile)" />
+      <FileWrites Include="$(MeowBuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

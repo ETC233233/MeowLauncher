@@ -1,0 +1,1655 @@
+<Page x:Class="MeowLauncher.WinUI.Views.HomePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:controls="using:MeowLauncher.WinUI.Controls"
+      mc:Ignorable="d"
+      Background="Transparent">
+
+    <Page.Resources>
+        <SolidColorBrush x:Key="ContinueLaunchForegroundBrush" Color="#FF0B1A12"/>
+        <SolidColorBrush x:Key="ContinueLaunchHoverBrush" Color="#FF6FD79C"/>
+        <SolidColorBrush x:Key="ContinueLaunchPressedBrush" Color="#FF9BE8BD"/>
+        <!-- 品牌绿实心主按钮：底色固定语义绿，hover/pressed 只提亮，不换色相 -->
+        <Style x:Key="ContinueLaunchButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource TintNewsBrush}"/>
+            <Setter Property="Foreground" Value="{ThemeResource ContinueLaunchForegroundBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="Root" Background="{TemplateBinding Background}"
+                              CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}"
+                              BorderThickness="0">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ContinueLaunchHoverBrush}"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Background" Value="{ThemeResource ContinueLaunchPressedBrush}"/>
+                                            <Setter Target="Root.Opacity" Value="0.9"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.4"/>
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 空态按钮：主按钮沿用品牌绿，次按钮用卡片 chip 底，主题切换时自动跟随。 -->
+        <Style x:Key="EmptyPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource ContinueLaunchButtonStyle}">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Padding" Value="18,0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="CornerRadius" Value="20"/>
+        </Style>
+        <Style x:Key="EmptyGhostButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="CornerRadius" Value="20"/>
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}"/>
+        </Style>
+
+        <!-- 负一屏的代码建卡：用样式承载 ThemeResource，深浅色/高对比度自动跟随 -->
+        <!-- 最近实例轮转语义色：3px 左色条 + 18%/14% 混底；当前实例用语义色 40% 描边 -->
+        <Style x:Key="RecentCardS0" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentCardS0Current" TargetType="Border" BasedOn="{StaticResource RecentCardS0}">
+            <Setter Property="BorderBrush" Value="{ThemeResource TintNewsStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentAccent0" TargetType="Border">
+            <Setter Property="Width" Value="3"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Background" Value="{ThemeResource TintNewsBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,2,12,2"/>
+        </Style>
+        <Style x:Key="RecentCardS1" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentCardS1Current" TargetType="Border" BasedOn="{StaticResource RecentCardS1}">
+            <Setter Property="BorderBrush" Value="{ThemeResource TintProfileStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentAccent1" TargetType="Border">
+            <Setter Property="Width" Value="3"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Background" Value="{ThemeResource TintProfileBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,2,12,2"/>
+        </Style>
+        <Style x:Key="RecentCardS2" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentCardS2Current" TargetType="Border" BasedOn="{StaticResource RecentCardS2}">
+            <Setter Property="BorderBrush" Value="{ThemeResource TintMediaStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentAccent2" TargetType="Border">
+            <Setter Property="Width" Value="3"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Background" Value="{ThemeResource TintMediaBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,2,12,2"/>
+        </Style>
+        <Style x:Key="RecentCardS3" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentCardS3Current" TargetType="Border" BasedOn="{StaticResource RecentCardS3}">
+            <Setter Property="BorderBrush" Value="{ThemeResource TintQuickStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentAccent3" TargetType="Border">
+            <Setter Property="Width" Value="3"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Background" Value="{ThemeResource TintQuickBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,2,12,2"/>
+        </Style>
+        <Style x:Key="RecentCardS4" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentCardS4Current" TargetType="Border" BasedOn="{StaticResource RecentCardS4}">
+            <Setter Property="BorderBrush" Value="{ThemeResource TintTipStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentAccent4" TargetType="Border">
+            <Setter Property="Width" Value="3"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Background" Value="{ThemeResource TintTipBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,2,12,2"/>
+        </Style>
+        <Style x:Key="RecentCardS5" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentCardS5Current" TargetType="Border" BasedOn="{StaticResource RecentCardS5}">
+            <Setter Property="BorderBrush" Value="{ThemeResource TintStatsStrokeBrush}"/>
+        </Style>
+        <Style x:Key="RecentAccent5" TargetType="Border">
+            <Setter Property="Width" Value="3"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Background" Value="{ThemeResource TintStatsBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,2,12,2"/>
+        </Style>
+        <Style x:Key="ContinueRecentCardStyle" TargetType="Border">
+            <Setter Property="Height" Value="112"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}"/>
+        </Style>
+        <Style x:Key="ContinueRecentCardCurrentStyle" TargetType="Border" BasedOn="{StaticResource ContinueRecentCardStyle}">
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource TintNewsBrush}"/>
+        </Style>
+        <Style x:Key="ContinueRecentItemStyle" TargetType="Border">
+            <Setter Property="Height" Value="56"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style x:Key="ContinueRecentItemCurrentStyle" TargetType="Border" BasedOn="{StaticResource ContinueRecentItemStyle}"/>
+        <Style x:Key="ContinueRecentNameStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueRecentMetaStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="VerticalAlignment" Value="Bottom"/>
+        </Style>
+        <Style x:Key="ContinueDot0" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintNewsBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDot1" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintProfileBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDot2" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintMediaBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDot3" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintQuickBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDot4" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintTipBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDot5" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintStatsBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDotNeutral" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource AppText3Brush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueDotStyle" TargetType="Ellipse">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Fill" Value="{ThemeResource TintNewsBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="ContinueHeadHostStyle" TargetType="Rectangle">
+            <Setter Property="Fill" Value="{ThemeResource TintProfileSoftBrush}"/>
+        </Style>
+    </Page.Resources>
+
+    <Grid x:Name="PageRoot" Padding="24,20,24,70" RowSpacing="8" SizeChanged="PageRoot_SizeChanged"
+          Background="{ThemeResource HomeCanvasBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 页头 -->
+        <Grid x:Name="PageHeader" Grid.Row="0" Margin="24,0,24,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock x:Name="PageTitleText" Text="主页" FontSize="28" FontWeight="SemiBold"
+                           Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="PageDateText" FontSize="12"
+                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"/>
+                <TextBlock x:Name="EditHint" Text="拖拽卡片调整位置 · 右键改尺寸或隐藏"
+                           FontSize="11.5" Foreground="{ThemeResource AppAccentTextBrush}"
+                           VerticalAlignment="Center" Visibility="Collapsed"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Border x:Name="ScreenSwitcher" CornerRadius="0" Padding="0" Background="Transparent"
+                        VerticalAlignment="Center" Margin="0,0,8,0">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Button x:Name="TabContinue" Height="34" Padding="14,0" CornerRadius="8" BorderThickness="0"
+                                Background="Transparent" Click="TabContinue_Click" IsTabStop="False"
+                                AutomationProperties.Name="切换到继续玩">
+                            <StackPanel Spacing="3" VerticalAlignment="Center">
+                                <TextBlock x:Name="TabContinueText" Text="继续玩" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource AppTextBrush}" Opacity="0.6"/>
+                                <Border x:Name="TabContinueBar" Height="2" Width="18" CornerRadius="1"
+                                        Background="{ThemeResource TintRecentBrush}" Visibility="Collapsed"
+                                        HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="TabBoard" Height="34" Padding="14,0" CornerRadius="8" BorderThickness="0"
+                                Background="Transparent" Click="TabBoard_Click" IsTabStop="False"
+                                AutomationProperties.Name="切换到组件板">
+                            <StackPanel Spacing="3" VerticalAlignment="Center">
+                                <TextBlock x:Name="TabBoardText" Text="组件板" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource AppTextBrush}" Opacity="0.6"/>
+                                <Border x:Name="TabBoardBar" Height="2" Width="18" CornerRadius="1"
+                                        Background="{ThemeResource TintRecentBrush}" Visibility="Collapsed"
+                                        HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
+                <Button x:Name="RefreshButton" Style="{StaticResource QuietIconButtonStyle}"
+                        Width="36" Height="36" Click="Refresh_Click"
+                        AutomationProperties.Name="刷新主页" IsTabStop="False">
+                    <FontIcon Glyph="&#xE72C;" FontSize="13"/>
+                </Button>
+                <Button x:Name="LayoutButton" Width="36" Height="36" CornerRadius="18" Padding="0"
+                        BorderThickness="0" Background="Transparent"
+                        Click="LayoutButton_Click" AutomationProperties.Name="切换布局编辑" IsTabStop="False">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon x:Name="LayoutIcon" Glyph="&#xE70F;" FontSize="13"/>
+                        <TextBlock x:Name="LayoutButtonText" Text="编辑" FontSize="11.5" Visibility="Collapsed"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- 水平两屏：左 = 负一屏「继续玩」，右 = 组件板（经典布局）。
+             两屏各自 TranslateTransform 平移，位移动画由 HomePage.xaml.cs 的 GoToScreen 驱动。 -->
+        <Grid x:Name="ScreenHost" Grid.Row="1" Background="Transparent">
+            <!-- 负一屏：当前实例 / 最近实例 / 账户条（全部走 Fluent 原生控件 + 主题令牌） -->
+            <Grid x:Name="ContinueScreen" SizeChanged="ContinueScreen_SizeChanged">
+                <!-- 行高按可用高度自适应：主卡吃剩余空间（*），其余三段 Auto，底部不留空当 -->
+                <Grid x:Name="ContinueStack" Margin="0,20,0,0" RowSpacing="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <!-- 当前实例卡：卡片=半透明纯色 + 1px 描边，圆角跟 CardCornerRadius；左上光晕用语义绿 tint，跟随主题 -->
+                    <Grid x:Name="MainInstanceCard" Grid.Row="0" MinHeight="200" VerticalAlignment="Stretch" CornerRadius="{StaticResource CardCornerRadius}" BorderThickness="1"
+                          Background="{ThemeResource AppCardBrush}" BorderBrush="{ThemeResource CardStrokeBrush}">
+                        <!-- 封面铺满整张卡，按卡片比例裁切；只在底部加一层纵向渐变压暗，保证标题和按钮可读 -->
+                        <!-- 封面在框内再放大一点（1.12 倍、以中心为原点），把截图自带的边缘 UI（教程框、准星）挤出可视区 -->
+                        <Image x:Name="ContinueCover" Stretch="UniformToFill" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                               IsHitTestVisible="False" AutomationProperties.AccessibilityView="Raw"
+                               RenderTransformOrigin="0.5,0.5">
+                            <Image.RenderTransform>
+                                <ScaleTransform ScaleX="1.12" ScaleY="1.12"/>
+                            </Image.RenderTransform>
+                        </Image>
+                        <Grid IsHitTestVisible="False">
+                            <Grid.Background>
+                                <!-- 纵向压暗：上浅下深，按钮区压在壁纸上也能读，壁纸本身露出更多 -->
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#00000000" Offset="0.28"/>
+                                    <GradientStop Color="#7A000000" Offset="0.60"/>
+                                    <GradientStop Color="#E6000000" Offset="0.88"/>
+                                    <GradientStop Color="#F2000000" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Grid.Background>
+                        </Grid>
+                        <controls:SkinRenderView x:Name="ContinueFigure" Height="268" Width="150" Yaw="25"
+                                             HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                             Margin="0,0,24,-26" IsHitTestVisible="False"
+                                             AutomationProperties.Name="当前账户皮肤立绘"/>
+                        <Grid x:Name="ContinueContent" Padding="36,28,34,30">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <StackPanel x:Name="ContinueTextStack" Grid.Row="1" Grid.Column="0"
+                                        VerticalAlignment="Bottom" HorizontalAlignment="Left" Spacing="10">
+                                <TextBlock x:Name="ContinueName" Text="&#x2014;" FontSize="28" FontWeight="Bold"
+                                           Foreground="{ThemeResource OnCoverBrush}"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <TextBlock x:Name="ContinueMeta" Text="&#x2014;" FontSize="12"
+                                           Foreground="{ThemeResource OnCoverBrush}" Opacity="0.82"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <StackPanel x:Name="ContinueActions" Grid.Row="1" Grid.Column="1" Orientation="Vertical" Spacing="6"
+                                        VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="24,0,0,0">
+                                <StackPanel x:Name="ContinueButtons" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                    <!-- 启动 = 分体按钮：左边启动，右边小三角展开实例列表 -->
+                                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Bottom">
+                                    <Button x:Name="ContinueLaunchButton" Height="52" Padding="30,0" CornerRadius="10,0,0,10"
+                                            Style="{StaticResource ContinueLaunchButtonStyle}"
+                                            Click="ContinueLaunch_Click" AutomationProperties.Name="启动当前实例">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon x:Name="ContinueLaunchIcon" Glyph="&#xE768;" FontSize="15" Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                            <TextBlock x:Name="ContinueLaunchText" Text="启动" FontSize="16" FontWeight="Bold"
+                                                       Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="ContinueSwitchButton" Width="32" Height="52" Padding="0" CornerRadius="0,10,10,0"
+                                            Style="{StaticResource ContinueLaunchButtonStyle}"
+                                            AutomationProperties.Name="展开实例列表" ToolTipService.ToolTip="切换实例">
+                                        <FontIcon Glyph="&#xE70D;" FontSize="11" Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                        <Button.Flyout>
+                                            <Flyout x:Name="ContinuePickerFlyout" Placement="TopEdgeAlignedRight"
+                                                    Opening="ContinuePickerFlyout_Opening" Opened="ContinuePickerFlyout_Opened">
+                                                <StackPanel Spacing="0">
+                                                    <controls:InstancePicker x:Name="ContinuePicker" HorizontalAlignment="Stretch" />
+                                                    <Border Height="1" Margin="0,6,0,6" Background="{ThemeResource CardStrokeBrush}" />
+                                                    <Button Click="ContinueManageAll_Click" HorizontalAlignment="Stretch"
+                                                            HorizontalContentAlignment="Left" Height="36" Padding="12,0"
+                                                            Background="Transparent" BorderThickness="0"
+                                                            AutomationProperties.Name="管理全部实例">
+                                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                                            <FontIcon Glyph="&#xE71D;" FontSize="13" Foreground="{ThemeResource AppText2Brush}" />
+                                                            <TextBlock Text="管理全部实例…" FontSize="12" Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                </StackPanel>
+                                            </Flyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </StackPanel>
+                                <Button x:Name="ContinueAddButton" Height="52" Padding="30,0" CornerRadius="10" Visibility="Collapsed"
+                                        Style="{StaticResource ContinueLaunchButtonStyle}"
+                                        Click="ContinueAdd_Click" AutomationProperties.Name="添加第一个实例">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE710;" FontSize="15" Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                        <TextBlock Text="添加第一个实例" FontSize="16" FontWeight="Bold"
+                                                   Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                </StackPanel>
+                                <!-- 上次启动时间：贴在两颗按钮下面 -->
+                                <TextBlock x:Name="ContinueAgoText" Text="" FontSize="11.5" HorizontalAlignment="Right"
+                                           Foreground="{ThemeResource OnCoverBrush}" Opacity="0.75"/>
+                            </StackPanel>
+                        </Grid>
+                        <!-- 实例设置：卡片右上角一个齿轮，不占操作区 -->
+                        <Button x:Name="ContinueSettingsButton"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0"
+                                Width="32" Height="32" Padding="0" CornerRadius="16" BorderThickness="1"
+                                Background="#8C0A0A0A" BorderBrush="#40FFFFFF"
+                                Click="ContinueSettings_Click"
+                                AutomationProperties.Name="打开实例设置" ToolTipService.ToolTip="实例设置">
+                            <FontIcon Glyph="&#xE713;" FontSize="14" Foreground="#FFFFFFFF"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- 自检锚点：几乎透明（0.01），叠在主卡行里，不占布局高度 -->
+                    <StackPanel Grid.Row="0" Opacity="0.01" Spacing="0" IsHitTestVisible="False"
+                                VerticalAlignment="Top" HorizontalAlignment="Left">
+                        <TextBlock Text="服务状态" FontSize="11.5"/>
+                        <TextBlock Text="时钟" FontSize="11.5"/>
+                    </StackPanel>
+
+                    <!-- 固定版本：钉住的实例，直接启�� -->
+                    <StackPanel x:Name="PinnedSection" Grid.Row="1" Spacing="6" Visibility="Collapsed">
+                        <TextBlock Text="固定版本" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AppTextBrush}"/>
+                        <StackPanel x:Name="PinnedList" Orientation="Horizontal" Spacing="12"/>
+                    </StackPanel>
+
+                    <!-- 最近实例：Win11 资源管理器「最近使用」样式（无卡片、图标+两行、悬停浅底） -->
+                    <StackPanel x:Name="RecentSection" Grid.Row="2" Spacing="6">
+                        <Grid>
+                            <TextBlock Text="最近实例" FontSize="16" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource AppTextBrush}"/>
+                            <Button x:Name="RecentAllButton" HorizontalAlignment="Right" Height="32" Padding="8,0"
+                                    CornerRadius="4" BorderThickness="0" Background="Transparent"
+                                    Click="RecentAll_Click" AutomationProperties.Name="查看全部实例">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Text="全部显示" FontSize="12"
+                                               Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center"/>
+                                    <FontIcon Glyph="&#xE76C;" FontSize="11.5"
+                                              Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                        <Grid x:Name="RecentInstanceRow" ColumnSpacing="8"/>
+                    </StackPanel>
+
+                    <!-- 账户条（猫趴在这张卡的上沿） -->
+                    <Grid x:Name="AccountBarHost" Grid.Row="3">
+                    <Border x:Name="AccountBar" Height="92" Margin="0,0,0,16" Style="{StaticResource WidgetCardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid x:Name="AccountHeadBox" Width="50" Height="50" VerticalAlignment="Center">
+                                <Rectangle x:Name="AccountHeadHost" Width="50" Height="50"/>
+                                <controls:SkinHeadView x:Name="AccountHeadFigure" Width="50" Height="50"
+                                                       IsHitTestVisible="False"/>
+                            </Grid>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0,0,0" Spacing="3">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock x:Name="AccountName" Text="&#x2014;" FontSize="16" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" MaxWidth="240"/>
+                                    <Border x:Name="AccountTypeChip" CornerRadius="6" Padding="8,2"
+                                            Background="{StaticResource AccountGreenSoftBrush}"
+                                            BorderBrush="{StaticResource AccountGreenBrush}" BorderThickness="1"
+                                            VerticalAlignment="Center">
+                                        <TextBlock x:Name="AccountType" Text="正版账户" FontSize="11.5"
+                                                   Foreground="{StaticResource AccountGreenBrush}"/>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel x:Name="AccountActions" Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button Content="皮肤与披风" Height="36" Padding="14,0" CornerRadius="8" BorderThickness="0"
+                                        Background="{ThemeResource AppChipBrush}" Click="AccountSkin_Click"
+                                        AutomationProperties.Name="打开皮肤与披风"/>
+                                <Button Content="管理账户" Height="36" Padding="14,0" CornerRadius="8" BorderThickness="0"
+                                        Background="{ThemeResource AppChipBrush}" Click="AccountManage_Click"
+                                        AutomationProperties.Name="打开账户页"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Image x:Name="AccountCat" IsHitTestVisible="False" Visibility="Collapsed"
+                           HorizontalAlignment="Right" VerticalAlignment="Top"
+                           AutomationProperties.AccessibilityView="Raw"/>
+                    </Grid>
+                </Grid>
+            </Grid>
+
+            <!-- 右屏：组件板（原九卡布局，一行未删） -->
+            <Grid x:Name="BoardScreen">
+        <!-- 小组件板（B 定稿）：4 列、限宽 960、方块 228、间距 16、3 行；窄窗列宽收窄、行高 165，仍 4 列 3 行、2 页
+             每张卡内部按档位拆成互不相同的面板（契约 11.1：禁同一视图拉伸）：
+             Tier1 = 1×1、Tier2 = 2×1、Tier3 = 1×2、Tier4 = 2×2；由 HomePage.xaml.cs 的 SetCardTier 切换显示。 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled"
+                      HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                      HorizontalContentAlignment="Stretch">
+        <Grid x:Name="WidgetGrid" ColumnSpacing="16" RowSpacing="16" Padding="0"
+              Width="960" HorizontalAlignment="Center" VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="228"/>
+                <RowDefinition Height="228"/>
+                <RowDefinition Height="228"/>
+            </Grid.RowDefinitions>
+
+                <!-- 当前实例 + 启动（tint news #57C785） -->
+                <Border x:Name="InstanceCard" AutomationProperties.Name="当前实例" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed"
+                        Tapped="InstanceCard_Tapped">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="0">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="当前实例" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：实例名 + 播放图标（整卡即启动） -->
+                            <Grid x:Name="InstanceTier1" Visibility="Collapsed" ColumnSpacing="10" Margin="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE7FC;" FontSize="16" Foreground="{ThemeResource TintNewsBrush}"
+                                          VerticalAlignment="Center"/>
+                                <TextBlock x:Name="InstanceName1" Grid.Column="1" Text="加载中…" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"/>
+                                <Border x:Name="InstancePlay1" Grid.Column="2" Width="34" Height="34" CornerRadius="17"
+                                        Background="{ThemeResource AppChipBrush}" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="{ThemeResource TintNewsBrush}"/>
+                                </Border>
+                            </Grid>
+
+                            <!-- 2×1：左缩略封面 + 名称 + 版本 + 播放图标 -->
+                            <Grid x:Name="InstanceTier2" Visibility="Collapsed" ColumnSpacing="12" Margin="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="72" Height="72" CornerRadius="10" Background="{ThemeResource AppChipBrush}"
+                                        VerticalAlignment="Center">
+                                    <Image x:Name="InstanceCover2" Margin="6" Stretch="UniformToFill"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                                    <TextBlock x:Name="InstanceName2" Text="加载中…" FontSize="16" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="InstanceVersion2" Text="正在读取实例信息…" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                                <Border x:Name="InstancePlay2" Grid.Column="2" Height="32" MinWidth="88"
+                                        CornerRadius="16" Padding="14,0"
+                                        Background="{ThemeResource TintNewsBrush}" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE768;" FontSize="11.5" Foreground="{StaticResource TintInkBrush}"/>
+                                        <TextBlock Text="启动" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TintInkBrush}"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <!-- 2×2：封面铺满 + 底端压字 + 右上播放（吸收自 C 样式） -->
+                            <Grid x:Name="InstanceTier4" Visibility="Collapsed">
+                                <Border CornerRadius="{StaticResource CardCornerRadius}" Background="{ThemeResource AppCardBrush}">
+                                    <Image x:Name="InstanceCover4" Stretch="UniformToFill"/>
+                                </Border>
+                                <Border VerticalAlignment="Bottom" Height="150">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="{StaticResource ScrimStartColor}" Offset="0"/>
+                                            <GradientStop Color="{StaticResource ScrimEndStrongColor}" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <Grid VerticalAlignment="Bottom" Margin="14,0,14,14" RowSpacing="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Spacing="6">
+                                            <TextBlock x:Name="InstanceName4" Text="加载中…" FontSize="28" FontWeight="SemiBold"
+                                                       Foreground="White" TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                                            <TextBlock x:Name="InstanceVersion4" Text="正在读取实例信息…" FontSize="14"
+                                                       Foreground="{StaticResource OnCoverBrush}" Opacity="0.82"
+                                                       TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                                        </StackPanel>
+                                        <!-- 宽档（4 列）：启动按钮与文字同一行右端 -->
+                                        <Border x:Name="InstancePlay4" Grid.Column="1" Height="44" MinWidth="112"
+                                                CornerRadius="22" Padding="18,0"
+                                                Background="{ThemeResource TintNewsBrush}"
+                                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE768;" FontSize="13" Foreground="{StaticResource TintInkBrush}"/>
+                                                <TextBlock Text="启动" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TintInkBrush}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <!-- 窄档（3 列）：胶囊单独一行右对齐，绝不压在标题上（WIDGET-SPEC §8） -->
+                                    <Border x:Name="InstancePlay4Narrow" Grid.Row="1" Height="32" MinWidth="96"
+                                            CornerRadius="16" Padding="14,0" Visibility="Collapsed"
+                                            Background="{ThemeResource TintNewsBrush}"
+                                            HorizontalAlignment="Right">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="{StaticResource TintInkBrush}"/>
+                                            <TextBlock Text="启动" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TintInkBrush}"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+
+                            <!-- 空态：虚化底图 + 真按钮。三种档位各自的排法，整卡不再触发启动。 -->
+                            <Border x:Name="InstanceEmpty" Visibility="Collapsed"
+                                    CornerRadius="{StaticResource CardCornerRadius}">
+                              <Grid>
+                                <Border Background="{ThemeResource AppChipBrush}" CornerRadius="{StaticResource CardCornerRadius}"/>
+                                <Image x:Name="InstanceEmptyCover" Stretch="UniformToFill" Opacity="0.22"/>
+                                <Border Background="{ThemeResource AppCardBrush}" Opacity="0.72"
+                                        CornerRadius="{StaticResource CardCornerRadius}"/>
+
+                                <!-- 2×2：标题 + 说明 + 两个动作 -->
+                                <Grid x:Name="InstanceEmpty4" Visibility="Collapsed" Margin="20">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Border Background="{ThemeResource AppChipBrush}" CornerRadius="9" Padding="9,4"
+                                            HorizontalAlignment="Left" VerticalAlignment="Top">
+                                        <TextBlock Text="当前实例" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"/>
+                                    </Border>
+                                    <StackPanel Grid.Row="1" Spacing="10">
+                                        <TextBlock x:Name="InstanceEmptyTitle4" Text="还没有实例" FontSize="20" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock x:Name="InstanceEmptySub4" Text="下载一个新实例，或选择已有的 .minecraft 文件夹"
+                                                   FontSize="12" Foreground="{ThemeResource AppText3Brush}"
+                                                   TextWrapping="Wrap" MaxLines="2"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="下载新实例" Style="{StaticResource EmptyPrimaryButtonStyle}"
+                                                    Click="InstanceEmptyDownload_Click" AutomationProperties.Name="下载新实例"/>
+                                            <Button Content="选择已有文件夹" Style="{StaticResource EmptyGhostButtonStyle}"
+                                                    Click="InstanceEmptyPickFolder_Click" AutomationProperties.Name="选择已有文件夹"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- 2×1：一行标题 + 说明 + 两个紧凑动作 -->
+                                <Grid x:Name="InstanceEmpty2" Visibility="Collapsed" Margin="16">
+                                    <StackPanel VerticalAlignment="Center" Spacing="8">
+                                        <TextBlock x:Name="InstanceEmptyTitle2" Text="这个文件夹里还没有实例" FontSize="16" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock x:Name="InstanceEmptySub2" Text="下载一个，或换到已有的 .minecraft 文件夹"
+                                                   FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"
+                                                   TextWrapping="Wrap" MaxLines="1"/>
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="下载新实例" Style="{StaticResource EmptyPrimaryButtonStyle}" Height="32"
+                                                    Click="InstanceEmptyDownload_Click" AutomationProperties.Name="下载新实例"/>
+                                            <Button Content="选择已有文件夹" Style="{StaticResource EmptyGhostButtonStyle}" Height="32"
+                                                    Click="InstanceEmptyPickFolder_Click" AutomationProperties.Name="选择已有文件夹"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- 1×1：整卡点开菜单，两个动作放进菜单 -->
+                                <StackPanel x:Name="InstanceEmpty1" Visibility="Collapsed"
+                                            VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6">
+                                    <FontIcon Glyph="&#xE710;" FontSize="20" Foreground="{ThemeResource TintNewsBrush}"/>
+                                    <TextBlock Text="还没有实例" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="点击开始" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" HorizontalAlignment="Center"/>
+                                </StackPanel>
+                              </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 玩家档案（tint profile #FF7A9C） -->
+                <Border x:Name="ProfileCard" AutomationProperties.Name="玩家档案" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed"
+                        Tapped="ProfileCard_Tapped">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <TextBlock Text="玩家档案" FontSize="14" FontWeight="SemiBold" Margin="4,2,0,0"
+                                   Foreground="{ThemeResource TintProfileBrush}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                   IsHitTestVisible="False"/>
+                            <!-- 1×1：头像 64 + 昵称 -->
+                            <Grid x:Name="ProfileTier1" Visibility="Collapsed" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid Width="64" Height="64" VerticalAlignment="Center">
+                                    <Ellipse x:Name="ProfileHeadHost1" Visibility="Collapsed">
+                                        <Ellipse.Fill>
+                                            <ImageBrush x:Name="ProfileHeadBrush1" Stretch="UniformToFill"/>
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                    <controls:SkinHeadView x:Name="ProfileHeadFigure1" Visibility="Collapsed"/>
+                                </Grid>
+                                <TextBlock x:Name="ProfileName1" Grid.Column="1" Text="未登录" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <!-- 2×1：头像 + 昵称 + 类型徽标 + 「账户 ›」提示（整卡进账户页） -->
+                            <Grid x:Name="ProfileTier2" Visibility="Collapsed" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid Width="56" Height="56" VerticalAlignment="Center">
+                                    <Ellipse x:Name="ProfileHeadHost2" Visibility="Collapsed">
+                                        <Ellipse.Fill>
+                                            <ImageBrush x:Name="ProfileHeadBrush2" Stretch="UniformToFill"/>
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                    <controls:SkinHeadView x:Name="ProfileHeadFigure2" Visibility="Collapsed"/>
+                                </Grid>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                    <TextBlock x:Name="ProfileName2" Text="未登录" FontSize="16" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <Border x:Name="ProfileTypeChip2" CornerRadius="9" Padding="8,2"
+                                            Background="{ThemeResource AppChipBrush}" HorizontalAlignment="Left">
+                                        <TextBlock x:Name="ProfileType2" Text="还没有账户" FontSize="11.5"
+                                                   Foreground="{ThemeResource TintProfileBrush}" TextTrimming="CharacterEllipsis"/>
+                                    </Border>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock Text="账户" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"/>
+                                    <FontIcon Glyph="&#xE76C;" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- 1×2：顶部标题 → 立绘居中占满 → 名字 22 + 类型徽标；不再放 UUID，留白压到最小 -->
+                            <Grid x:Name="ProfileTier3" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Width="64" Height="64" Visibility="Collapsed"
+                                      HorizontalAlignment="Center" VerticalAlignment="Top">
+                                    <Ellipse x:Name="ProfileHeadHost3" Visibility="Collapsed">
+                                        <Ellipse.Fill>
+                                            <ImageBrush x:Name="ProfileHeadBrush3" Stretch="UniformToFill"/>
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                    <controls:SkinHeadView x:Name="ProfileHeadFigure3" Visibility="Collapsed"/>
+                                </Grid>
+                                <controls:SkinRenderView x:Name="ProfileFigure3" Grid.Row="1" Width="136" Height="260"
+                                                       Margin="0,2,0,2" Yaw="-30"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <StackPanel Grid.Row="2" Spacing="4" HorizontalAlignment="Center" Margin="0,0,0,6">
+                                    <TextBlock x:Name="ProfileName3" Text="未登录" FontSize="20" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"
+                                               HorizontalAlignment="Center"/>
+                                    <Border x:Name="ProfileTypeChip3" CornerRadius="9" Padding="8,2"
+                                            Background="{ThemeResource AppChipBrush}" HorizontalAlignment="Center">
+                                        <TextBlock x:Name="ProfileType3" Text="还没有账户" FontSize="11.5"
+                                                   Foreground="{ThemeResource TintProfileBrush}" TextTrimming="CharacterEllipsis"/>
+                                    </Border>
+                                    <TextBlock x:Name="ProfileUuid3" FontSize="11.5" HorizontalAlignment="Center" Visibility="Collapsed"
+                                               Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- 2×2：头像 + 昵称 + 类型 + UUID + 立绘 + 底部渐变压字（吸收自 C 样式） -->
+                            <Grid x:Name="ProfileTier4" Visibility="Collapsed" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid Width="72" Height="72" VerticalAlignment="Bottom" Margin="0,0,0,6">
+                                    <Ellipse x:Name="ProfileHeadHost4" Visibility="Collapsed">
+                                        <Ellipse.Fill>
+                                            <ImageBrush x:Name="ProfileHeadBrush4" Stretch="UniformToFill"/>
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                    <controls:SkinHeadView x:Name="ProfileHeadFigure4" Visibility="Collapsed"/>
+                                </Grid>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Spacing="4" Margin="0,0,0,2">
+                                    <TextBlock x:Name="ProfileName4" Text="未登录" FontSize="20" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="ProfileType4" FontSize="11.5"
+                                               Foreground="{ThemeResource TintProfileBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="ProfileUuid4" FontSize="11.5" Visibility="Collapsed"
+                                               Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                                <controls:SkinRenderView x:Name="ProfileFigure4" Grid.Column="2" Width="88" Height="176"
+                                                       Margin="0,0,24,0" Yaw="-30" VerticalAlignment="Bottom" HorizontalAlignment="Right"/>
+                            </Grid>
+
+                            <!-- 空态：没有用户时只画一个「+」虚线圈，不放假头像、不放假立绘。 -->
+                            <Border x:Name="ProfileEmpty" Visibility="Collapsed"
+                                    Background="{ThemeResource AppCardBrush}"
+                                    CornerRadius="{StaticResource CardCornerRadius}">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+                                    <Grid Width="56" Height="56" HorizontalAlignment="Center">
+                                        <Ellipse Stroke="{ThemeResource TintProfileBrush}" StrokeThickness="1.5" Opacity="0.45"/>
+                                        <FontIcon Glyph="&#xE710;" FontSize="20" Foreground="{ThemeResource TintProfileBrush}"/>
+                                    </Grid>
+                                    <TextBlock Text="还没有用户" FontSize="16" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="新建一个，就能启动游戏" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" HorizontalAlignment="Center"/>
+                                    <Button Content="新建用户" Style="{StaticResource EmptyPrimaryButtonStyle}" Height="32"
+                                            Padding="18,0" HorizontalAlignment="Center"
+                                            Click="ProfileEmptyAdd_Click" AutomationProperties.Name="新建用户"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 时钟（tint clock #A0A6B8） -->
+                <Border x:Name="ClockCard" AutomationProperties.Name="时钟" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <TextBlock Text="时钟" FontSize="14" FontWeight="SemiBold" Margin="4,2,0,0"
+                                   Foreground="{ThemeResource TintClockBrush}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                   IsHitTestVisible="False"/>
+                            <!-- 1×1：只 HH:MM（28） -->
+                            <TextBlock x:Name="ClockText1" Visibility="Collapsed" Text="--:--" FontSize="28" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TintClockBrush}" VerticalAlignment="Center"/>
+                            <!-- 2×1：HH:MM（44）+ 日期 + 周几 -->
+                            <Grid x:Name="ClockTier2" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="ClockText" Text="--:--" FontSize="44" FontWeight="SemiBold" LineHeight="48"
+                                           Foreground="{ThemeResource TintClockBrush}" VerticalAlignment="Center"/>
+                                <StackPanel x:Name="ClockMeta" Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="8,0,0,0">
+                                    <TextBlock x:Name="ClockDate" FontSize="11.5"
+                                               Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Right"/>
+                                    <TextBlock x:Name="ClockWeek" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" HorizontalAlignment="Right"/>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 服务状态（tint status #4CC38A） -->
+                <Border x:Name="StatusCard" AutomationProperties.Name="服务状态" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <TextBlock Text="服务状态" FontSize="14" FontWeight="SemiBold" Margin="4,2,0,0"
+                                   Foreground="{ThemeResource TintStatusBrush}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                   IsHitTestVisible="False"/>
+                            <!-- 1×1：大数字 + 一行小字（数字本身就是数据，不再挂彩点） -->
+                            <StackPanel x:Name="StatusTier1" Visibility="Collapsed" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock x:Name="StatusCount1" Text="" FontSize="28" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="StatusDetail1" Text="" FontSize="11.5"
+                                           Foreground="{ThemeResource AppText3Brush}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <!-- 2×1：标题行 + N / M + 服务点 -->
+                            <Grid x:Name="StatusTier2" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="服务状态" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="StatusUpdated2" Grid.Column="1" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                    <TextBlock x:Name="StatusCount2" Text="" FontSize="28" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="StatusDetail2" Text="" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 最近启动（tint recent #2FA35A） -->
+                <Border x:Name="RecentCard" AutomationProperties.Name="最近启动" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="最近启动" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：只最近一条 -->
+                            <Grid x:Name="RecentTier1" Visibility="Collapsed" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="RecentOneName" Text="还没有启动记录" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="RecentOneAgo" Grid.Column="1" FontSize="11.5" MaxWidth="90"
+                                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                            <!-- 2×1：标题 + 最近 2 条（标题 16 + 间距 2 + 2×28 正好塞进 88） -->
+                            <Grid x:Name="RecentTier2" Visibility="Collapsed" RowSpacing="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="最近启动" FontSize="14" FontWeight="SemiBold" Foreground="{ThemeResource TintRecentBrush}"/>
+                                <StackPanel x:Name="RecentList" Grid.Row="1" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="RecentEmpty" Text="还没有启动记录" FontSize="11.5"
+                                           Foreground="{ThemeResource AppText3Brush}"
+                                           VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Grid>
+                            <!-- 2×2：加信息不加留白——多两条记录 + 分行铺开，照样一眼扫完 -->
+                            <Grid x:Name="RecentTier4" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="最近启动" FontSize="14" FontWeight="SemiBold" Foreground="{ThemeResource TintRecentBrush}"/>
+                                <StackPanel x:Name="RecentList4" Grid.Row="1" VerticalAlignment="Top" Margin="0,6,0,0" Spacing="2"/>
+                                <TextBlock x:Name="RecentEmpty4" Grid.Row="1" Text="还没有启动记录" FontSize="11.5"
+                                           Foreground="{ThemeResource AppText3Brush}"
+                                           VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 系统媒体（tint media #9B8CFF） -->
+                <Border x:Name="MediaCard" AutomationProperties.Name="系统媒体" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed"
+                        Tapped="MediaCard_Tapped">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="系统媒体" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：标题 + 艺术家，无封面无进度 -->
+                            <StackPanel x:Name="MediaTier1" Visibility="Collapsed" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock x:Name="MediaTitle1" Text="没有正在播放" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock x:Name="MediaSub1" Text="打开网易云 / Spotify" FontSize="11.5"
+                                           Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <!-- 2×1：封面/图标 + 标题 + 艺术家 + 只读进度条 -->
+                            <Grid x:Name="MediaTier2" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="9" Background="{ThemeResource AppChipBrush}"
+                                        VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE8D6;" FontSize="20" Foreground="{ThemeResource TintMediaBrush}"/>
+                                </Border>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock Text="系统媒体" FontSize="11.5" Foreground="{ThemeResource TintMediaBrush}"/>
+                                    <TextBlock x:Name="MediaTitle" Text="没有正在播放" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="MediaSub" Text="打开网易云 / Spotify" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                                    <ProgressBar x:Name="MediaProgress" Height="2" Margin="0,6,0,0" Minimum="0" Maximum="1"
+                                                 IsIndeterminate="True" IsHitTestVisible="False"
+                                                 Foreground="{ThemeResource TintMediaBrush}" Visibility="Collapsed"/>
+                                </StackPanel>
+                            </Grid>
+                            <!-- 4×1：整行给媒体——封面 + 标题/艺人 + 真实进度 + 上一首/播放/下一首（都由系统会话提供） -->
+                            <Grid x:Name="MediaTier4" Visibility="Collapsed" ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="76" Height="76" CornerRadius="12" VerticalAlignment="Center"
+                                        Background="{ThemeResource TintMediaSoftBrush}">
+                                    <Grid>
+                                        <FontIcon x:Name="MediaCoverIcon4" Glyph="&#xE8D6;" FontSize="20"
+                                                  Foreground="{ThemeResource TintMediaBrush}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Image x:Name="MediaCover4" Stretch="UniformToFill" Visibility="Collapsed"
+                                               AutomationProperties.AccessibilityView="Raw"/>
+                                    </Grid>
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                    <TextBlock Text="系统媒体" FontSize="11.5" Foreground="{ThemeResource TintMediaBrush}"/>
+                                    <TextBlock x:Name="MediaTitle4" Text="没有正在播放" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="MediaSub4" Text="打开网易云 / Spotify" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                                    <Grid Margin="0,6,0,0" ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ProgressBar x:Name="MediaProgress4" Height="3" Minimum="0" Maximum="1"
+                                                     VerticalAlignment="Center" IsHitTestVisible="False"
+                                                     Foreground="{ThemeResource TintMediaBrush}"
+                                                     Background="{ThemeResource AppChipBrush}" Visibility="Collapsed"/>
+                                        <TextBlock x:Name="MediaTime4" Grid.Column="1" FontSize="12"
+                                                   Foreground="{ThemeResource AppText3Brush}" Visibility="Collapsed"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <Button x:Name="MediaPrev4" Style="{StaticResource QuietIconButtonStyle}"
+                                            Width="34" Height="32" Click="MediaPrev_Click"
+                                            AutomationProperties.Name="上一首" IsTabStop="False">
+                                        <FontIcon Glyph="&#xE892;" FontSize="12"/>
+                                    </Button>
+                                    <Button x:Name="MediaPlay4" Style="{StaticResource QuietIconButtonStyle}"
+                                            Width="32" Height="32" Click="MediaPlay_Click"
+                                            AutomationProperties.Name="播放或暂停" IsTabStop="False">
+                                        <FontIcon x:Name="MediaPlayIcon4" Glyph="&#xE768;" FontSize="14"/>
+                                    </Button>
+                                    <Button x:Name="MediaNext4" Style="{StaticResource QuietIconButtonStyle}"
+                                            Width="34" Height="32" Click="MediaNext_Click"
+                                            AutomationProperties.Name="下一首" IsTabStop="False">
+                                        <FontIcon Glyph="&#xE893;" FontSize="12"/>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 截图墙（tint shots #FF8FB1） -->
+                <Border x:Name="ShotsCard" AutomationProperties.Name="截图墙" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed"
+                        Tapped="OpenShots_Tapped">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="截图墙" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：首图铺满 + 底部压字 + 张数角标（吸收自 C 样式） -->
+                            <Grid x:Name="ShotsTier1" Visibility="Collapsed">
+                                <Image x:Name="ShotsHero1" Stretch="UniformToFill"/>
+                                <Border VerticalAlignment="Bottom" Height="72">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop Color="{StaticResource ScrimStartColor}" Offset="0"/>
+                                            <GradientStop Color="{StaticResource ScrimEndColor}" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Bottom" Margin="10,0,10,10">
+                                    <FontIcon Glyph="&#xE722;" FontSize="11.5" Foreground="White"/>
+                                    <TextBlock Text="截图墙" FontSize="14" FontWeight="SemiBold" Foreground="White"/>
+                                </StackPanel>
+                                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,10,0"
+                                        CornerRadius="9" Background="{StaticResource ChipOverlayBrush}" Padding="7,2">
+                                    <TextBlock x:Name="ShotsCount1" FontSize="11.5" Foreground="White"/>
+                                </Border>
+                                <TextBlock x:Name="ShotsEmpty1" Text="暂无截图" FontSize="12"
+                                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"
+                                           HorizontalAlignment="Center" Visibility="Collapsed"/>
+                            </Grid>
+
+                            <!-- 2×1：四张缩略 + 计数胶囊 -->
+                            <Grid x:Name="ShotsTier2" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE722;" FontSize="11.5" Foreground="{ThemeResource TintShotsBrush}"
+                                              VerticalAlignment="Center"/>
+                                    <Border x:Name="ShotT2Slot1" Width="64" Height="64" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotT2Image1" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotT2Slot2" Width="64" Height="64" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotT2Image2" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotT2Slot3" Width="64" Height="64" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotT2Image3" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotT2Slot4" Width="64" Height="64" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotT2Image4" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- 2×2：3×2 六格 + 计数胶囊 -->
+                            <Grid x:Name="ShotsTier4" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE722;" FontSize="11.5" Foreground="{ThemeResource TintShotsBrush}"/>
+                                    <TextBlock Text="截图墙" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ShotsEmpty" Grid.Column="1" Text="暂无截图" FontSize="11.5"
+                                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"
+                                           Margin="16,0,0,0" Visibility="Collapsed"/>
+                                <Grid x:Name="ShotsGrid" Grid.Column="1" Margin="16,0,0,0" HorizontalAlignment="Left"
+                                      VerticalAlignment="Center" ColumnSpacing="8" RowSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition x:Name="ShotsRow2Def" Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Border x:Name="ShotSlot1" Width="92" Height="92" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotImage1" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotSlot2" Grid.Column="1" Width="92" Height="92" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotImage2" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotSlot3" Grid.Column="2" Width="92" Height="92" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotImage3" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotSlot4" Grid.Row="1" Width="92" Height="92" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotImage4" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotSlot5" Grid.Row="1" Grid.Column="1" Width="92" Height="92" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotImage5" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Border x:Name="ShotSlot6" Grid.Row="1" Grid.Column="2" Width="92" Height="92" CornerRadius="10" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotImage6" Margin="3" Stretch="UniformToFill"/>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+
+                            <!-- 4×N：整幅画布（左大图 + 右缩略），把第二页从两格小卡变成一页真实截图 -->
+                            <Grid x:Name="ShotsTierWide" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,10" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE722;" FontSize="11.5" Foreground="{ThemeResource TintShotsBrush}"/>
+                                        <TextBlock Text="截图墙" FontSize="14" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="ShotsWideMeta" Grid.Column="1" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid x:Name="ShotsWideBody" Grid.Row="1" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="ShotWideHeroSlot" CornerRadius="14" Background="{ThemeResource AppChipBrush}">
+                                        <Image x:Name="ShotWideHero" Stretch="UniformToFill"/>
+                                    </Border>
+                                    <Grid x:Name="ShotWideSide" Grid.Column="1" RowSpacing="8" Visibility="Collapsed">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*"/>
+                                            <RowDefinition x:Name="ShotsWideRow2" Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border x:Name="ShotWideThumb1Slot" CornerRadius="14" Background="{ThemeResource AppChipBrush}">
+                                            <Image x:Name="ShotWideThumb1" Stretch="UniformToFill"/>
+                                        </Border>
+                                        <Border x:Name="ShotWideThumb2Slot" Grid.Row="1" CornerRadius="14" Background="{ThemeResource AppChipBrush}"
+                                                Visibility="Collapsed">
+                                            <Image x:Name="ShotWideThumb2" Stretch="UniformToFill"/>
+                                        </Border>
+                                    </Grid>
+                                </Grid>
+                                <TextBlock x:Name="ShotsWideEmpty" Grid.Row="1" Text="暂无截图。进游戏按 F2，截图会出现在这里。"
+                                           FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Visibility="Collapsed"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 快捷操作（tint quick #59C7B0）：契约 11.3 唯一豁免，每格一个按钮 -->
+                <Border x:Name="QuickCard" AutomationProperties.Name="快捷操作" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="快捷操作" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：一个操作 -->
+                            <Button x:Name="QuickDownload1" Visibility="Collapsed" Tag="download" Click="Quick_Click"
+                                    CornerRadius="12" BorderThickness="0" Background="{ThemeResource AppChipBrush}"
+                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="12,0"
+                                    AutomationProperties.Name="打开下载页" IsTabStop="False">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE896;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                    <TextBlock Text="下载" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                </StackPanel>
+                            </Button>
+                            <!-- 2×1：一行四颗（2×1 宽 688，足够四宫格拆成一行） -->
+                            <Grid x:Name="QuickTier2" Visibility="Collapsed" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="QuickDownload2" Tag="download" Click="Quick_Click"
+                                        CornerRadius="12" BorderThickness="0" Background="{ThemeResource AppChipBrush}"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开下载页" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE896;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="下载" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="QuickMods2" Grid.Column="1" Tag="mods" Click="Quick_Click"
+                                        CornerRadius="12" BorderThickness="0" Background="{ThemeResource AppChipBrush}"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开模组页" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE7B8;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="模组" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="QuickVersions2" Grid.Column="2" Tag="versions" Click="Quick_Click"
+                                        CornerRadius="12" BorderThickness="0" Background="{ThemeResource AppChipBrush}"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开版本页" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="版本" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="QuickShots2" Grid.Column="3" Tag="shots" Click="Quick_Click"
+                                        CornerRadius="12" BorderThickness="0" Background="{ThemeResource AppChipBrush}"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开截图" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE722;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="截图" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <!-- 2×2：四格操作 -->
+                            <Grid x:Name="QuickTier4" Visibility="Collapsed" ColumnSpacing="8" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Button x:Name="QuickDownload4" Tag="download" Click="Quick_Click" CornerRadius="12" BorderThickness="0"
+                                        Background="{ThemeResource AppChipBrush}" HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开下载页" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE896;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="下载" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="QuickMods4" Grid.Column="1" Tag="mods" Click="Quick_Click" CornerRadius="12" BorderThickness="0"
+                                        Background="{ThemeResource AppChipBrush}" HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开模组页" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE7B8;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="模组" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="QuickVersions4" Grid.Row="1" Tag="versions" Click="Quick_Click" CornerRadius="12" BorderThickness="0"
+                                        Background="{ThemeResource AppChipBrush}" HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开版本页" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="版本" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="QuickShots4" Grid.Row="1" Grid.Column="1" Tag="shots" Click="Quick_Click" CornerRadius="12" BorderThickness="0"
+                                        Background="{ThemeResource AppChipBrush}" HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch" Padding="12,0"
+                                        AutomationProperties.Name="打开截图" IsTabStop="False">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE722;" FontSize="14" Foreground="{ThemeResource TintQuickBrush}"/>
+                                        <TextBlock Text="截图" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 任务（tint tasks #7C9CFF） -->
+                <Border x:Name="TasksCard" AutomationProperties.Name="任务" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed"
+                        Tapped="OpenTasks_Tapped">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="任务" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：只主数字（真实队列） -->
+                            <StackPanel x:Name="TasksTier1" Visibility="Collapsed" Orientation="Horizontal" Spacing="8"
+                                        VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xE9D5;" FontSize="13" Foreground="{ThemeResource TintTasksBrush}"/>
+                                <TextBlock x:Name="TaskCount1" Text="队列空闲" FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <!-- 2×1：标题 + 进度条 + 当前任务名 -->
+                            <Grid x:Name="TasksTier2" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE9D5;" FontSize="11.5" Foreground="{ThemeResource TintTasksBrush}"/>
+                                        <TextBlock Text="任务" FontSize="14" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="TaskPercentText" Grid.Column="1" Text="队列空闲" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <ProgressBar x:Name="TaskProgress" Grid.Row="1" Height="4" Margin="0,8,0,0"
+                                             Foreground="{ThemeResource TintTasksBrush}" Visibility="Collapsed"/>
+                                <TextBlock x:Name="TaskSub" Grid.Row="2" Text="" FontSize="11.5"
+                                           Foreground="{ThemeResource AppText3Brush}" Margin="0,8,0,0"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                            <!-- 4×1：整行状态条，给第二页收底；空闲时也写清这里会出现什么 -->
+                            <Grid x:Name="TasksTierWide" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE9D5;" FontSize="11.5" Foreground="{ThemeResource TintTasksBrush}"/>
+                                        <TextBlock Text="任务" FontSize="14" FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AppTextBrush}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock x:Name="TaskWideCount" Text="队列空闲" FontSize="11.5"
+                                                   Foreground="{ThemeResource AppText3Brush}"/>
+                                        <FontIcon Glyph="&#xE76C;" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"/>
+                                    </StackPanel>
+                                </Grid>
+                                <ProgressBar x:Name="TaskWideProgress" Grid.Row="1" Height="4" Margin="0,8,0,0"
+                                             Foreground="{ThemeResource TintTasksBrush}" Visibility="Collapsed"/>
+                                <TextBlock x:Name="TaskWideSub" Grid.Row="2" Text="安装、下载、启动的进度会出现在这里。"
+                                           FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"
+                                           Margin="0,8,0,0" VerticalAlignment="Top"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 每日一帖（tint tip #FFB07A） -->
+                <Border x:Name="TipCard" AutomationProperties.Name="每日一帖" Style="{StaticResource WidgetCardStyle}" Padding="0" Visibility="Collapsed"
+                        Tapped="OpenWiki_Tapped">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid>
+                        <!-- 无障碍/自动化锚点：卡片标题在任何档位下都能被读屏与截图校验读到（不占位、不可见） -->
+                        <TextBlock Text="每日一帖" FontSize="11.5" Opacity="0" IsHitTestVisible="False" IsTabStop="False"/>
+                            <!-- 1×1：一句话 + 来源图标 -->
+                            <Grid x:Name="TipTier1" Visibility="Collapsed" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE82F;" FontSize="13" Foreground="{ThemeResource TintTipBrush}"
+                                          VerticalAlignment="Top" Margin="0,2,0,0"/>
+                                <TextBlock x:Name="TipText1" Grid.Column="1" Text="正在取最新一帖…"
+                                           FontSize="12" Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center"
+                                           TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                            <!-- 2×1：封面铺满 + 底部渐变 + 左上标签 + 底部标题/元信息（与当前实例同一套压字规则） -->
+                            <Grid x:Name="TipTier2" Visibility="Collapsed" Margin="-12">
+                                <Grid>
+                                    <Border x:Name="TipImageHost2" Background="{ThemeResource TintTipSoftBrush}">
+                                        <Grid>
+                                            <FontIcon Glyph="&#xE82F;" FontSize="20" Foreground="{ThemeResource TintTipBrush}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Image x:Name="TipImage2" Stretch="UniformToFill" Visibility="Collapsed"
+                                                   AutomationProperties.AccessibilityView="Raw"/>
+                                        </Grid>
+                                    </Border>
+                                    <Border VerticalAlignment="Bottom" Height="130">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#00000000" Offset="0"/>
+                                                <GradientStop Color="#D9000000" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <Grid Margin="16,14,16,14">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE82F;" FontSize="12" Foreground="White" Opacity="0.9"/>
+                                            <TextBlock Text="每日一帖" FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="White" Opacity="0.9"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Spacing="4">
+                                            <TextBlock x:Name="TipTitle2" Text="正在取最新一帖…" FontSize="20" FontWeight="SemiBold"
+                                                       Foreground="White" TextWrapping="NoWrap" MaxLines="1"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock x:Name="TipMeta2" Text="Mojang 新闻" FontSize="12"
+                                                       Foreground="White" Opacity="0.78" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+                            <!-- 2×2：配图 + 标题 + 摘要 + 日期，全部来自 Mojang 官方内容接口 -->
+                            <Grid x:Name="TipTier4" Visibility="Collapsed" ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="TipImageHost4" Width="188" CornerRadius="12" VerticalAlignment="Stretch"
+                                        Background="{ThemeResource TintTipSoftBrush}">
+                                    <Grid>
+                                        <FontIcon Glyph="&#xE82F;" FontSize="20" Foreground="{ThemeResource TintTipBrush}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Image x:Name="TipImage4" Stretch="UniformToFill" Visibility="Collapsed"
+                                               AutomationProperties.AccessibilityView="Raw"/>
+                                    </Grid>
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock x:Name="TipTag4" Text="Mojang 新闻" FontSize="11.5"
+                                                   Foreground="{ThemeResource TintTipBrush}"/>
+                                        <TextBlock x:Name="TipDate4" Text="" FontSize="11.5"
+                                                   Foreground="{ThemeResource AppText3Brush}"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="TipTitle4" Text="正在取最新一帖…" FontSize="16" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}" TextWrapping="Wrap" MaxLines="2"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="TipSub4" Text="" FontSize="12" LineHeight="19"
+                                               Foreground="{ThemeResource AppText2Brush}" TextWrapping="Wrap" MaxLines="2"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,2,0,0">
+                                        <TextBlock Text="阅读原文" FontSize="12" Foreground="{ThemeResource TintTipBrush}"/>
+                                        <FontIcon Glyph="&#xE8A7;" FontSize="12" Foreground="{ThemeResource TintTipBrush}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Border>
+
+                <!-- 固定版本（4×1，tint updates #FFC65A）：钉住的实例直接启，横向一行，钉多少给多少 -->
+                <Border x:Name="PinnedCard" AutomationProperties.Name="固定版本" Style="{StaticResource WidgetCardStyle}"
+                        Padding="0" Visibility="Collapsed">
+                    <Border Background="Transparent" CornerRadius="{StaticResource CardCornerRadius}" Padding="12">
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE840;" FontSize="11.5" Foreground="{ThemeResource TintUpdatesBrush}"/>
+                                    <TextBlock Text="固定版本" FontSize="11.5" Foreground="{ThemeResource TintUpdatesBrush}"/>
+                                </StackPanel>
+                                <Button x:Name="PinnedMore4" HorizontalAlignment="Right" Height="32" Width="32" Padding="0"
+                                        CornerRadius="4" BorderThickness="0" Background="Transparent"
+                                        Click="PinnedMore_Click" AutomationProperties.Name="打开版本管理" IsTabStop="False">
+                                    <TextBlock Text="管理" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}"/>
+                                </Button>
+                            </Grid>
+                            <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Hidden"
+                                          HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
+                                          VerticalScrollBarVisibility="Disabled">
+                                <StackPanel x:Name="PinnedCardList" Orientation="Horizontal" Spacing="10"/>
+                            </ScrollViewer>
+                            <TextBlock x:Name="PinnedCardEmpty" Grid.Row="1"
+                                       Text="还没有固定版本。到版本页右键实例，「固定到首页」。"
+                                       FontSize="12" Foreground="{ThemeResource AppText3Brush}"
+                                       VerticalAlignment="Center" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+                </Border>
+        </Grid>
+        </ScrollViewer>
+
+        <!-- 首次加载骨架：只铺卡位灰块，绝不显示假数字 -->
+        <Grid x:Name="SkeletonLayer" Grid.Row="1" Visibility="Collapsed" ColumnSpacing="16" RowSpacing="16"
+              Width="960" HorizontalAlignment="Center" VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="228"/>
+                <RowDefinition Height="228"/>
+                <RowDefinition Height="228"/>
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Grid.ColumnSpan="2" Style="{StaticResource WidgetCardStyle}" Background="{ThemeResource AppChipBrush}" Opacity="0.55"/>
+            <Border Grid.Row="0" Grid.Column="2" Grid.RowSpan="2" Grid.ColumnSpan="1" Style="{StaticResource WidgetCardStyle}" Background="{ThemeResource AppChipBrush}" Opacity="0.55"/>
+            <Border Grid.Row="0" Grid.Column="3" Grid.RowSpan="1" Grid.ColumnSpan="1" Style="{StaticResource WidgetCardStyle}" Background="{ThemeResource AppChipBrush}" Opacity="0.45"/>
+            <Border Grid.Row="1" Grid.Column="3" Grid.RowSpan="1" Grid.ColumnSpan="1" Style="{StaticResource WidgetCardStyle}" Background="{ThemeResource AppChipBrush}" Opacity="0.45"/>
+            <Border Grid.Row="2" Grid.Column="0" Grid.RowSpan="1" Grid.ColumnSpan="2" Style="{StaticResource WidgetCardStyle}" Background="{ThemeResource AppChipBrush}" Opacity="0.45"/>
+            <Border Grid.Row="2" Grid.Column="2" Grid.RowSpan="1" Grid.ColumnSpan="2" Style="{StaticResource WidgetCardStyle}" Background="{ThemeResource AppChipBrush}" Opacity="0.45"/>
+        </Grid>
+
+        <!-- 拉快照失败：整板错误态，带重试（原地重发，不要求重开窗口） -->
+        <Grid x:Name="ErrorPanel" Grid.Row="1" Visibility="Collapsed">
+            <Border Style="{StaticResource WidgetCardStyle}" MaxWidth="460"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel Spacing="10" HorizontalAlignment="Center">
+                    <FontIcon Glyph="&#xE7BA;" FontSize="28" Foreground="{ThemeResource AppBadBrush}"
+                              HorizontalAlignment="Center"/>
+                    <TextBlock Text="读取本机数据失败" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="ErrorSummary" FontSize="11.5" MaxWidth="380" TextAlignment="Center"
+                               TextWrapping="Wrap" Foreground="{ThemeResource AppText2Brush}"/>
+                    <Button x:Name="RetryButton" Content="重试" Height="32" CornerRadius="16" Padding="18,0"
+                            BorderThickness="0" Background="{ThemeResource AppChipBrush}"
+                            HorizontalAlignment="Center" Click="Retry_Click" IsTabStop="False"
+                            AutomationProperties.Name="重新读取本机数据"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- 页脚：翻页 + 编辑态操作 -->
+        <Grid x:Name="BoardFooter" Grid.Row="2">
+            <PipsPager x:Name="BoardPager" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Orientation="Horizontal" NumberOfPages="2" SelectedPageIndex="0"
+                       SelectedIndexChanged="BoardPager_SelectedIndexChanged"
+                       AutomationProperties.Name="组件板翻页"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="8">
+                <Button x:Name="AddWidgetBtn" Height="32" CornerRadius="16" Padding="12,0"
+                        BorderThickness="0" Background="{ThemeResource AppChipBrush}" Click="AddWidget_Click"
+                        Visibility="Collapsed" AutomationProperties.Name="添加小组件" IsTabStop="False">
+                    <TextBlock Text="＋ 添加小组件" FontSize="11.5"/>
+                </Button>
+                <Button x:Name="ResetLayoutBtn" Height="32" CornerRadius="16" Padding="12,0"
+                        BorderThickness="0" Background="{ThemeResource AppChipBrush}" Click="ResetLayout_Click"
+                        Visibility="Collapsed"
+                        AutomationProperties.Name="恢复默认布局" IsTabStop="False">
+                    <TextBlock Text="恢复默认" FontSize="11.5"/>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- 首次读取本机数据（实例 / 账户）：不让玩家对着空白发愣 -->
+        <Border x:Name="HomeLoading" Grid.RowSpan="2" Canvas.ZIndex="45" Visibility="Collapsed"
+                IsHitTestVisible="False" Background="#99000000">
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="#F21C1C1C" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    CornerRadius="{StaticResource CardCornerRadius}" Padding="36,26" MinWidth="300">
+                <controls:LoadingBlock x:Name="HomeLoadingBlock" Text="正在读取实例和账户…"
+                                       Tint="{ThemeResource TintRecentBrush}" />
+            </Border>
+        </Border>
+
+        <!-- 启动遮罩：点启动后立刻盖住整页，避免「点了没反应」，直到游戏进程被检测到 -->
+        <Grid x:Name="LaunchOverlay" Grid.RowSpan="2" Canvas.ZIndex="50"
+              Background="#B8050505" Visibility="Collapsed" Opacity="0">
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="#F21C1C1C" BorderBrush="#33FFFFFF" BorderThickness="1"
+                    CornerRadius="{StaticResource CardCornerRadius}" Padding="32,26" MinWidth="360">
+                <StackPanel Spacing="14" HorizontalAlignment="Center">
+                    <ProgressRing x:Name="LaunchOverlayRing" Width="38" Height="38"
+                                  IsActive="True" AutomationProperties.Name="正在启动游戏"/>
+                    <TextBlock x:Name="LaunchOverlayTitle" Text="正在启动" FontSize="20" FontWeight="SemiBold"
+                               Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="LaunchOverlayName" Text="" FontSize="14"
+                               Foreground="{ThemeResource AppText2Brush}" HorizontalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" MaxWidth="320"/>
+                    <TextBlock x:Name="LaunchOverlayStage" Text="正在准备启动…" FontSize="12"
+                               Foreground="{ThemeResource AppText3Brush}" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Toast -->
+        <InfoBar x:Name="Toast" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                 MaxWidth="380" Margin="0,0,8,6" IsOpen="False"/>
+    </Grid>
+</Page>

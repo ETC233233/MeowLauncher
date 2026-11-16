@@ -1,0 +1,8 @@
+<Project>
+  <!-- 联机组件清单入口和验签公钥（公钥不是密钥）。复制成 online.props 再改成你自己的配置服务；
+       没有 online.props 也能编译，只是联机组件下载不可用。 -->
+  <PropertyGroup>
+    <MeowConfigEntry>https://example.com/config</MeowConfigEntry>
+    <MeowConfigKeys>k1:BASE64_ED25519_PUBLIC_KEY</MeowConfigKeys>
+  </PropertyGroup>
+</Project>

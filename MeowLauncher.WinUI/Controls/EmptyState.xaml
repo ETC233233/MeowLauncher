@@ -1,0 +1,16 @@
+<UserControl
+    x:Class="MeowLauncher.WinUI.Controls.EmptyState"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                Spacing="9" MaxWidth="380">
+        <FontIcon x:Name="IconGlyph" FontSize="28"
+                  Foreground="{ThemeResource AppText3Brush}" />
+        <TextBlock x:Name="TitleBlock" FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
+                   HorizontalAlignment="Center" TextAlignment="Center"
+                   Foreground="{ThemeResource AppText2Brush}" />
+        <TextBlock x:Name="HintBlock" FontSize="{StaticResource FontSizeSmall}" TextWrapping="Wrap" TextAlignment="Center"
+                   Foreground="{ThemeResource AppText3Brush}" Visibility="Collapsed" />
+    </StackPanel>
+</UserControl>

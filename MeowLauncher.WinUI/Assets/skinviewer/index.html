@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MeowLauncher Skin Viewer</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; background: transparent; outline: none; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="skin-canvas"></canvas></div>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/skinview3d.bundle.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("skin-canvas");
+  var viewer = null;
+  var pending = null;
+  var readySent = false;
+
+  function post(obj) {
+    try { window.chrome.webview.postMessage(JSON.stringify(obj)); } catch (e) { /* ignore */ }
+  }
+
+  function stageSize() {
+    var w = canvas.clientWidth || canvas.parentElement.clientWidth || 320;
+    var h = canvas.clientHeight || canvas.parentElement.clientHeight || 188;
+    return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
+  }
+
+  // 参数来源：xgamingserver.com/tools/minecraft/skin-viewer 的 SkinViewer 实例。
+  // 页面原参数 globalLight=2.8 / cameraLight=.8 配的是它自己那份 three/skinview3d；
+  // 本地 vendor 是较新的 three，同样的 2.8 会把皮肤打成白块，实测 0.4 / 0.6 与网页观感一致。
+  function ensureViewer() {
+    if (viewer) return viewer;
+    if (typeof skinview3d === "undefined" || typeof skinview3d.SkinViewer !== "function") {
+      throw new Error("skinview3d 未加载");
+    }
+    var s = stageSize();
+    viewer = new skinview3d.SkinViewer({
+      canvas: canvas,
+      width: s.w,
+      height: s.h,
+      pixelRatio: Math.min(2, window.devicePixelRatio || 1),
+      preserveDrawingBuffer: true,
+      enableControls: true,
+      animation: null
+    });
+    viewer.background = null;
+    viewer.animation = null;
+    viewer.autoRotate = false;
+    viewer.fov = 40;
+    viewer.globalLight.intensity = 0.4;
+    viewer.cameraLight.intensity = 0.6;
+    viewer.zoom = 0.85;
+    viewer.controls.enablePan = false;
+    viewer.controls.enableZoom = false;
+    viewer.controls.enableRotate = true;
+    viewer.controls.rotateSpeed = 0.65;
+    viewer.playerObject.rotation.y = 25 * Math.PI / 180;
+    try {
+      var r = viewer.renderer || viewer._renderer;
+      if (r && r.setClearColor) {
+        r.setClearColor(0x000000, 0);
+        if (r.setClearAlpha) r.setClearAlpha(0);
+        if (r.domElement) r.domElement.style.background = "transparent";
+      }
+    } catch (e) { /* ignore */ }
+    return viewer;
+  }
+
+  // 0 = 正面，25 = 网页里那个四分之三角度；直接转玩家，不转相机（跟网页做法一致）
+  function applyYaw(deg) {
+    if (!viewer) return;
+    viewer.playerObject.rotation.y = (deg === undefined || deg === null ? 25 : deg) * Math.PI / 180;
+    viewer.render();
+  }
+
+  function showAllLayers() {
+    if (!viewer) return;
+    try {
+      var parts = ["head", "body", "rightArm", "leftArm", "rightLeg", "leftLeg"];
+      for (var i = 0; i < parts.length; i++) {
+        var p = viewer.playerObject.skin[parts[i]];
+        if (p) {
+          if (p.innerLayer) p.innerLayer.visible = true;
+          if (p.outerLayer) p.outerLayer.visible = true;
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function applySpec(spec, done) {
+    if (!spec || !spec.skin) {
+      post({ type: "error", message: "没有可用的皮肤文件" });
+      return;
+    }
+    try {
+      var v = ensureViewer();
+      var s = stageSize();
+      var w = spec.width || s.w;
+      var h = spec.height || s.h;
+      try {
+        var pr = spec.pixelRatio || Math.min(2, window.devicePixelRatio || 1);
+        var renderer = v.renderer || v._renderer;
+        if (renderer && renderer.setPixelRatio) renderer.setPixelRatio(pr);
+      } catch (e) { /* ignore */ }
+      v.setSize(w, h);
+      v.background = null;
+      v.zoom = 0.85;
+      v.fov = 40;
+      v.globalLight.intensity = 0.4;
+      v.cameraLight.intensity = 0.6;
+      v.playerObject.rotation.y = (spec.yaw === undefined ? 25 : spec.yaw) * Math.PI / 180;
+      var load = v.loadSkin(spec.skin, { model: spec.slim ? "slim" : "default" });
+      Promise.resolve(load).then(function () {
+        showAllLayers();
+        if (spec.cape) {
+          return Promise.resolve(v.loadCape(spec.cape, { backEquipment: "cape" })).catch(function () { /* 披风失败不影响主体 */ });
+        }
+        return v.loadCape(null);
+      }).then(function () {
+        v.playerObject.rotation.y = (spec.yaw === undefined ? 25 : spec.yaw) * Math.PI / 180;
+        v.render();
+        if (done) done();
+      }).catch(function (err) {
+        post({ type: "error", message: "皮肤加载失败：" + (err && err.message ? err.message : err) });
+      });
+    } catch (e) {
+      post({ type: "error", message: "渲染器初始化失败：" + (e && e.message ? e.message : e) });
+    }
+  }
+
+  function resize() {
+    if (!viewer) return;
+    var s = stageSize();
+    try { viewer.setSize(s.w, s.h); } catch (e) { /* ignore */ }
+    try { viewer.render(); } catch (e) { /* ignore */ }
+  }
+
+  // ---- 给 C# 的接口：可见舞台 / 离屏透明 PNG ----
+  window.setSkin = function (skinUrl, slim, capeUrl, yaw) {
+    var spec = { skin: skinUrl, slim: !!slim, cape: capeUrl || "", yaw: (typeof yaw === "number" ? yaw : 25) };
+    pending = spec;
+    applySpec(spec, function () { post({ type: "skin-applied" }); });
+  };
+
+  window.setYaw = function (deg) { applyYaw(deg); };
+
+  window.renderPng = function (spec, requestId) {
+    if (!spec || !spec.skin) {
+      post({ type: "error", message: "没有可用的皮肤文件" });
+      return;
+    }
+    applySpec(spec, function () {
+      try {
+        post({ type: "png", id: requestId, data: canvas.toDataURL("image/png") });
+      } catch (e) {
+        post({ type: "error", message: "导出 PNG 失败：" + (e && e.message ? e.message : e) });
+      }
+    });
+  };
+
+  window.loadCape = function (url) {
+    if (!viewer) return;
+    try {
+      if (url) viewer.loadCape(url, { backEquipment: "cape" });
+      else viewer.loadCape(null);
+      viewer.render();
+    } catch (e) { /* ignore */ }
+  };
+
+  window.addEventListener("wheel", function (e) { e.preventDefault(); }, { passive: false });
+  window.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  window.addEventListener("resize", function () { setTimeout(resize, 30); });
+
+  (function boot() {
+    try {
+      ensureViewer();
+      if (!readySent) { readySent = true; post({ type: "ready" }); }
+      if (pending) applySpec(pending);
+    } catch (e) {
+      post({ type: "error", message: "初始化失败：" + (e && e.message ? e.message : e) });
+    }
+  })();
+})();
+</script>
+</body>
+</html>

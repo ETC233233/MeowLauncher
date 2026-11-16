@@ -1,0 +1,14 @@
+<UserControl
+    x:Class="MeowLauncher.WinUI.Controls.PageSearchBox"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 页内搜索框：所有列表页共用这一个控件。它只管「这一页的列表」；跨页跳转归顶栏全局搜索（Ctrl+Shift+K）。
+         本页筛选用 IsFilter=True：漏斗图标 + 「在本页筛选：…」占位，避免看着像第二个全局搜索。 -->
+    <AutoSuggestBox x:Name="Box" Height="36" QueryIcon="Find" VerticalAlignment="Center"
+                    Background="{ThemeResource AppChipBrush}"
+                    BorderBrush="{ThemeResource AppStrokeBrush}"
+                    BorderThickness="1"
+                    TextChanged="Box_TextChanged"
+                    QuerySubmitted="Box_QuerySubmitted" />
+</UserControl>

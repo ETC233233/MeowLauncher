@@ -1,0 +1,263 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.ModsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MeowLauncher.WinUI.Controls"
+    xmlns:models="using:MeowLauncher.WinUI.Models"
+    xmlns:views="using:MeowLauncher.WinUI.Views"
+    Background="Transparent">
+
+    <Page.Resources>
+        <Thickness x:Key="ToolbarPadding">16,8</Thickness>
+    </Page.Resources>
+
+    <!-- 语义色：Mod = 绿（TintRecent）。卡片/胶囊/字号全部走 Themes 令牌。 -->
+    <Grid x:Name="PageRoot" Padding="0,20,0,24" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 页头：嵌在「实例」宿主里时收起，避免和宿主页头重复 -->
+        <Grid x:Name="PageHeader" Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="Mod 管理" FontSize="28" FontWeight="SemiBold"
+                           Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+                <Border Width="28" Height="28" CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource TintRecentSoftBrush}" Margin="2,0,0,0"
+                        VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE8B7;" FontSize="14" Foreground="{ThemeResource TintRecentBrush}" />
+                </Border>
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="RefreshButton" Style="{StaticResource QuietIconButtonStyle}"
+                        AutomationProperties.Name="重新扫描 Mod 列表" Click="Refresh_Click"
+                        ToolTipService.ToolTip="重新扫描">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                </Button>
+                <Button Height="36" Padding="14,0" CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource AppChipBrush}" BorderThickness="0"
+                        Foreground="{ThemeResource AppText2Brush}"
+                        AutomationProperties.Name="导入本地 Mod" Click="Import_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE8B5;" FontSize="14" />
+                        <TextBlock Text="导入" FontSize="11.5" />
+                    </StackPanel>
+                </Button>
+                <Button Height="36" Padding="14,0" CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource AppChipBrush}" BorderThickness="0"
+                        Foreground="{ThemeResource AppText2Brush}"
+                        AutomationProperties.Name="打开 Mod 目录" Click="OpenFolder_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                        <TextBlock Text="打开 Mod 目录" FontSize="11.5" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- 工具栏统一规格（t46）：高 64、左右内边距 16、上下 8；搜索图标 36×36 圆角 10；
+             筛选胶囊高 28、间距 8，右端由卡内边距留 16。 -->
+        <Border Grid.Row="1" Style="{StaticResource WidgetCardStyle}" Height="64" Padding="{StaticResource ToolbarPadding}">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <controls:PageSearchBox x:Name="QueryBox" Width="280" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                        IsFilter="True" PlaceholderText="在本页筛选：Mod 名称、ID 或文件名"
+                                        QueryChanged="QueryBox_QueryChanged" />
+
+                <TextBlock x:Name="ModCountText" Grid.Column="1" Margin="10,0,0,0"
+                           Text="0 个 Mod" FontSize="11.5"
+                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"/>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Button x:Name="CheckUpdatesButton" Height="32" Padding="14,0" CornerRadius="4" FontSize="12"
+                        BorderThickness="1" Background="Transparent"
+                        BorderBrush="{ThemeResource AppStrokeBrush}"
+                        Foreground="{ThemeResource AppTextBrush}"
+                        AutomationProperties.Name="检查 Mod 更新" Click="CheckUpdates_Click"
+                        ToolTipService.ToolTip="按文件哈希到 Modrinth / CurseForge 反查，看有没有新版本">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon x:Name="CheckUpdatesIcon" Glyph="&#xE895;" FontSize="13" />
+                        <TextBlock x:Name="CheckUpdatesText" Text="检查更新" FontSize="12" />
+                    </StackPanel>
+                </Button>
+                <Border VerticalAlignment="Center"
+                        Background="{ThemeResource AppCardBrush}"
+                        BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
+                        CornerRadius="{StaticResource ChipCornerRadius}">
+                    <StackPanel Orientation="Horizontal" Spacing="2" Margin="3" KeyDown="ChipGroup_KeyDown">
+                        <RadioButton x:Name="FilterAll" Content="全部" GroupName="ModsFilter"
+                                     Style="{StaticResource ChipRadioStyle}"
+                                     Height="28" MinHeight="28" Padding="12,0"
+                                     AutomationProperties.Name="筛选：全部 Mod" Tag="all"
+                                     Checked="Filter_Checked" />
+                        <RadioButton x:Name="FilterEnabled" Content="已启用" GroupName="ModsFilter"
+                                     Style="{StaticResource ChipRadioStyle}"
+                                     Height="28" MinHeight="28" Padding="12,0"
+                                     AutomationProperties.Name="筛选：已启用 Mod" Tag="enabled"
+                                     Checked="Filter_Checked" />
+                        <RadioButton x:Name="FilterDisabled" Content="已停用" GroupName="ModsFilter"
+                                     Style="{StaticResource ChipRadioStyle}"
+                                     Height="28" MinHeight="28" Padding="12,0"
+                                     AutomationProperties.Name="筛选：已停用 Mod" Tag="disabled"
+                                     Checked="Filter_Checked" />
+                    </StackPanel>
+                </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <ListView x:Name="ModList" SelectionMode="None" IsItemClickEnabled="True" ItemClick="ModList_ItemClick"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                        <Setter Property="Margin" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:ModInfo">
+                        <Border Background="Transparent"
+                                BorderBrush="{ThemeResource CardStrokeBrush}"
+                                BorderThickness="0,0,0,1"
+                                CornerRadius="0" Padding="0">
+                            <Grid Padding="8,10" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Width="42" Height="42" CornerRadius="12"
+                                        Background="{ThemeResource TintRecentSoftBrush}"
+                                        VerticalAlignment="Center">
+                                    <Grid>
+                                        <FontIcon Glyph="&#xE8B7;" FontSize="16"
+                                                  Foreground="{ThemeResource TintRecentBrush}" />
+                                        <Image Source="{x:Bind IconSource}" Stretch="UniformToFill" />
+                                    </Grid>
+                                </Border>
+
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                                    <TextBlock Text="{x:Bind DisplayName}" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}"
+                                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                                    <TextBlock Text="{x:Bind Subtitle}" FontSize="11.5"
+                                               Foreground="{ThemeResource AppText3Brush}"
+                                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                                    <TextBlock Text="{x:Bind Detail}" FontSize="12"
+                                               Foreground="{ThemeResource AppText2Brush}"
+                                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <!-- 检查更新后才出现：新版本号 + 描边「更新」，悬停变品牌绿实心 -->
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                                                Visibility="{x:Bind UpdateVisibility}">
+                                        <TextBlock Text="{x:Bind UpdateText}" FontSize="11.5"
+                                                   Foreground="{ThemeResource AppGoodBrush}" VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" MaxWidth="150" />
+                                        <Button Content="更新" Height="30" MinWidth="64" Padding="12,0" FontSize="12"
+                                                CornerRadius="4" BorderThickness="1" Background="Transparent"
+                                                BorderBrush="{ThemeResource AppStrokeBrush}"
+                                                Foreground="{ThemeResource AppTextBrush}"
+                                                AutomationProperties.Name="更新这个 Mod"
+                                                Tag="{x:Bind File}" Click="UpdateMod_Click">
+                                            <Button.Resources>
+                                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="AppBrandBrush" />
+                                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="AppBrandBrush" />
+                                                <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="AppBrandBrush" />
+                                                <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="AppBrandBrush" />
+                                                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="AppBrandTextBrush" />
+                                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AppBrandTextBrush" />
+                                            </Button.Resources>
+                                        </Button>
+                                    </StackPanel>
+                                    <Border Background="{ThemeResource AppChipBrush}"
+                                            CornerRadius="{StaticResource ChipCornerRadius}"
+                                            Padding="9,3" VerticalAlignment="Center"
+                                            Visibility="{x:Bind views:ModVisuals.HiddenWhen(Enabled)}">
+                                        <TextBlock Text="已停用" FontSize="11.5"
+                                                   Foreground="{ThemeResource AppBadBrush}" />
+                                    </Border>
+                                </StackPanel>
+
+                                <Button Grid.Column="3" Height="32" Padding="11,0"
+                                        CornerRadius="{StaticResource ChipCornerRadius}"
+                                        Background="{ThemeResource AppChipBrush}" BorderThickness="0"
+                                        Foreground="{ThemeResource AppTextBrush}" FontSize="11.5"
+                                        VerticalAlignment="Center"
+                                        AutomationProperties.Name="{x:Bind views:ModVisuals.ToggleName(DisplayName, Enabled)}"
+                                        Tag="{x:Bind File}" Click="Toggle_Click"
+                                        Visibility="{x:Bind ToggleVisibility}"
+                                        ToolTipService.ToolTip="启用 / 停用">
+                                    <TextBlock Text="{x:Bind views:ModVisuals.ToggleLabel(Enabled)}"
+                                               FontSize="11.5" Foreground="{ThemeResource AppTextBrush}" />
+                                </Button>
+
+                                <!-- 放错地方的资源包 / 光影包：启停没有意义，换成「移到资源包 / 光影」 -->
+                                <Button Grid.Column="3" Height="32" Padding="11,0"
+                                        CornerRadius="{StaticResource ChipCornerRadius}"
+                                        Background="{ThemeResource AppChipBrush}" BorderThickness="0"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind MoveVisibility}"
+                                        AutomationProperties.Name="{x:Bind MoveText}"
+                                        Tag="{x:Bind File}" Click="MoveMisplaced_Click"
+                                        ToolTipService.ToolTip="移到这个实例的对应文件夹，游戏才会读到">
+                                    <TextBlock Text="{x:Bind MoveText}" FontSize="11.5" Foreground="{ThemeResource AppTextBrush}" />
+                                </Button>
+
+                                <Button VerticalAlignment="Center" Grid.Column="4" Width="32" Height="32" Padding="0"
+                                        CornerRadius="{StaticResource ChipCornerRadius}"
+                                        Background="Transparent" BorderThickness="0"
+                                        AutomationProperties.Name="移到回收目录"
+                                        Tag="{x:Bind File}" Click="Delete_Click"
+                                        ToolTipService.ToolTip="移到回收目录">
+                                    <FontIcon Glyph="&#xE74D;" FontSize="12"
+                                              Foreground="{ThemeResource AppText3Brush}" />
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <controls:LoadingBlock x:Name="LoadingPanel" Text="正在读取 Mod 列表…" Tint="{ThemeResource TintRecentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+
+            <StackPanel x:Name="EmptyHost" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="12" Visibility="Collapsed">
+                <controls:EmptyState x:Name="EmptyPanel"
+                                     Glyph="&#xE8B7;" Title="这个实例还没有 Mod"
+                                     Hint="可前往在线资源页下载，或将已有mod的拖入此窗口或文件夹。" />
+                <Button x:Name="RetryButton" Content="重新读取" Height="32" Padding="16,0"
+                        CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
+                        HorizontalAlignment="Center" FontSize="11.5"
+                        Background="{ThemeResource AppChipBrush}"
+                        Foreground="{ThemeResource AppTextBrush}"
+                        AutomationProperties.Name="重新读取 Mod 列表" Click="Retry_Click"
+                        Visibility="Collapsed" />
+            </StackPanel>
+        </Grid>
+
+        <InfoBar x:Name="Toast" Grid.Row="0" Grid.RowSpan="3" IsOpen="False"
+                 HorizontalAlignment="Right" VerticalAlignment="Top" Width="420" IsClosable="True" />
+    </Grid>
+</Page>

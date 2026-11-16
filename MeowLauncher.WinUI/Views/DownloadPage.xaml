@@ -1,0 +1,293 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.DownloadPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="using:MeowLauncher.WinUI.Controls"
+    mc:Ignorable="d"
+    Background="Transparent">
+
+    <Page.Resources>
+        <Style x:Key="FlatItemStyle" TargetType="ListViewItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
+        <Style x:Key="QuietButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
+            <Setter Property="FontSize" Value="11.5" />
+        </Style>
+    </Page.Resources>
+
+    <Grid x:Name="PageRoot" Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="HeaderRow" Height="52" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 顶栏（嵌在「获取」宿主里时整行收起，避免和宿主页头重复） -->
+        <Grid x:Name="PageHeader" Grid.Row="0">
+            <TextBlock x:Name="PageTitle" Text="下载版本" FontSize="28" FontWeight="Bold"
+                       Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+        </Grid>
+
+        <!-- 工具栏：全局搜索 + 下载源 + 刷新 -->
+        <Grid x:Name="ToolbarHost" Grid.Row="1" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MaxWidth="360" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <controls:PageSearchBox x:Name="QueryBox" Grid.Column="0" VerticalAlignment="Center"
+                                    IsFilter="True" PlaceholderText="在本页筛选：版本号，例如 1.21 或 24w14a"
+                                    QueryChanged="QueryBox_QueryChanged" />
+
+            <TextBlock Grid.Column="2" Text="下载源" VerticalAlignment="Center"
+                       FontSize="{StaticResource FontSizeCaption}"
+                       Foreground="{ThemeResource AppText3Brush}" />
+            <ComboBox x:Name="SourceBox" Grid.Column="3" Width="132" Height="34" VerticalAlignment="Center"
+                      AutomationProperties.Name="下载源"
+                      SelectionChanged="SourceBox_SelectionChanged">
+                <ComboBoxItem Content="官方" Tag="" />
+                <ComboBoxItem Content="BMCLAPI" Tag="bmclapi" />
+            </ComboBox>
+            <Button x:Name="RefreshButton" Grid.Column="4" Width="34" Height="34" Padding="0"
+                    Style="{StaticResource QuietButtonStyle}" CornerRadius="6"
+                    AutomationProperties.Name="刷新 Mojang 版本清单"
+                    ToolTipService.ToolTip="刷新版本清单" Click="Refresh_Click">
+                <FontIcon Glyph="&#xE72C;" FontSize="13" Foreground="{ThemeResource AppText2Brush}" />
+            </Button>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <!-- 两栏：左 大版本导航，右 版本列表 -->
+            <Grid x:Name="BrowseGrid" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="NavColumn" Width="224" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 左栏：顶部三段分类（正式版 / 快照 / 远古版），下面列该分类的大版本 -->
+                <Border Grid.Column="0" Background="{ThemeResource AppCardBrush}"
+                        BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
+                        CornerRadius="{StaticResource CardCornerRadius}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid x:Name="CatBar" Grid.Row="0" Margin="8,8,8,4" ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="CatRelease" Grid.Column="0" Tag="release" Click="Cat_Click"
+                                          AutomationProperties.Name="正式版" HorizontalAlignment="Stretch"
+                                          Padding="0,6" CornerRadius="6" BorderThickness="0">
+                                <StackPanel Spacing="0">
+                                    <TextBlock Text="正式版" FontSize="12.5" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="CatReleaseCount" FontSize="11" HorizontalAlignment="Center"
+                                               Foreground="{ThemeResource AppText3Brush}" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="CatSnapshot" Grid.Column="1" Tag="snapshot" Click="Cat_Click"
+                                          AutomationProperties.Name="快照" HorizontalAlignment="Stretch"
+                                          Padding="0,6" CornerRadius="6" BorderThickness="0">
+                                <StackPanel Spacing="0">
+                                    <TextBlock Text="快照" FontSize="12.5" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="CatSnapshotCount" FontSize="11" HorizontalAlignment="Center"
+                                               Foreground="{ThemeResource AppText3Brush}" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="CatAncient" Grid.Column="2" Tag="ancient" Click="Cat_Click"
+                                          AutomationProperties.Name="远古版" HorizontalAlignment="Stretch"
+                                          Padding="0,6" CornerRadius="6" BorderThickness="0">
+                                <StackPanel Spacing="0">
+                                    <TextBlock Text="远古" FontSize="12.5" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="CatAncientCount" FontSize="11" HorizontalAlignment="Center"
+                                               Foreground="{ThemeResource AppText3Brush}" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <ListView x:Name="NavList" Grid.Row="1" SelectionMode="None" Padding="0,2,0,6"
+                                  IsItemClickEnabled="True" ItemClick="Nav_ItemClick"
+                                  ItemContainerStyle="{StaticResource FlatItemStyle}"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListView.Resources>
+                                <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="{ThemeResource AppChipHoverColor}" />
+                                <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="{ThemeResource AppChipHoverColor}" />
+                            </ListView.Resources>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- 大版本条目：28 图标（有横幅用横幅，没有用 default_icon）+ 大版本 / 副标题 + 数量；
+                                         每行两行文字，没有官方代号的副标题写「最新 x · 年月」。
+                                         选中 = 品牌绿浅底 + 左侧品牌绿竖条 -->
+                                    <Grid MinHeight="40" Margin="8,1">
+                                        <Border Background="{ThemeResource AppBrandSoftBrush}" CornerRadius="6"
+                                                Visibility="{Binding SelectedVisibility}" />
+                                        <Border Width="3" CornerRadius="2" HorizontalAlignment="Left"
+                                                Margin="0,8"
+                                                Background="{ThemeResource AppBrandBrush}"
+                                                Visibility="{Binding SelectedVisibility}" />
+                                        <Grid Padding="14,4,10,4" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="28" Height="28" CornerRadius="4" VerticalAlignment="Center">
+                                                <Border.Background>
+                                                    <ImageBrush ImageSource="{Binding Icon}" Stretch="{Binding IconStretch}" />
+                                                </Border.Background>
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
+                                                <TextBlock Text="{Binding Title}" FontSize="{StaticResource FontSizeBody}"
+                                                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{ThemeResource AppTextBrush}" />
+                                                <TextBlock Text="{Binding Sub}" FontSize="{StaticResource FontSizeCaption}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{ThemeResource AppText3Brush}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding CountText}"
+                                                       FontSize="{StaticResource FontSizeCaption}"
+                                                       Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+
+                <!-- 右栏 -->
+                <Border Grid.Column="1" Background="{ThemeResource AppCardBrush}"
+                        BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
+                        CornerRadius="{StaticResource CardCornerRadius}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="52" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Padding="20,0,20,0" ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ListTitle" FontSize="16" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       Foreground="{ThemeResource AppTextBrush}" />
+                            <TextBlock x:Name="ListCount" Grid.Column="1" FontSize="{StaticResource FontSizeCaption}"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       Foreground="{ThemeResource AppText3Brush}" />
+                        </Grid>
+                        <Border VerticalAlignment="Bottom" Height="1" Background="{ThemeResource AppStrokeBrush}" Opacity="0.6" />
+
+                        <ListView x:Name="VersionList" Grid.Row="1" SelectionMode="None" Padding="8,4"
+                                  IsItemClickEnabled="True" ItemClick="Version_RowClick"
+                                  ItemContainerStyle="{StaticResource FlatItemStyle}"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListView.Resources>
+                                <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="{ThemeResource AppChipHoverColor}" />
+                                <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="{ThemeResource AppChipHoverColor}" />
+                            </ListView.Resources>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- 版本行：56 高；32 图标 + 版本号/日期 + 已安装标记 -->
+                                    <Grid Height="56" Padding="12,0,12,0" ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="32" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="32" Height="32" CornerRadius="4" VerticalAlignment="Center">
+                                            <Border.Background>
+                                                <ImageBrush ImageSource="{Binding Icon}" Stretch="{Binding IconStretch}" />
+                                            </Border.Background>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding Id}" VerticalAlignment="Center"
+                                                           FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{ThemeResource AppTextBrush}" />
+                                                <TextBlock Text="最新版本" VerticalAlignment="Center"
+                                                           FontSize="{StaticResource FontSizeCaption}"
+                                                           Foreground="{ThemeResource AppGoodBrush}"
+                                                           Visibility="{Binding LatestVisibility}" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding Meta}" FontSize="{StaticResource FontSizeCaption}"
+                                                       Foreground="{ThemeResource AppText3Brush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14"
+                                                    VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                        Visibility="{Binding InstalledVisibility}">
+                                                <FontIcon Glyph="&#xE73E;" FontSize="13"
+                                                          Foreground="{ThemeResource AppGoodBrush}" />
+                                                <TextBlock Text="已安装" FontSize="{StaticResource FontSizeCaption}"
+                                                           Foreground="{ThemeResource AppGoodBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <FontIcon Glyph="&#xE76C;" FontSize="11"
+                                                      Foreground="{ThemeResource AppText3Brush}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 加载态 -->
+            <controls:LoadingBlock x:Name="LoadingPanel" Text="正在读取 Mojang 版本清单…" Tint="{ThemeResource TintStatsBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+            <!-- 空态 -->
+            <StackPanel x:Name="EmptyPanel" Visibility="Collapsed" Spacing="14"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                <controls:EmptyState x:Name="EmptyText"
+                                     Glyph="&#xE896;" Title="没有匹配的版本" Hint="" />
+                <Button x:Name="EmptyAction" Content="重新读取清单" HorizontalAlignment="Center"
+                        Style="{StaticResource QuietButtonStyle}" Click="EmptyAction_Click" />
+            </StackPanel>
+
+            <!-- 错态 -->
+            <StackPanel x:Name="ErrorPanel" Visibility="Collapsed" MaxWidth="420"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                <FontIcon Glyph="&#xE7BA;" FontSize="28" Foreground="{ThemeResource AppWarnBrush}" />
+                <TextBlock x:Name="ErrorTitle" Text="读取版本清单失败" FontSize="14"
+                           FontWeight="SemiBold" HorizontalAlignment="Center"
+                           Foreground="{ThemeResource AppTextBrush}" />
+                <TextBlock x:Name="ErrorSummary" Text="" MaxWidth="400"
+                           FontSize="{StaticResource FontSizeCaption}"
+                           Foreground="{ThemeResource AppText3Brush}"
+                           TextWrapping="Wrap" TextAlignment="Center" />
+                <Button Content="重试" HorizontalAlignment="Center"
+                        AutomationProperties.Name="重新读取 Mojang 版本清单"
+                        Style="{StaticResource QuietButtonStyle}" Click="Refresh_Click" />
+            </StackPanel>
+
+            <InfoBar x:Name="StatusBar" IsOpen="False" Width="560"
+                     HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                     Margin="0,0,0,10" IsClosable="True" />
+        </Grid>
+    </Grid>
+</Page>

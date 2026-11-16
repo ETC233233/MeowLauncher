@@ -1,0 +1,53 @@
+<UserControl
+    x:Class="MeowLauncher.WinUI.Controls.TaskIsland"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 任务灵动岛（实时活动）：悬在内容区顶部居中。
+         紧凑态 = 一颗药丸（图标/转圈 · 标题 · 进度 · +N）；点击或悬停展开成任务卡（最多 3 条 + 查看全部）。
+         完成 / 失败时药丸变色停留片刻再收起；没有任务时整体 Collapsed，不占位、不拦截点击。 -->
+    <Grid>
+    <Border x:Name="Pill" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
+            MinWidth="160" MaxWidth="232" CornerRadius="18" BorderThickness="1"
+            Background="{ThemeResource AppCardBrush}" BorderBrush="{ThemeResource AppStrokeBrush}"
+            RenderTransformOrigin="0.5,0"
+            PointerEntered="Pill_PointerEntered" PointerExited="Pill_PointerExited"
+            Tapped="Pill_Tapped" AutomationProperties.Name="任务进度">
+        <Border.RenderTransform>
+            <CompositeTransform x:Name="PillScale" ScaleX="1" ScaleY="1" />
+        </Border.RenderTransform>
+        <StackPanel>
+            <!-- 紧凑行：高 36 -->
+            <Grid x:Name="CompactRow" Height="42" Padding="12,0" ColumnSpacing="9">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="18" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ProgressRing x:Name="Ring" Width="16" Height="16" IsActive="True" VerticalAlignment="Center"
+                              Foreground="{ThemeResource TintTasksBrush}" />
+                <FontIcon x:Name="StateIcon" Glyph="&#xE73E;" FontSize="14" Visibility="Collapsed"
+                          VerticalAlignment="Center" />
+                <TextBlock x:Name="TitleText" Grid.Column="1" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{ThemeResource AppTextBrush}" TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="PercentText" Grid.Column="2" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="8,0,0,0"
+                           Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
+                <Border x:Name="MoreChip" Grid.Column="3" Padding="6,1" CornerRadius="9" Visibility="Collapsed"
+                        Background="{ThemeResource AppChipBrush}" VerticalAlignment="Center">
+                    <TextBlock x:Name="MoreText" FontSize="11.5" Foreground="{ThemeResource AppText2Brush}" />
+                </Border>
+            </Grid>
+            <ProgressBar x:Name="Bar" Height="2" Minimum="0" Maximum="100" Margin="14,0,14,0"
+                         Foreground="{ThemeResource TintTasksBrush}" Background="Transparent" />
+            <!-- 展开体：和药丸是同一个形状。BodyHost 的高度做动画（从 0 撑开），多出来的部分被它自己的槽位裁掉；
+                 Body 固定宽度、靠左，药丸变宽时文字不会跟着重新折行。 -->
+            <Grid x:Name="BodyHost" Height="0" Visibility="Collapsed">
+                <StackPanel x:Name="Body" Spacing="8" Padding="12,8,12,12" VerticalAlignment="Top" HorizontalAlignment="Left" />
+            </Grid>
+        </StackPanel>
+    </Border>
+
+    </Grid>
+</UserControl>

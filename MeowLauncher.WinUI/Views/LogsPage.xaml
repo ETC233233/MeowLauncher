@@ -1,0 +1,120 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.LogsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MeowLauncher.WinUI.Controls"
+    Background="Transparent">
+
+    <!-- 语义色：日志 = 灰（TintClock）。行内文字颜色按级别取 good/warn/bad。 -->
+    <Grid x:Name="PageRoot" Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="日志" FontSize="28" FontWeight="SemiBold"
+                           Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+                <Border Width="28" Height="28" CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource TintClockSoftBrush}" Margin="2,0,0,0"
+                        VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource TintClockBrush}" />
+                </Border>
+                <TextBlock x:Name="SummaryText" Text="正在读取…" FontSize="11.5"
+                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"
+                           Margin="8,4,0,0" TextTrimming="CharacterEllipsis" MaxWidth="260" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <controls:InstanceSwitcher x:Name="Switcher" VerticalAlignment="Center" />
+                <ComboBox x:Name="FileBox" Height="36" Width="240" CornerRadius="10"
+                          DisplayMemberPath="Label" PlaceholderText="选择日志文件"
+                          SelectionChanged="File_Changed"
+                          AutomationProperties.Name="选择日志文件" />
+                <Button Content="打开日志目录" Height="36" Padding="14,0"
+                        CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource AppChipBrush}" BorderThickness="0"
+                        Foreground="{ThemeResource AppText2Brush}" FontSize="11.5"
+                        AutomationProperties.Name="打开日志目录" Click="OpenDir_Click" />
+                <Button x:Name="RefreshButton" Width="36" Height="36" Padding="0"
+                        CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource AppChipBrush}" BorderThickness="0"
+                        AutomationProperties.Name="刷新日志" Click="Refresh_Click"
+                        ToolTipService.ToolTip="刷新">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" Foreground="{ThemeResource AppText2Brush}" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource WidgetCardStyle}">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <ComboBox x:Name="FilterBox" Height="32" Width="110" CornerRadius="10"
+                          SelectedIndex="0" SelectionChanged="Filter_Changed"
+                          AutomationProperties.Name="筛选日志级别">
+                    <ComboBoxItem Content="全部" />
+                    <ComboBoxItem Content="错误" />
+                    <ComboBoxItem Content="警告" />
+                </ComboBox>
+
+                <CheckBox Grid.Column="1" x:Name="FollowSwitch" Content="跟随最新" IsChecked="True" FontSize="11.5"
+                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                          AutomationProperties.Name="跟随最新日志"
+                          Checked="Follow_Toggled" Unchecked="Follow_Toggled" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource WidgetCardStyle}" Padding="0">
+            <Grid>
+                <ListView x:Name="LogList" SelectionMode="None" IsItemClickEnabled="False"
+                          Padding="6,6,6,10"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="Margin" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}"
+                                       FontFamily="Consolas" FontSize="12"
+                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                       IsTextSelectionEnabled="True" Margin="8,2" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <controls:LoadingBlock x:Name="LoadingPanel" Text="正在读取日志…" Tint="{ThemeResource TintClockBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+
+                <StackPanel x:Name="EmptyHost" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Spacing="12" Visibility="Collapsed">
+                    <controls:EmptyState x:Name="EmptyPanel"
+                                         Glyph="&#xE7C3;" Title="还没有日志"
+                                         Hint="启动一次游戏后，这里的日志会自动出现。" />
+                    <Button x:Name="RetryButton" Content="重新读取" Height="32" Padding="16,0"
+                            CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
+                            HorizontalAlignment="Center" FontSize="11.5"
+                            Background="{ThemeResource AppChipBrush}"
+                            Foreground="{ThemeResource AppTextBrush}"
+                            AutomationProperties.Name="重新读取日志" Click="Retry_Click"
+                            Visibility="Collapsed" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

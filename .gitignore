@@ -1,0 +1,86 @@
+# 构建产物
+MeowLauncher.WinUI/bin/
+MeowLauncher.WinUI/obj/
+publish-test/
+dist/
+*.user
+.locks/
+
+# 归档与备份（体积大，不进仓库）
+_archive/
+demo/launcher-demo/
+demo/RoomAgent/
+demo/easytier/
+demo/*.zip
+demo/dist/
+demo/pkg/
+demo/meow-room-demo-new/
+
+# 运行时与临时
+__pycache__/
+*.pyc
+*.log
+*.bak
+*.bak-*
+*.zip
+tmp/
+
+# demo 是独立 git 仓库（联机模块），单独管理
+demo/
+
+# 本地临时/备份
+MeowLauncher.WinUI/.backup/
+MeowLauncher.WinUI/.tmp-*
+MeowLauncher.WinUI/*.bak*
+*.old-*
+
+# ===== 开源前补充（2026-11-13）=====
+# 发布产物 / 打包临时目录 / 截图证据 / 回收站
+publish-slim/
+_pack/
+_trash-*/
+screenshots/
+obj/
+bin/
+# 编辑器 / 助手本地状态；dsh 对话
+.claude/
+.agents/
+# 联机配置入口（不入库，见 online.props.example）；服务端目录与密钥一律不公开
+MeowLauncher.WinUI/online.props
+account-worker/
+config-worker/
+gateway-worker/
+node_modules/
+.wrangler/
+.dev.vars
+# 联机模块是独立公开仓库，作为 git 子模块引入（见 .gitmodules），不把它的文件直接提交进来
+_export/online-component/
+_export/meow-room-module/bin/
+_export/meow-room-module/obj/
+# AI 助手的项目须知含部署记录与回滚版本号，先不公开
+CLAUDE.md
+# 内部交接文档 / 开发探针脚本：含本机绝对路径与用户名，不公开
+docs/handoff/
+_agents/
+MeowLauncher.WinUI/STATUS-*.md
+tools/dump_user_msgs.py
+tools/probes/
+tools/_*
+build/
+
+# ===== 2026-11-16 公开仓库清理 =====
+# 发布产物（构建输出，含 WebView2 本机用户数据，绝不入库）
+publish-v2/
+publish-fd/
+publish-*/
+# 改代码前的备份 / 交接包
+backups/
+_handoff/
+# 一次性改代码的补丁脚本：写死本机路径，不公开
+tools/patch_*.py
+
+# 开发期本地参考文档，不随仓库发布
+docs/
+
+# 本地协作说明，不进仓库
+AGENTS.md

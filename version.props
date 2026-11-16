@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    版本信息的唯一来源（三档：Review / Beta / Release，见 README 与发布流程说明）。
+    - MeowVersion：将来的正式版本号（主.次.修订）。Review 构建不对外显示它，只用于程序集版本。
+        修订 +1 = 小幅更新（修问题）；次版本 +1 = 大幅更新（如开放联机模块）；主版本 +1 = 颠覆性更新（重构、彻底迁移）。
+    - MeowChannel：review（默认，每次编译自动 +1 迭代次数）| beta | release。
+    - 晋升：tools/promote.ps1 用指定的构建号（-p:MeowBuildId=...）重新出包，不再自增。
+  -->
+  <PropertyGroup>
+    <MeowVersion Condition="'$(MeowVersion)' == ''">0.5.0</MeowVersion>
+    <MeowChannel Condition="'$(MeowChannel)' == ''">review</MeowChannel>
+  </PropertyGroup>
+</Project>

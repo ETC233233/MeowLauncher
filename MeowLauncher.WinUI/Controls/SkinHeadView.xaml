@@ -1,0 +1,12 @@
+<UserControl
+    x:Class="MeowLauncher.WinUI.Controls.SkinHeadView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 轻量 2D 头像：直接裁皮肤 PNG 的头层/帽层，不创建 WebView2，也不做 3D。 -->
+    <Grid x:Name="Host" Background="Transparent">
+        <!-- 位图尺寸 = 控件物理像素，Stretch=Fill 不再二次缩放（以前整数倍放大再缩小，边缘发糊） -->
+        <Image x:Name="HeadImage" Stretch="Fill" IsHitTestVisible="False" UseLayoutRounding="True"
+               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+    </Grid>
+</UserControl>

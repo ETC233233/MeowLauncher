@@ -1,0 +1,695 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.AccountPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:MeowLauncher.WinUI.Controls"
+    Background="Transparent">
+
+    <!--
+      账户页（契约 3/6/7）：语义色 = 品牌绿，不跟系统强调色跑。
+      字号/圆角/间距全部走 Themes 令牌，不写死一次性数值。
+      只保留「当前账户 / 账户设置 / 其他账户」三块；改名走后端 Mojang 接口，其余行只放已实现的能力。
+    -->
+    <Page.Resources>
+        <SolidColorBrush x:Key="AccountGreenBrush" Color="#FF2FA35A" />
+        <SolidColorBrush x:Key="AccountGreenSoftBrush" Color="#252FA35A" />
+        <Style x:Key="SectionLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
+        </Style>
+        <Style x:Key="RowTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+        <Style x:Key="RowHintStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText3Brush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="RowButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="56" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="CornerRadius" Value="{StaticResource RowCornerRadius}" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <!-- 页头返回：无底色，跟着主题文字色走；hover 交给 Button 默认模板。 -->
+        <Style x:Key="HeaderBackButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="CornerRadius" Value="17" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
+        </Style>
+        <Style x:Key="PillButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="CornerRadius" Value="17" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+        <!-- Windows 设置同款行卡：独立圆角卡 + 主题色线图标 + 标题/说明 + 右箭头。 -->
+        <Style x:Key="WindowsRowButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="68" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="{ThemeResource AppCardBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="SkinActionButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+    </Page.Resources>
+
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 页头：图标 + 页面标题一行（照 HomePage）；皮肤与披风子视图用 CrumbSep/CrumbSkin 表示层级。
+             添加账户入口在「其他账户」卡底部，页头不放按钮。 -->
+        <Grid x:Name="PageHeader" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock x:Name="CrumbRoot" Text="账户" FontSize="28" FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Foreground="{ThemeResource AppTextBrush}" Tapped="CrumbRoot_Tapped" />
+                <FontIcon x:Name="CrumbSep" Glyph="&#xE76C;" FontSize="14" Visibility="Collapsed"
+                          Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
+                <TextBlock x:Name="CrumbSkin" Text="皮肤与披风" FontSize="28" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource AppTextBrush}" />
+                <TextBlock x:Name="CrumbFriends" Text="好友" FontSize="28" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource AppTextBrush}" />
+            </StackPanel>
+            <Button x:Name="HeaderBackButton" VerticalAlignment="Center" Grid.Column="1" Visibility="Collapsed"
+                    Style="{StaticResource HeaderBackButtonStyle}"
+                    AutomationProperties.Name="返回账户" Click="BackToRoot_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                    <TextBlock Text="返回账户" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- 根视图 -->
+        <ScrollViewer x:Name="RootView" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+            <StackPanel HorizontalAlignment="Stretch" Spacing="12">
+
+                <!-- ① 当前账户（照 Windows 设置「账户」页：96 大头像 + 名称/类型 + 右侧状态，不套卡片外框） -->
+                <Grid x:Name="AccountCard" Margin="2,6,2,8">
+                    <Grid x:Name="CurrentBody" ColumnSpacing="20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid x:Name="AvatarHost" Width="96" Height="96" VerticalAlignment="Center"
+                              AutomationProperties.Name="当前账户头像" />
+
+                        <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock x:Name="CurrentName" Text="正在读取账户…" FontSize="28"
+                                           FontWeight="SemiBold" VerticalAlignment="Center"
+                                           Foreground="{ThemeResource AppTextBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <ProgressRing x:Name="CurrentLoadingRing" Width="18" Height="18"
+                                              IsActive="False" Visibility="Collapsed"
+                                              AutomationProperties.Name="正在加载账户档案" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Border Background="{StaticResource AccountGreenSoftBrush}"
+                                        BorderBrush="{StaticResource AccountGreenBrush}" BorderThickness="1"
+                                        CornerRadius="6" Padding="8,2">
+                                    <TextBlock x:Name="CurrentType" Text=""
+                                               FontSize="{StaticResource FontSizeCaption}"
+                                               Foreground="{StaticResource AccountGreenBrush}" />
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+
+                <!-- ①-b 玩家档案：仿 Windows 设置「显示器信息」的折叠行（行高、图标、箭头与下面的菜单行一致） -->
+                <Border x:Name="InfoCard" Style="{StaticResource WidgetCardStyle}" Padding="0" AutomationProperties.Name="玩家档案">
+                  <StackPanel Spacing="0">
+                    <Button x:Name="InfoToggleRow" Style="{StaticResource WindowsRowButtonStyle}"
+                            Background="Transparent" BorderThickness="0" CornerRadius="7,7,7,7"
+                            AutomationProperties.Name="玩家档案" Height="64" MinHeight="64" Click="InfoToggle_Click">
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE946;" FontSize="20" Width="20"
+                                      Foreground="{StaticResource AccountGreenBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="玩家档案" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock x:Name="InfoSummary" Text="显示玩家账户的基础信息" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <FontIcon x:Name="InfoChevron" Grid.Column="2" Glyph="&#xE70E;" FontSize="12"
+                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
+                        </Grid>
+                    </Button>
+                    <Border x:Name="InfoBodyCard" BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="0,1,0,0">
+                        <StackPanel x:Name="InfoBody" Padding="50,10,16,12" Spacing="0">
+                            <Grid Height="34" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="112" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="玩家名" VerticalAlignment="Center"
+                                           FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText3Brush}" />
+                                <TextBlock x:Name="InfoPlayerName" Grid.Column="1" Text="—" VerticalAlignment="Center"
+                                           FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppTextBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                            <Grid Height="34" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="112" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="UUID" VerticalAlignment="Center"
+                                           FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText3Brush}" />
+                                <TextBlock x:Name="InfoUuid" Grid.Column="1" Text="—" VerticalAlignment="Center"
+                                           FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppTextBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                            <Grid Height="34" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="112" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="账户类型" VerticalAlignment="Center"
+                                           FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText3Brush}" />
+                                <TextBlock x:Name="InfoAccountType" Grid.Column="1" Text="—" VerticalAlignment="Center"
+                                           FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppTextBrush}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </Border>
+
+                <!-- ② 账户设置（Windows 设置样式：每行一张独立卡片，图标无底色、主题色描线，标题 + 说明 + 右箭头） -->
+                <TextBlock x:Name="SettingsTitle" Text="账户设置" Style="{StaticResource SectionLabelStyle}"
+                           Margin="4,14,0,2" />
+                <StackPanel x:Name="SettingsCard" Spacing="6">
+                    <Button x:Name="RenameRow" Style="{StaticResource WindowsRowButtonStyle}"
+                            AutomationProperties.Name="更改玩家名称" MinHeight="56" Click="Rename_Click">
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8AC;" FontSize="16" Width="28"
+                                      Foreground="{StaticResource AccountGreenBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="更改玩家名称" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="修改 Minecraft 档案里的玩家名称" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" Glyph="&#xE76C;" FontSize="12"
+                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center">
+                                <FontIcon.RenderTransform>
+                                    <TranslateTransform />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="FriendsRow" Style="{StaticResource WindowsRowButtonStyle}"
+                            AutomationProperties.Name="好友" MinHeight="56" Click="FriendsEntry_Click">
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE716;" FontSize="16" Width="28"
+                                      Foreground="{StaticResource AccountGreenBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="好友" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="查看好友列表、处理好友请求" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" Glyph="&#xE76C;" FontSize="12"
+                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center">
+                                <FontIcon.RenderTransform>
+                                    <TranslateTransform />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="SkinRow" Style="{StaticResource WindowsRowButtonStyle}"
+                            AutomationProperties.Name="皮肤与披风" MinHeight="56" Click="SkinEntry_Click">
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE790;" FontSize="16" Width="28"
+                                      Foreground="{StaticResource AccountGreenBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="皮肤与披风" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="更换皮肤、选择披风" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" Glyph="&#xE76C;" FontSize="12"
+                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center">
+                                <FontIcon.RenderTransform>
+                                    <TranslateTransform />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="LogoutRow" Style="{StaticResource WindowsRowButtonStyle}"
+                            AutomationProperties.Name="退出账户" MinHeight="56" Click="Logout_Click" DoubleTapped="Logout_DoubleTapped"
+                            Foreground="{ThemeResource AppBadBrush}"
+                            ToolTipService.ToolTip="双击以从启动器退出此账户的登录">
+                        <Grid ColumnSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE74D;" FontSize="16" Width="28"
+                                      Foreground="{StaticResource AccountGreenBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="退出账户" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="双击以从启动器退出此账户的登录" Style="{StaticResource RowHintStyle}" />
+
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" Glyph="&#xE76C;" FontSize="12"
+                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center">
+                                <FontIcon.RenderTransform>
+                                    <TranslateTransform />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
+                        </Grid>
+                    </Button>
+
+                </StackPanel>
+
+                <!-- ②-b 账户权限（直接写 Mojang /player/attributes） -->
+                <TextBlock x:Name="PermsTitle" Text="账户权限" Style="{StaticResource SectionLabelStyle}" Margin="4,14,0,2" />
+                <Border x:Name="PermsCard" Style="{StaticResource WidgetCardStyle}">
+                    <StackPanel Spacing="0">
+                        <Grid Height="68" Padding="16,0" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="好友请求" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="允许向我发送好友请求" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="PermFriendsSwitch" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" Tag="friends"
+                                          OnContent="" OffContent="" Toggled="Perm_Toggled"
+                                          AutomationProperties.Name="好友请求" VerticalAlignment="Center" />
+                        </Grid>
+                        <Border Height="1" Margin="16,0" Background="{ThemeResource CardStrokeBrush}" Opacity="0.6" />
+                        <Grid Height="68" Padding="16,0" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="加入邀请" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="允许好友直接加入我的世界" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="PermInvitesSwitch" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" Tag="invites"
+                                          OnContent="" OffContent="" Toggled="Perm_Toggled"
+                                          AutomationProperties.Name="加入邀请" VerticalAlignment="Center" />
+                        </Grid>
+                        <Border Height="1" Margin="16,0" Background="{ThemeResource CardStrokeBrush}" Opacity="0.6" />
+                        <Grid Height="68" Padding="16,0" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="聊天过滤" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="过滤聊天中的不当用语" Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <ToggleSwitch x:Name="PermProfanitySwitch" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" Tag="profanity"
+                                          OnContent="" OffContent="" Toggled="Perm_Toggled"
+                                          AutomationProperties.Name="聊天过滤" VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock x:Name="PermPrivileges" Visibility="Collapsed" Text="" Style="{StaticResource RowHintStyle}" />
+                        <Grid Margin="16,2,16,10" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="PermsStatus" Text="" Style="{StaticResource RowHintStyle}"
+                                       TextWrapping="Wrap" VerticalAlignment="Center" />
+                            <Button x:Name="PermsReloginButton" VerticalAlignment="Center" Grid.Column="1" Content="重新登录"
+                                    Style="{StaticResource SkinActionButtonStyle}"
+                                    Visibility="Collapsed" Click="AddMicrosoft_Click"
+                                    AutomationProperties.Name="重新登录 Microsoft 账户" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ③ 其他账户 -->
+                <TextBlock x:Name="OtherTitle" Text="其他账户" Style="{StaticResource SectionLabelStyle}" Margin="4,10,0,0" />
+                <Border x:Name="OtherCard" Style="{StaticResource WidgetCardStyle}">
+                    <StackPanel Spacing="4">
+                        <StackPanel x:Name="OtherRows" Spacing="0" />
+                        <controls:EmptyState x:Name="OtherEmpty" Glyph="&#xE77B;" Title="没有其他账户"
+                                             Visibility="Collapsed" />
+                        <!-- 底部 64px 行：
+                             左「添加其他用户」文字 + 右 primary「添加账户」 -->
+                        <Grid Height="64" Padding="16,0">
+                            <TextBlock Text="添加其他用户" FontSize="{StaticResource FontSizeBody}"
+                                       Foreground="{ThemeResource AppTextBrush}"
+                                       VerticalAlignment="Center" />
+                            <Button x:Name="AddAccountButton" Content="添加账户" HorizontalAlignment="Right"
+                                    VerticalAlignment="Center" Height="32" Padding="14,0"
+                                    CornerRadius="16" BorderThickness="0"
+                                    Background="{StaticResource AccountGreenBrush}"
+                                    Foreground="{ThemeResource AppAccentTextBrush}"
+                                    FontSize="{StaticResource FontSizeCaption}"
+                                    AutomationProperties.Name="添加账户" Click="AddAccountMenu_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 皮肤与披风子视图：两栏结构。
+             左栏固定 340×420 预览，右栏「皮肤 / 披风 / 相关设置」三张卡；窄窗改为上下排。 -->
+        <ScrollViewer x:Name="SkinView" Grid.Row="1" Visibility="Collapsed"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      HorizontalContentAlignment="Stretch">
+            <Grid x:Name="SkinLayout" ColumnSpacing="16" RowSpacing="12" Margin="0,2,0,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="PreviewColumn" Width="340" />
+                    <ColumnDefinition x:Name="OptionsColumn" Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- 左栏：固定比例展示台。3D 预览走开源 skinview3d（WebView2），失败时只显示提示。 -->
+                <Border x:Name="SkinStage" Grid.Row="0" Grid.Column="0"
+                        Width="340" Height="420" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        CornerRadius="{StaticResource CardCornerRadius}"
+                        Background="{ThemeResource AppCardBrush}"
+                        BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1">
+                    <Grid>
+                        <controls:SkinViewer3D x:Name="SkinPreviewFigure" Margin="8"
+                                               HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                        <!-- 模型旁的刷新：只在用户主动刷新时重拉档案，右侧改动成功后会自己再刷一次。 -->
+                        <Button x:Name="SkinRefreshButton" Width="36" Height="36" Padding="0"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,12,0"
+                                CornerRadius="18" BorderThickness="0" Background="#66000000"
+                                ToolTipService.ToolTip="刷新皮肤与披风"
+                                AutomationProperties.Name="刷新皮肤与披风" Click="SkinRefresh_Click">
+                            <FontIcon x:Name="SkinRefreshIcon" Glyph="&#xE72C;" FontSize="14"
+                                      Foreground="White" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- 右栏：三块内容 -->
+                <StackPanel x:Name="SkinOptions" Grid.Row="0" Grid.Column="1" Spacing="10">
+
+                    <Grid Margin="4,0,0,0">
+                        <TextBlock Text="皮肤" Style="{StaticResource SectionLabelStyle}" Margin="0" />
+                        <TextBlock x:Name="ProfileVariant" HorizontalAlignment="Right"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   VerticalAlignment="Center"
+                                   Foreground="{ThemeResource AppText3Brush}" />
+                    </Grid>
+                    <Border Style="{StaticResource WidgetCardStyle}">
+                        <StackPanel Spacing="12">
+                            <!-- 皮肤模型 -->
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="皮肤模型" Style="{StaticResource RowTitleStyle}"
+                                               FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                            VerticalAlignment="Center">
+                                    <Button x:Name="ClassicRow" Style="{StaticResource SkinActionButtonStyle}"
+                                            Tag="classic" Click="Variant_Click"
+                                            AutomationProperties.Name="皮肤模型：经典 Steve">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon x:Name="ClassicCheck" Glyph="&#xE73E;" FontSize="{StaticResource FontSizeCaption}"
+                                                      Foreground="{StaticResource AccountGreenBrush}"
+                                                      Visibility="Collapsed" />
+                                            <TextBlock Text="经典 Steve" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="SlimRow" Style="{StaticResource SkinActionButtonStyle}"
+                                            Tag="slim" Click="Variant_Click"
+                                            AutomationProperties.Name="皮肤模型：纤细 Alex">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon x:Name="SlimCheck" Glyph="&#xE73E;" FontSize="{StaticResource FontSizeCaption}"
+                                                      Foreground="{StaticResource AccountGreenBrush}"
+                                                      Visibility="Collapsed" />
+                                            <TextBlock Text="纤细 Alex" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Height="1" Background="{ThemeResource CardStrokeBrush}" Opacity="0.6" />
+
+                            <!-- 皮肤图片 -->
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="皮肤图片" Style="{StaticResource RowTitleStyle}"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock x:Name="SkinImageHint"
+                                               Text="请选择 64×64 的 PNG 皮肤文件"
+                                               Style="{StaticResource RowHintStyle}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                            VerticalAlignment="Center">
+                                    <Button x:Name="UploadSkinButton" Content="上传皮肤"
+                                            Style="{StaticResource SkinActionButtonStyle}"
+                                            AutomationProperties.Name="上传皮肤" Click="UploadSkin_Click" />
+                                    <Button x:Name="ResetSkinButton" Content="重置皮肤"
+                                            Style="{StaticResource SkinActionButtonStyle}"
+                                            AutomationProperties.Name="重置皮肤" Click="ResetSkin_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 档案错误态：警告图标 + ≤120 字摘要 + 原地重试 -->
+                    <Border x:Name="ProfileErrorPanel" Visibility="Collapsed"
+                            Style="{StaticResource WidgetCardStyle}">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE7BA;" FontSize="15"
+                                          Foreground="{ThemeResource AppWarnBrush}" />
+                                <TextBlock Text="档案读取失败" Style="{StaticResource RowTitleStyle}"
+                                           FontWeight="SemiBold" />
+                            </StackPanel>
+                            <TextBlock x:Name="ProfileErrorText" Style="{StaticResource RowHintStyle}"
+                                       MaxWidth="640" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="重试" Style="{StaticResource SkinActionButtonStyle}"
+                                        AutomationProperties.Name="重试读取档案" Click="RefreshProfile_Click" />
+                                <Button x:Name="ReloginButton" Content="重新登录"
+                                        Style="{StaticResource SkinActionButtonStyle}"
+                                        AutomationProperties.Name="重新登录正版账户"
+                                        Visibility="Collapsed" Click="AddMicrosoft_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 披风 -->
+                    <Grid Margin="4,6,0,0">
+                        <TextBlock Text="披风" Style="{StaticResource SectionLabelStyle}" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                            <ProgressRing x:Name="ProfileLoadingRing" Width="16" Height="16"
+                                          IsActive="False" Visibility="Collapsed"
+                                          AutomationProperties.Name="正在读取档案" />
+                            <TextBlock x:Name="ProfileStatus" FontSize="{StaticResource FontSizeCaption}"
+                                       VerticalAlignment="Center"
+                                       Foreground="{ThemeResource AppText3Brush}" />
+                        </StackPanel>
+                    </Grid>
+                    <Border x:Name="CapeCard" Style="{StaticResource WidgetCardStyle}">
+                        <StackPanel Spacing="8">
+                            <ItemsControl x:Name="CapeList">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <ItemsWrapGrid Orientation="Horizontal" ItemWidth="104" ItemHeight="72" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                            <controls:EmptyState x:Name="CapeEmpty" Glyph="&#xE7B8;"
+                                                 Title="该玩家暂未拥有披风呢TAT"
+                                                 Visibility="Collapsed" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 离线账户没有正版披风，但保留这张说明卡，避免整块区域凭空消失 -->
+                    <Border x:Name="OfflineCapeCard" Style="{StaticResource WidgetCardStyle}"
+                            Visibility="Collapsed">
+                        <TextBlock Text="离线账户没有正版披风。" Style="{StaticResource RowHintStyle}" />
+                    </Border>
+
+                    <!-- 相关设置 -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="4,6,0,0">
+                        <Image Source="Assets/default_icon.png" Width="16" Height="16" Stretch="Uniform"
+                               VerticalAlignment="Center" />
+                        <TextBlock Text="相关设置" Style="{StaticResource SectionLabelStyle}" Margin="0" />
+                    </StackPanel>
+                    <Button Style="{StaticResource RowButtonStyle}" Height="60"
+                            Background="{ThemeResource AppCardBrush}"
+                            BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource CardCornerRadius}"
+                            AutomationProperties.Name="管理我的档案" Click="OpenMinecraftProfile_Click">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Image Source="Assets/default_icon.png" Width="28" Height="28" Stretch="Uniform"
+                                   VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="管理我的档案" Style="{StaticResource RowTitleStyle}" />
+                                <TextBlock Text="在 Minecraft 官网管理我的皮肤与披风"
+                                           Style="{StaticResource RowHintStyle}" />
+                            </StackPanel>
+                            <FontIcon Grid.Column="2" Glyph="&#xE8A7;" FontSize="12"
+                                      VerticalAlignment="Center"
+                                      Foreground="{ThemeResource AppText3Brush}" />
+                        </Grid>
+                    </Button>
+
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+
+        <!-- 好友子视图：账户设置里的「好友」入口。只对正版账户开放，
+             数据走 Java 版 26.2 Snapshot 7 起的好友接口；在线状态由 presence 接口补。 -->
+        <ScrollViewer x:Name="FriendsView" Grid.Row="1" Visibility="Collapsed"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      HorizontalContentAlignment="Stretch">
+            <StackPanel HorizontalAlignment="Stretch" Spacing="12">
+                <Border Style="{StaticResource WidgetCardStyle}">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <StackPanel Spacing="3">
+                                <TextBlock x:Name="FriendsSummary" Text="正在读取好友列表…"
+                                           FontSize="{StaticResource FontSizeTitle}" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AppTextBrush}" />
+                                <TextBlock x:Name="FriendsPresenceHint" Visibility="Collapsed"
+                                           FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource AppText3Brush}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8"
+                                        HorizontalAlignment="Right" VerticalAlignment="Top">
+                                <ProgressRing x:Name="FriendsLoadingRing" Width="18" Height="18"
+                                              IsActive="False" Visibility="Collapsed"
+                                              AutomationProperties.Name="正在读取好友列表" />
+                                <Button x:Name="FriendsRefreshButton" Content="刷新"
+                                        Style="{StaticResource PillButtonStyle}"
+                                        AutomationProperties.Name="刷新好友列表"
+                                        Click="RefreshFriends_Click" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="FriendNameBox" Height="40" MaxLength="16"
+                                     PlaceholderText="输入玩家名加好友"
+                                     AutomationProperties.Name="输入要添加的好友玩家名" />
+                            <Button x:Name="AddFriendButton" VerticalAlignment="Center" Grid.Column="1" Content="发送好友请求"
+                                    Height="36" Padding="18,0" CornerRadius="18" BorderThickness="0"
+                                    Background="{StaticResource AccountGreenBrush}"
+                                    Foreground="{ThemeResource AppAccentTextBrush}"
+                                    FontSize="{StaticResource FontSizeBody}"
+                                    AutomationProperties.Name="发送好友请求"
+                                    Click="AddFriend_Click" />
+                        </Grid>
+                        <TextBlock x:Name="FriendsStatus" Visibility="Collapsed"
+                                   FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource AppText3Brush}" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="好友" Style="{StaticResource SectionLabelStyle}" Margin="4,4,0,0" />
+                <Border Style="{StaticResource WidgetCardStyle}">
+                    <StackPanel>
+                        <StackPanel x:Name="FriendList" Spacing="0" />
+                        <controls:EmptyState x:Name="FriendEmpty" Glyph="&#xE716;"
+                                             Title="还没有好友" Hint="在游戏里或上方输入玩家名添加好友。"
+                                             Margin="0,16" Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 好友申请：标题常驻；没有任何待处理请求时显示「暂无待处理的好友请求」 -->
+                <TextBlock Text="好友申请" Style="{StaticResource SectionLabelStyle}" Margin="4,4,0,0" />
+                <Border x:Name="RequestsEmptyCard" Style="{StaticResource WidgetCardStyle}" Visibility="Collapsed">
+                    <TextBlock x:Name="RequestsEmptyText" Text="暂无待处理的好友请求"
+                               FontSize="{StaticResource FontSizeBody}"
+                               Foreground="{ThemeResource AppText3Brush}"
+                               HorizontalAlignment="Center" Margin="0,14" />
+                </Border>
+
+                <StackPanel x:Name="IncomingSection" Spacing="8" Visibility="Collapsed">
+                    <TextBlock Text="收到的请求" Style="{StaticResource SectionLabelStyle}" Margin="4,4,0,0" />
+                    <Border Style="{StaticResource WidgetCardStyle}">
+                        <StackPanel x:Name="IncomingList" Spacing="0" />
+                    </Border>
+                </StackPanel>
+
+                <StackPanel x:Name="OutgoingSection" Spacing="8" Visibility="Collapsed">
+                    <TextBlock Text="已发送" Style="{StaticResource SectionLabelStyle}" Margin="4,4,0,0" />
+                    <Border Style="{StaticResource WidgetCardStyle}">
+                        <StackPanel x:Name="OutgoingList" Spacing="0" />
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <InfoBar x:Name="Toast" Grid.Row="1" IsOpen="False" Severity="Informational"
+                 VerticalAlignment="Bottom" HorizontalAlignment="Right" Width="380"
+                 Margin="0,0,8,8" IsClosable="True" />
+    </Grid>
+</Page>

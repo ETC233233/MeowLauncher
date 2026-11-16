@@ -1,0 +1,373 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.OnlinePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:MeowLauncher.WinUI.Converters"
+    xmlns:controls="using:MeowLauncher.WinUI.Controls"
+    xmlns:models="using:MeowLauncher.WinUI.Models"
+    Background="Transparent">
+
+    <Page.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <!-- 列表行悬停底色：AppTextColor 在深色下为白、浅色下为黑，6% 足够看出层次 -->
+        <SolidColorBrush x:Key="RowHoverBrush" Color="{ThemeResource AppTextColor}" Opacity="0.06" />
+        <Thickness x:Key="ToolbarPadding">16,8</Thickness>
+
+        <!-- 左栏分类行：整行可点，选中态由代码按品牌色刷（底色 + 左侧绿条），不用系统强调色 -->
+        <Style x:Key="CatPillStyle" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="3,0,0,0" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+
+        <!-- 顶部分类胶囊：横排，选中 = 品牌绿浅底 + 底部 2px 绿条 -->
+        <Style x:Key="CatChipStyle" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="SourceTabStyle" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </Page.Resources>
+
+    <!-- 语义色：在线资源 = 紫（TintMedia）。 -->
+    <Grid x:Name="PageRoot" Padding="{StaticResource PagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 页头：嵌在「获取」宿主里时收起，避免和宿主页头重复 -->
+        <Grid x:Name="PageHeader" Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="在线资源" FontSize="28" FontWeight="SemiBold"
+                           Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+                <Border Width="28" Height="28" CornerRadius="{StaticResource ChipCornerRadius}"
+                        Background="{ThemeResource TintMediaSoftBrush}" Margin="2,0,0,0"
+                        VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE774;" FontSize="14" Foreground="{ThemeResource TintMediaBrush}" />
+                </Border>
+                <TextBlock x:Name="ResultCount" Text="Modrinth" FontSize="11.5"
+                           Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"
+                           Margin="8,4,0,0" TextTrimming="CharacterEllipsis" MaxWidth="360" />
+            </StackPanel>
+            <controls:InstanceSwitcher x:Name="HeaderSwitcher" Grid.Column="1" VerticalAlignment="Center" />
+        </Grid>
+
+        <!-- 工具栏统一规格（t46）：高 64、左右内边距 16、上下 8；搜索图标 36×36 圆角 10；
+             来源下拉与胶囊同高 28，右端由卡内边距留 16。 -->
+        <!-- 独立打开本页时才用这张搜索卡；嵌在「获取」里时搜索框在顶栏，这张卡收起（AttachQueryBox） -->
+        <Border x:Name="SearchCard" Grid.Row="1" Style="{StaticResource WidgetCardStyle}" Height="64" Padding="{StaticResource ToolbarPadding}">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <controls:PageSearchBox x:Name="QueryBox" Grid.ColumnSpan="2" VerticalAlignment="Center"
+                                        PlaceholderText="搜索 Mod、整合包、资源包、光影…"
+                                        QueryChanged="QueryBox_QueryChanged"
+                                        QuerySubmitted="QueryBox_QuerySubmitted" />
+
+                <!-- 数据源切换已并入「获取」顶部的「在线资源」按钮（向右展开）；SourceBox 仍是隐藏的状态载体 -->
+                <ComboBox x:Name="SourceBox" Grid.Column="2" Visibility="Collapsed"
+                          SelectedIndex="0" SelectionChanged="SourceBox_SelectionChanged"
+                          AutomationProperties.Name="在线资源来源">
+                    <ComboBoxItem Content="Modrinth" />
+                    <ComboBoxItem Content="CurseForge" />
+                </ComboBox>
+            </Grid>
+        </Border>
+
+        <!-- 主体：左栏竖排分类 + 下面单独的整合包框；右栏筛选 + 结果 -->
+        <Grid Grid.Row="2" ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="164" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Spacing="12" VerticalAlignment="Top">
+                <!-- 装进当前实例的几类资源。选中 = 品牌绿浅底 + 左侧 3px 绿条 -->
+                <Border Style="{StaticResource WidgetCardStyle}" Padding="8">
+                    <StackPanel Spacing="2">
+                        <Button x:Name="CatAll" Tag="all" Style="{StaticResource CatPillStyle}"
+                                AutomationProperties.Name="分类：全部" Click="Category_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE71D;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock Text="全部" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="CatMod" Tag="mod" Style="{StaticResource CatPillStyle}"
+                                AutomationProperties.Name="分类：Mod" Click="Category_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE7B8;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock Text="Mod" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="CatResourcepack" Tag="resourcepack" Style="{StaticResource CatPillStyle}"
+                                AutomationProperties.Name="分类：资源包" Click="Category_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE790;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock Text="资源包" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="CatShader" Tag="shader" Style="{StaticResource CatPillStyle}"
+                                AutomationProperties.Name="分类：光影" Click="Category_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE706;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock Text="光影" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="CatDatapack" Tag="datapack" Style="{StaticResource CatPillStyle}"
+                                AutomationProperties.Name="分类：数据包" Click="Category_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE8A5;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock Text="数据包" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- 整合包单独一个框：它会装成一个新实例，不是往当前实例里加资源 -->
+                <Border Style="{StaticResource WidgetCardStyle}" Padding="8">
+                    <Button x:Name="CatModpack" Tag="modpack" Style="{StaticResource CatPillStyle}"
+                            Height="Auto" Padding="12,8"
+                            AutomationProperties.Name="分类：整合包" Click="Category_Click"
+                            ToolTipService.ToolTip="浏览整合包">
+                        <StackPanel Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE8F1;" FontSize="15" VerticalAlignment="Center" />
+                                <TextBlock Text="整合包" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="装成新实例，不受当前实例的版本和加载器限制" FontSize="11"
+                                       Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap"
+                                       Margin="25,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                </Border>
+            </StackPanel>
+
+            <Grid Grid.Column="1" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 筛选：游戏版本 / 加载器 / 排序；「跟随 x」= 当前实例解析出的真实值。提示文字跟在右边 -->
+                <Border Grid.Row="0" Style="{StaticResource WidgetCardStyle}" Padding="{StaticResource ToolbarPadding}">
+                    <Grid ColumnSpacing="14" MinHeight="40">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <ComboBox x:Name="GameVersionBox" Height="32" Width="140" CornerRadius="10"
+                                      VerticalAlignment="Center" SelectionChanged="Filter_SelectionChanged"
+                                      ToolTipService.ToolTip="游戏版本（「跟随」= 当前实例的版本）"
+                                      AutomationProperties.Name="游戏版本筛选" />
+                            <StackPanel x:Name="LoaderGroup" Orientation="Horizontal" Spacing="8">
+                                <ComboBox x:Name="LoaderBox" Height="32" Width="140" CornerRadius="10"
+                                          VerticalAlignment="Center" SelectionChanged="Filter_SelectionChanged"
+                                          ToolTipService.ToolTip="加载器（「跟随」= 当前实例的加载器）"
+                                          AutomationProperties.Name="加载器筛选" />
+                            </StackPanel>
+                            <ComboBox x:Name="SortBox" Height="32" Width="104" CornerRadius="10"
+                                      ToolTipService.ToolTip="排序"
+                                      VerticalAlignment="Center" SelectionChanged="Sort_SelectionChanged"
+                                      AutomationProperties.Name="排序方式">
+                                <ComboBoxItem Content="相关度" Tag="relevance" />
+                                <ComboBoxItem Content="下载量" Tag="downloads" />
+                                <ComboBoxItem Content="最近更新" Tag="updated" />
+                                <ComboBoxItem Content="最新发布" Tag="newest" />
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock x:Name="FilterHint" Grid.Column="1" Text="" FontSize="11.5" Visibility="Collapsed"
+                                   Foreground="{ThemeResource AppWarnBrush}" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1">
+            <!-- 整页只有这一张卡；行本身是平铺的，不再卡片套卡片 -->
+            <Border Style="{StaticResource WidgetCardStyle}" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                <ListView x:Name="ResultsList" SelectionMode="None" Padding="6,4"
+                          IsItemClickEnabled="True" ItemClick="ResultsList_ItemClick" Background="Transparent"
+                          PointerMoved="ResultsList_PointerMoved" PointerExited="ResultsList_PointerExited"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="Margin" Value="0" />
+                            <Setter Property="CornerRadius" Value="8" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:OnlineItem">
+                            <!-- 行分隔：底部 1px CardStroke（alpha≈5%），不再做行卡；悬停底色由 ListView 统一刷 -->
+                            <Grid Height="58" Padding="10,0" ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="36" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Width="36" Height="36" CornerRadius="8"
+                                        Background="{ThemeResource TintMediaSoftBrush}"
+                                        VerticalAlignment="Center">
+                                    <Grid>
+                                        <FontIcon Glyph="&#xE774;" FontSize="14"
+                                                  Foreground="{ThemeResource TintMediaBrush}" />
+                                        <Image Source="{x:Bind IconSource}" Stretch="UniformToFill" />
+                                    </Grid>
+                                </Border>
+
+                                <!-- 第一行：标题 + 作者 ……… 下载量 · 类型；第二行：一行简介（单行省略，完整描述在详情里） -->
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="{x:Bind Title}" FontSize="14" FontWeight="SemiBold"
+                                                       Foreground="{ThemeResource AppTextBrush}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="360"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Text="{x:Bind Author}" FontSize="11.5"
+                                                       Foreground="{ThemeResource AppText3Brush}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="160"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind MetaText}" FontSize="11.5"
+                                                   Foreground="{ThemeResource AppText3Brush}"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                    <TextBlock Text="{x:Bind DescriptionLine}" FontSize="12"
+                                               Foreground="{ThemeResource AppText2Brush}"
+                                               Visibility="{x:Bind DescriptionVisibility}"
+                                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                                </StackPanel>
+
+                                <!-- 获取页列表只留一个动作：安装。默认描边弱按钮，悬停/按下才变实心；已安装是绿色 ✓ 文字，和下载页同一套。 -->
+                                <Grid Grid.Column="2" Width="88" VerticalAlignment="Center">
+                                    <Button HorizontalAlignment="Right"
+                                            Content="{x:Bind ActionText}" Height="30" MinWidth="72" Padding="14,0" FontSize="12"
+                                            CornerRadius="4" BorderThickness="1"
+                                            HorizontalContentAlignment="Center"
+                                            Background="Transparent"
+                                            BorderBrush="{ThemeResource AppStrokeBrush}"
+                                            Foreground="{ThemeResource AppTextBrush}"
+                                            Visibility="{x:Bind InstallVisibility}"
+                                            AutomationProperties.Name="{x:Bind ActionTooltip}"
+                                            ToolTipService.ToolTip="{x:Bind ActionTooltip}"
+                                            Tag="{x:Bind Id}" Click="RowAction_Click">
+                                        <Button.Resources>
+                                            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="AppBrandBrush" />
+                                            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="AppBrandBrush" />
+                                            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="AppBrandBrush" />
+                                            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="AppBrandBrush" />
+                                            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="AppBrandTextBrush" />
+                                            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AppBrandTextBrush" />
+                                        </Button.Resources>
+                                    </Button>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right"
+                                                Visibility="{x:Bind InstalledVisibility}"
+                                                ToolTipService.ToolTip="{x:Bind ActionTooltip}">
+                                        <FontIcon Glyph="&#xE73E;" FontSize="13"
+                                                  Foreground="{ThemeResource AppGoodBrush}" />
+                                        <TextBlock Text="已安装" FontSize="{StaticResource FontSizeCaption}"
+                                                   Foreground="{ThemeResource AppGoodBrush}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Rectangle Grid.ColumnSpan="3" Height="1" VerticalAlignment="Bottom"
+                                           Fill="{ThemeResource CardStrokeBrush}" Opacity="0.6"
+                                           IsHitTestVisible="False" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                    <Button x:Name="LoadMoreButton" Grid.Row="1" Content="加载更多"
+                            FontFamily="Microsoft YaHei UI" Language="zh-CN"
+                            Height="32" Margin="10,6,10,10" HorizontalAlignment="Stretch"
+                            Visibility="Collapsed" Click="LoadMore_Click"
+                            AutomationProperties.Name="加载更多结果" />
+                </Grid>
+            </Border>
+
+            <controls:LoadingBlock x:Name="LoadingPanel" Text="正在搜索 Modrinth…" Tint="{ThemeResource TintMediaBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+
+            <StackPanel x:Name="EmptyHost" HorizontalAlignment="Center"
+                        VerticalAlignment="Center" Spacing="12" Visibility="Collapsed">
+                <controls:EmptyState x:Name="EmptyPanel"
+                                     Glyph="&#xE774;" Title="没有找到结果"
+                                     Hint="换个关键词，或切换 Modrinth / CurseForge 再试。" />
+                <Button x:Name="RetryButton" Content="重试" Height="32" Padding="16,0"
+                        CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
+                        HorizontalAlignment="Center" FontSize="11.5"
+                        Background="{ThemeResource AppChipBrush}"
+                        Foreground="{ThemeResource AppTextBrush}"
+                        AutomationProperties.Name="重试搜索" Click="EmptyRetry_Click"
+                        Visibility="Collapsed" />
+
+                <StackPanel x:Name="CategoryShortcuts" Orientation="Horizontal" Spacing="8"
+                            HorizontalAlignment="Center" Visibility="Collapsed">
+                    <Button Content="Mod" Tag="mod" Height="32" Padding="14,0"
+                            CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0" FontSize="11.5"
+                            Background="{ThemeResource AppChipBrush}" Foreground="{ThemeResource AppText2Brush}"
+                            AutomationProperties.Name="空态快捷选择：Mod" Click="CategoryShortcut_Click" />
+                    <Button Content="整合包" Tag="modpack" Height="32" Padding="14,0"
+                            CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0" FontSize="11.5"
+                            Background="{ThemeResource AppChipBrush}" Foreground="{ThemeResource AppText2Brush}"
+                            AutomationProperties.Name="空态快捷选择：整合包" Click="CategoryShortcut_Click" />
+                    <Button Content="资源包" Tag="resourcepack" Height="32" Padding="14,0"
+                            CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0" FontSize="11.5"
+                            Background="{ThemeResource AppChipBrush}" Foreground="{ThemeResource AppText2Brush}"
+                            AutomationProperties.Name="空态快捷选择：资源包" Click="CategoryShortcut_Click" />
+                    <Button Content="光影" Tag="shader" Height="32" Padding="14,0"
+                            CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0" FontSize="11.5"
+                            Background="{ThemeResource AppChipBrush}" Foreground="{ThemeResource AppText2Brush}"
+                            AutomationProperties.Name="空态快捷选择：光影" Click="CategoryShortcut_Click" />
+                    <Button Content="数据包" Tag="datapack" Height="32" Padding="14,0"
+                            CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0" FontSize="11.5"
+                            Background="{ThemeResource AppChipBrush}" Foreground="{ThemeResource AppText2Brush}"
+                            AutomationProperties.Name="空态快捷选择：数据包" Click="CategoryShortcut_Click" />
+                </StackPanel>
+            </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

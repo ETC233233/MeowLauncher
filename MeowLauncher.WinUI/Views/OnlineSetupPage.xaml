@@ -1,0 +1,65 @@
+<Page
+    x:Class="MeowLauncher.WinUI.Views.OnlineSetupPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Transparent">
+
+    <!--
+      联机组件的下载 / 更新页：联机模块、提权代理和 EasyTier 不随启动器分发，首次进入「联机」时来这里下载。
+      样式全部写在本页，不依赖别处的页面级资源。
+    -->
+    <Page.Resources>
+        <SolidColorBrush x:Key="SetupGreenBrush" Color="#FF2FA35A" />
+        <Style x:Key="SetupPillStyle" TargetType="Button">
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="20,0" />
+            <Setter Property="CornerRadius" Value="18" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+        </Style>
+        <Style x:Key="SetupPrimaryPillStyle" TargetType="Button" BasedOn="{StaticResource SetupPillStyle}">
+            <Setter Property="Background" Value="{StaticResource SetupGreenBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Padding="48,20,48,32" Spacing="14" MaxWidth="940" HorizontalAlignment="Stretch">
+
+            <TextBlock Text="联机" FontSize="28" FontWeight="SemiBold" Foreground="{ThemeResource AppTextBrush}" Margin="0,8" />
+
+            <Border Background="{ThemeResource AppCardBrush}" BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource CardCornerRadius}" Padding="22">
+                <StackPanel Spacing="14">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <FontIcon Glyph="&#xE896;" FontSize="22" Foreground="{ThemeResource AppTextBrush}" />
+                        <TextBlock x:Name="TitleText" Text="联机组件" FontSize="18" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <TextBlock x:Name="BodyText" TextWrapping="Wrap" FontSize="{StaticResource FontSizeBody}"
+                               Foreground="{ThemeResource AppText2Brush}" />
+                    <TextBlock x:Name="DetailText" TextWrapping="Wrap" FontSize="{StaticResource FontSizeCaption}"
+                               Foreground="{ThemeResource AppText3Brush}" />
+
+                    <StackPanel x:Name="ProgressPanel" Spacing="8" Visibility="Collapsed">
+                        <ProgressBar x:Name="Bar" Minimum="0" Maximum="100" Height="4" IsIndeterminate="True" />
+                        <TextBlock x:Name="ProgressText" FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button x:Name="PrimaryButton" Style="{StaticResource SetupPrimaryPillStyle}" Click="Primary_Click" Visibility="Collapsed" />
+                        <Button x:Name="SecondaryButton" Style="{StaticResource SetupPillStyle}" Click="Secondary_Click" Visibility="Collapsed" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="联机组件包含联机模块、提权代理和 EasyTier，只在联机时使用；下载内容会校验签名清单里的哈希，不一致会被丢弃。"
+                       TextWrapping="Wrap" FontSize="{StaticResource FontSizeCaption}" Foreground="{ThemeResource AppText3Brush}" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -1,0 +1,46 @@
+<UserControl
+    x:Class="MeowLauncher.WinUI.Controls.WallpaperLayer"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsHitTestVisible="False"
+    Loaded="OnLoaded" Unloaded="OnUnloaded" SizeChanged="OnSizeChanged" ActualThemeChanged="OnThemeChanged">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="WallpaperVeilBrush" Color="#070D0A" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="WallpaperVeilBrush" Color="#F2F5F3" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="WallpaperVeilBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Canvas x:Name="WallCanvas" IsHitTestVisible="False">
+        <Canvas x:Name="SkyGroup" Canvas.ZIndex="0">
+            <Image x:Name="SkyLayer" Stretch="Fill" />
+            <StackPanel x:Name="CloudStrip" Orientation="Horizontal">
+                <Image x:Name="CloudA" Stretch="Fill" />
+                <Image x:Name="CloudB" Stretch="Fill" />
+            </StackPanel>
+        </Canvas>
+        <Image x:Name="SunLayer" Canvas.ZIndex="1" Stretch="Fill" Visibility="Collapsed" />
+        <Canvas x:Name="FarHost" Canvas.ZIndex="2">
+            <Image x:Name="FarLayer" Stretch="Fill" />
+        </Canvas>
+        <Rectangle x:Name="VeilBack" Canvas.ZIndex="3" Fill="{ThemeResource WallpaperVeilBrush}" Opacity="0">
+            <Rectangle.OpacityTransition><ScalarTransition Duration="0:0:0.2" /></Rectangle.OpacityTransition>
+        </Rectangle>
+        <Image x:Name="CatLayer" Canvas.ZIndex="4" Stretch="Fill" Visibility="Collapsed" />
+        <Canvas x:Name="LedgeHost" Canvas.ZIndex="5">
+            <Image x:Name="LedgeLayer" Stretch="Fill" />
+        </Canvas>
+        <Image x:Name="GlowLayer" Canvas.ZIndex="6" Stretch="Fill" Opacity="0" />
+        <Rectangle x:Name="VeilFront" Canvas.ZIndex="7" Fill="{ThemeResource WallpaperVeilBrush}" Opacity="0">
+            <Rectangle.OpacityTransition><ScalarTransition Duration="0:0:0.2" /></Rectangle.OpacityTransition>
+        </Rectangle>
+    </Canvas>
+</UserControl>
