@@ -1,6 +1,6 @@
 # MeowLauncher
 
-Hi！这里是 **MeowLauncher** 启动器源码仓库，我们致力于使用Windows原生的Fluent Design设计语言还原你最喜爱的启动器，让Minecraf像系统原生一样融入Windows。<br>
+Hi！这里是 **MeowLauncher** 启动器源码仓库，我们致力于使用 Windows 原生的 Fluent Design 设计语言还原你最喜爱的启动器，让 Minecraft 像系统原生一样融入 Windows 。<br>
 
 ![首页](assets/readme/home.png)
 
@@ -8,9 +8,9 @@ Hi！这里是 **MeowLauncher** 启动器源码仓库，我们致力于使用Win
 
 ## 从何而来
 
-MeowLauncher本身并非一个企划项目，只是作者与群友在群里戏弄大肥鱼时萌生的一个想法，作者利用其他ai辅助持续迭代半个月后便有了此项目:P
+MeowLauncher 本身并非一个企划项目，只是作者与群友在群里戏弄大肥鱼时萌生的一个想法，作者利用其他ai辅助持续迭代半个月后便有了此项目 :P
 <br>
-*这你扯不扯*
+*这你扯不扯.jpg*
 <br>
 
 ## 功能介绍
