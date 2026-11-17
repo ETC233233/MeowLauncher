@@ -93,7 +93,7 @@ def _mirror_enabled() -> bool:
 # 现在：
 #   - 每个线程对每个主机保持一条 keep-alive 连接，小文件不再反复握手；连接失效（服务器关了空闲连接）自动换新的重试；
 #   - 连接每个 IP 只等 CONNECT_TIMEOUT 秒，上次成功的 IP 排最前面；
-#   - 大文件（≥ SEGMENT_MIN 且服务器支持 Range）分 SEGMENTS 段并发下载；不支持就退回单连接；
+#   - 大文件（≥ SEGMENT_MIN 且服务器支持 Range）用多线程领取小块；不支持就退回单连接；
 #   - 先写 .part 临时文件，下完再改名：失败不会留下半截文件被当成已下载；
 #   - 并发数读设置里的 dlThreads（1~32，默认 16）。
 try:  # 小文件走 requests 的连接池会快一个数量级，没装就退回 urllib
@@ -280,181 +280,85 @@ def _seg_count(total: int) -> int:
     return max(2, min(want, max(2, total // (1024 * 1024))))
 
 
-def _download_segments(url: str, dest: Path, total: int, on_progress=None) -> None:
-    """把文件切成小块，N 个线程各抢一块下——快的线程接着抢下一块。
-
-    原来是「平均切成 N 段、一段一线程」，哪个线程先下完就空转，最后只剩一两条连接
-    收尾（实测 30 MB 的 jar：前 1.2 秒 47 MB/s，最后 0.5 秒掉到 9.6 MB/s）。改成抢块后
-    连接一直满载到最后。
-    """
-    threads = max(2, min(16, _seg_count(total)))
-    chunk = max(256 * 1024, min(2 * 1024 * 1024, total // (threads * 4) or 256 * 1024))
-    blocks = [(a, min(total - 1, a + chunk - 1)) for a in range(0, total, chunk)]
-    url = _final_url(url)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as fh:
-        fh.truncate(total)
-    lock = threading.Lock()
-    done = [0]
-    next_idx = [0]
-    err: list[Exception] = []
-
-    def take() -> tuple[int, int] | None:
-        with lock:
-            if next_idx[0] >= len(blocks):
-                return None
-            a, b = blocks[next_idx[0]]
-            next_idx[0] += 1
-            return a, b
-
-    retries: dict[tuple[int, int], int] = {}
-
-    def worker() -> None:
-        while True:
-            if err:
-                return
-            rng = take()
-            if rng is None:
-                return
-            a, b = rng
-            try:
-                _fetch_range(url, dest, a, b, lambda n: _bump(done, on_progress, total, lock, n))
-            except _NoRange:
-                raise
-            except Exception as e:  # noqa: BLE001
-                # 单块失败或太慢：塞回队列换个连接重抢，别让整轮卡在一条慢流水线上。
-                with lock:
-                    tries = retries.get(rng, 0) + 1
-                    retries[rng] = tries
-                    if tries <= 3:
-                        blocks.append(rng)
-                        return
-                    err.append(e)
-                return
-
-    ths = [threading.Thread(target=worker, daemon=True) for _ in range(threads)]
-    for t in ths:
-        t.start()
-    for t in ths:
-        t.join()
-    if err:
-        raise err[0]
-    if dest.stat().st_size != total or b"" in (b"",):
-        pass
-
-
-def _bump(done, on_progress, total: int, lock, n: int) -> None:
-    if on_progress is None:
-        return
-    with lock:
-        done[0] += n
-        on_progress(min(done[0], total), total)
-
-
-def _fetch_range(url: str, dest: Path, a: int, b: int, on_bytes,
-                 slow_after: float = 5.0, slow_rate: float = 80 * 1024) -> None:
-    """下 [a,b] 这一段。开了 5 秒还不到 80 KB/s 就当这条连接废了，抛错让外层重抢。"""
-    scheme, host, port, path = _split(url)
-    conn = _connect(scheme, host, port, 20)
-    started = time.time()
-    got_total = [0]
+def _fetch_range(url: str, start: int, end: int, total: int) -> tuple[bytes, str]:
+    handle, final = _request(url, extra={"Range": f"bytes={start}-{end}"})
+    reuse = False
     try:
-        conn.request("GET", path, headers={"User-Agent": UA, "Accept": "*/*",
-                                          "Range": f"bytes={a}-{b}"})
-        resp = conn.getresponse()
+        resp = handle.resp
         if resp.status == 200:
             raise _NoRange()
         if resp.status != 206:
             raise RuntimeError(f"HTTP {resp.status}")
-        with open(dest, "r+b") as fh:
-            fh.seek(a)
-            left = b - a + 1
-            while left > 0:
-                chunk = resp.read(min(_CHUNK, left))
-                if not chunk:
-                    raise RuntimeError("分段没下完整")
-                fh.write(chunk)
-                left -= len(chunk)
-                got_total[0] += len(chunk)
-                on_bytes(len(chunk))
-                span = time.time() - started
-                if span > slow_after and got_total[0] / span < slow_rate:
-                    raise RuntimeError("这一段太慢，换条连接重试")
+        expected_range = f"bytes {start}-{end}"
+        content_range = (resp.getheader("Content-Range") or "").strip().lower()
+        if content_range not in (f"{expected_range}/{total}", f"{expected_range}/*"):
+            raise RuntimeError(f"分段响应范围不符：{content_range}")
+        size = end - start + 1
+        data = resp.read(size + 1)
+        if len(data) != size:
+            raise RuntimeError("分段没下完整")
+        reuse = True
+        return data, final
     finally:
-        _drop(conn)
+        handle.done(reuse)
 
 
-def _seg_count(total: int) -> int:
-    """一个文件切几段：按设置里的下载线程走，但每段至少 1 MB，避免小文件切碎。"""
-    try:
-        want = int(_dl_threads())
-    except Exception:
-        want = SEGMENTS
-    want = max(2, min(16, want))
-    return max(2, min(want, max(2, total // (1024 * 1024))))
-
-
-def _download_segments(url: str, tmp: Path, total: int, on_progress=None,
-                       segments: int | None = None) -> None:
-    """把一个大文件切成几段，每段一条独立连接并发下载，各自写到文件的对应位置。"""
-    url = _final_url(url)
-    segments = int(segments or _seg_count(total))
-    seg = (total + segments - 1) // segments
-    ranges = [(i * seg, min(total - 1, (i + 1) * seg - 1)) for i in range(segments) if i * seg < total]
+def _download_segments(url: str, tmp: Path, total: int, on_progress=None) -> None:
+    """线程连续领取 512 KiB 的块，并复用各自的连接。"""
+    block_size = 512 * 1024
+    blocks = iter(range(0, total, block_size))
+    workers = min(_seg_count(total), (total + block_size - 1) // block_size)
     with open(tmp, "wb") as fh:
         fh.truncate(total)
+
     lock = threading.Lock()
-    done = [0]
-    no_range = [False]
+    stopped = threading.Event()
+    done = 0
 
-    def grab(a: int, b: int) -> None:
-        for attempt in range(2):
-            scheme, host, port, path = _split(url)
-            conn = _connect(scheme, host, port, 60)
-            try:
-                conn.request("GET", path, headers={"User-Agent": UA, "Accept": "*/*", "Range": f"bytes={a}-{b}"})
-                resp = conn.getresponse()
-                if resp.status == 200:
-                    no_range[0] = True
-                    raise _NoRange()
-                if resp.status != 206:
-                    raise RuntimeError(f"HTTP {resp.status}")
-                got = 0
-                with open(tmp, "r+b") as fh:
-                    fh.seek(a)
-                    while True:
-                        chunk = resp.read(_CHUNK)
-                        if not chunk:
-                            break
-                        fh.write(chunk)
-                        got += len(chunk)
-                        if on_progress:
-                            with lock:
-                                done[0] += len(chunk)
-                                on_progress(done[0], total)
-                if got != b - a + 1:
-                    raise RuntimeError("分段没下完整")
-                return
-            except _NoRange:
-                raise
-            except Exception:
-                if attempt == 1:
-                    raise
-                if on_progress:                      # 这一段重来：把它已经记的进度扣回去
+    def worker() -> None:
+        nonlocal done
+        source = url
+        try:
+            with open(tmp, "r+b") as fh:
+                while not stopped.is_set():
                     with lock:
-                        done[0] = max(0, done[0] - (locals().get("got") or 0))
-            finally:
+                        start = next(blocks, None)
+                    if start is None:
+                        return
+                    end = min(total, start + block_size) - 1
+                    try:
+                        data, source = _fetch_range(source, start, end, total)
+                    except _NoRange:
+                        raise
+                    except Exception:
+                        if stopped.is_set():
+                            return
+                        # 从原始地址重试，过期的 CDN 跳转地址可以重新解析。
+                        data, source = _fetch_range(url, start, end, total)
+                    fh.seek(start)
+                    fh.write(data)
+                    with lock:
+                        done += len(data)
+                        if on_progress:
+                            on_progress(done, total)
+        except Exception:
+            stopped.set()
+            raise
+        finally:
+            pool = _pool()
+            for conn in pool.values():
                 _drop(conn)
+            pool.clear()
 
-    with ThreadPoolExecutor(max_workers=len(ranges)) as ex:
-        futs = [ex.submit(grab, a, b) for a, b in ranges]
-        for f in futs:
-            f.result()
-    if tmp.stat().st_size != total:
-        raise RuntimeError("分段下载后文件大小不对")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        tasks = [executor.submit(worker) for _ in range(workers)]
+        for task in tasks:
+            task.result()
+    if done != total or tmp.stat().st_size != total:
+        raise RuntimeError(f"分段下载不完整：{done}/{total} 字节")
 
 
-def _fetch_to(url: str, tmp: Path, on_progress=None) -> None:
+def _fetch_to(url: str, tmp: Path, on_progress=None, *, allow_segments: bool = True) -> None:
     """下载到 tmp：先用池里的连接发 GET；文件很大且服务器给了 Content-Length 时改分段并发。"""
     h, final = _request(url, timeout=60)
     resp = h.resp
@@ -464,7 +368,8 @@ def _fetch_to(url: str, tmp: Path, on_progress=None) -> None:
             raise RuntimeError(f"HTTP {resp.status}：{url}")
         total = int(resp.getheader("Content-Length") or 0)
         accept = (resp.getheader("Accept-Ranges") or "").lower()
-        if total >= SEGMENT_MIN and "none" not in accept and resp.getheader("Content-Encoding") is None:
+        if (allow_segments and total >= SEGMENT_MIN and "none" not in accept
+                and resp.getheader("Content-Encoding") is None):
             h.done(False)                               # 这条连接不再用：关掉，分段各自开新连接
             try:
                 _download_segments(final, tmp, total, on_progress)
@@ -930,7 +835,7 @@ def _download_big(urls: list[str], dest: Path, size: int,
             try:
                 _download_segments(u, tmp, int(size), on_progress)
             except _NoRange:
-                _fetch_to(u, tmp, on_progress)
+                _fetch_to(u, tmp, on_progress, allow_segments=False)
             if verify is not None:
                 verify(tmp)
             os.replace(tmp, dest)
@@ -958,26 +863,11 @@ def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | No
     parts = urllib.parse.urlsplit(url)
     proxy = None if urllib.request.proxy_bypass(parts.netloc) else urllib.request.getproxies().get(parts.scheme)
     ver = verify if sha1 or size > 0 else None
-    # 安装器 jar 这类不大不小的文件：强制走分段并发，和普通下载用同一套逻辑。
-    if force_segments and proxy is None and size >= 1024 * 1024:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".part")
-        try:
-            _download_segments(url, tmp, int(size), on_progress)
-            if ver is not None:
-                ver(tmp)
-            os.replace(tmp, dest)
-            return dest
-        except Exception:
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
     if proxy is None:
         alt = mcim.file_mirror(url) or _mirrored(url)
         cands = [url] + ([alt] if alt and alt != url else [])
-        if size >= SEGMENT_MIN:
-            # 大文件：竞速选源 + 4 段并发（原先竞速胜者只开一条连接，比单源分段还慢）。
+        threshold = 1024 * 1024 if force_segments else SEGMENT_MIN
+        if size >= threshold:
             return _download_big(cands, dest, int(size), on_progress, ver)
         if size >= RACE_MIN and len(cands) > 1:
             return _stream_race(cands, dest, on_progress, verify=ver)

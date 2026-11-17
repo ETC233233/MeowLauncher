@@ -17,6 +17,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -34,7 +35,7 @@ def T(name: str, ok: bool, info: str = "") -> None:
 
 BIG = os.urandom(20 * 1024 * 1024)                  # 20 MB，超过分段阈值
 SMALL = [os.urandom(2000 + i) for i in range(40)]
-stats = {"conns": 0, "reqs": 0, "ranges": 0, "mode_norange": False}
+stats = {"conns": 0, "reqs": 0, "ranges": 0, "interrupted": 0}
 lock = threading.Lock()
 
 
@@ -55,7 +56,11 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except ConnectionError:
+            # 分段探测后，客户端可以主动关闭单连接响应。
+            pass
 
     def do_GET(self):
         with lock:
@@ -63,14 +68,27 @@ class Handler(BaseHTTPRequestHandler):
         p = self.path
         if p.startswith("/small/"):
             self._send(200, SMALL[int(p.split("/")[-1])])
-        elif p == "/big":
+        elif p in {"/big", "/big-retry", "/big-broken"}:
             rng = self.headers.get("Range")
             if rng:
                 with lock:
                     stats["ranges"] += 1
                 a, b = rng.split("=")[1].split("-")
                 a, b = int(a), int(b)
-                self._send(206, BIG[a:b + 1], {"Content-Range": f"bytes {a}-{b}/{len(BIG)}", "Accept-Ranges": "bytes"})
+                with lock:
+                    interrupt = a == 0 and (p == "/big-broken" or (p == "/big-retry" and stats["interrupted"] == 0))
+                    if interrupt:
+                        stats["interrupted"] += 1
+                content_range = f"bytes {a}-{b}/{len(BIG)}"
+                if interrupt:
+                    self.send_response(206)
+                    self.send_header("Content-Length", str(b - a + 1))
+                    self.send_header("Content-Range", content_range)
+                    self.end_headers()
+                    self.wfile.write(BIG[a:a + (b - a + 1) // 2])
+                    self.close_connection = True
+                else:
+                    self._send(206, BIG[a:b + 1], {"Content-Range": content_range, "Accept-Ranges": "bytes"})
             else:
                 self._send(200, BIG, {"Accept-Ranges": "bytes"})
         elif p == "/big-norange":
@@ -146,21 +164,49 @@ except Exception:
     raised = True
 T("truncated response raises, no half file left", raised and not dest.exists() and not dest.with_name(dest.name + ".part").exists())
 
-# 7) 大文件分段：内容完全一致，用了 4 个 Range 请求
+# 7) 大文件按块下载，下载线程复用连接。
 stats.update(conns=0, reqs=0, ranges=0)
 seen = []
 dest = tmp / "big.bin"
 t = time.time()
-net._download(f"{base}/big", dest, on_progress=lambda a, b: seen.append((a, b)))
-T("20 MB file by 4 Range segments is byte-identical", dest.read_bytes() == BIG, f"{time.time() - t:.2f}s")
-T("used 4 Range requests", stats["ranges"] == 4, f"ranges={stats['ranges']}")
-T("progress reached 100%", bool(seen) and seen[-1][0] == len(BIG) and seen[-1][1] == len(BIG))
+with patch.object(net, "_dl_threads", return_value=16):
+    net._download(f"{base}/big", dest, on_progress=lambda a, b: seen.append((a, b)), size=len(BIG))
+T("20 MiB by 512 KiB blocks is byte-identical", dest.read_bytes() == BIG, f"{time.time() - t:.2f}s")
+T("40 Range requests reuse up to 16 connections", stats["ranges"] == 40 and 1 <= stats["conns"] <= 16,
+  f"ranges={stats['ranges']} connections={stats['conns']}")
+T("progress reached 100%", bool(seen) and seen[-1] == (len(BIG), len(BIG)))
 T("no .part left after success", not dest.with_name(dest.name + ".part").exists())
 
-# 8) 服务器不认 Range：退回单连接，内容一致
+# 8) 不支持 Range、单块失败重试、失败后回镜像。
 dest = tmp / "big2.bin"
-net._download(f"{base}/big-norange", dest)
+net._download(f"{base}/big-norange", dest, size=len(BIG))
 T("server ignoring Range falls back to single stream, identical", dest.read_bytes() == BIG)
+
+stats.update(interrupted=0)
+seen = []
+dest = tmp / "big-retry.bin"
+net._download(f"{base}/big-retry", dest, on_progress=lambda a, b: seen.append(a), size=len(BIG))
+T("a truncated block retries without double-counting progress",
+  stats["interrupted"] == 1 and dest.read_bytes() == BIG and seen == sorted(seen) and seen[-1] == len(BIG))
+
+stats.update(interrupted=0)
+dest = tmp / "big-fail.bin"
+dest.write_bytes(b"existing file")
+try:
+    net._download(f"{base}/big-broken", dest, size=len(BIG))
+    raised = False
+except RuntimeError:
+    raised = True
+T("persistent block failure reports error and preserves destination",
+  raised and stats["interrupted"] == 2 and dest.read_bytes() == b"existing file"
+  and not dest.with_name(dest.name + ".part").exists())
+
+stats.update(interrupted=0)
+dest = tmp / "big-mirror.bin"
+with patch.object(net, "_mirrored", return_value=f"{base}/big"):
+    net._download(f"{base}/big-broken", dest, size=len(BIG), force_segments=True)
+T("official source retries before the installer falls back to mirror",
+  stats["interrupted"] == 2 and dest.read_bytes() == BIG)
 
 # 9) 线程数设置：读得到、夹在 1~32
 n = net._dl_threads()
