@@ -294,24 +294,27 @@ public sealed partial class TaskIsland : UserControl
         Pill.Visibility = Visibility.Visible;
 
         var idle = primary is null;                       // 没有任务：铃铛 + 未读数
-        var isActive = !idle && state is IslandState.Compact or IslandState.Expanded;
+        var expanded = state == IslandState.Expanded;
+        var showCompactProgress = !idle && state == IslandState.Compact;
         var unread = TaskCenter.Notifications.Count(n => !n.IsRead);
-        Ring.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
-        Ring.IsActive = isActive;
-        StateIcon.Visibility = isActive ? Visibility.Collapsed : Visibility.Visible;
+        Ring.Visibility = showCompactProgress ? Visibility.Visible : Visibility.Collapsed;
+        Ring.IsActive = showCompactProgress;
+        StateIcon.Visibility = expanded || showCompactProgress ? Visibility.Collapsed : Visibility.Visible;
         if (idle)
         {
             StateIcon.Glyph = "\uE7ED";
             StateIcon.Foreground = (Brush)Application.Current.Resources[unread > 0 ? "TintTasksBrush" : "AppText2Brush"];
         }
-        else if (!isActive)
+        else if (!expanded && !showCompactProgress)
         {
             var failed = state == IslandState.Failed;
             StateIcon.Glyph = failed ? "\uE783" : "\uE73E";
             StateIcon.Foreground = (Brush)Application.Current.Resources[failed ? "AppWarnBrush" : "AppAccentBrush"];
         }
 
-        TitleText.Text = idle
+        Grid.SetColumn(TitleText, expanded ? 0 : 1);
+        Grid.SetColumnSpan(TitleText, expanded ? 4 : 1);
+        TitleText.Text = expanded ? "任务与通知" : idle
             ? (unread > 0 ? $"{unread} 条未读" : "任务与通知")
             : state switch
             {
@@ -319,20 +322,17 @@ public sealed partial class TaskIsland : UserControl
                 IslandState.Failed => $"{primary!.Title} · 失败",
                 _ => primary!.Title,
             };
-        var showPercent = isActive && !primary!.IsIndeterminate;
-        // 灵动岛只放「一眼能看完」的东西：有确定进度就给百分比，否则留空只转圈；
-        // 细节文案属于任务页的步骤行，不要再往这里塞。
-        PercentText.Text = idle ? "" : showPercent ? $"{Math.Round(primary!.Progress)}%" : "";
-        PercentText.MaxWidth = showPercent ? 60 : 140;
-        Bar.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
-        Bar.IsIndeterminate = isActive && primary!.IsIndeterminate;
-        if (isActive && !primary!.IsIndeterminate) Bar.Value = primary.Progress;
+        var showPercent = showCompactProgress && !primary!.IsIndeterminate;
+        PercentText.Text = showPercent ? $"{Math.Round(primary!.Progress)}%" : "";
+        PercentText.Visibility = showPercent ? Visibility.Visible : Visibility.Collapsed;
+        Bar.Visibility = showCompactProgress ? Visibility.Visible : Visibility.Collapsed;
+        Bar.IsIndeterminate = showCompactProgress && primary!.IsIndeterminate;
+        if (showPercent) Bar.Value = primary!.Progress;
 
         var more = active.Count - 1;
-        MoreChip.Visibility = more > 0 ? Visibility.Visible : Visibility.Collapsed;
+        MoreChip.Visibility = !expanded && more > 0 ? Visibility.Visible : Visibility.Collapsed;
         MoreText.Text = $"+{more}";
 
-        var expanded = state == IslandState.Expanded;
         if (expanded)
         {
             BuildBody(active);
@@ -343,12 +343,6 @@ public sealed partial class TaskIsland : UserControl
             CollapseIsland();
         }
         CompactRow.Visibility = Visibility.Visible;
-        var iconOnly = false;                   // 搜索栏已经左移，药丸有地方放文字；展开时向右撑开
-        TitleText.Visibility = PercentText.Visibility = iconOnly ? Visibility.Collapsed : Visibility.Visible;
-        if (iconOnly) MoreChip.Visibility = Visibility.Collapsed;
-        CompactRow.ColumnSpacing = iconOnly ? 0 : 9;
-        Pill.MinWidth = iconOnly ? 0 : 160;
-        var tip = idle ? TitleText.Text : string.IsNullOrWhiteSpace(primary!.Detail) ? TitleText.Text : $"{TitleText.Text} · {primary.Detail}";
         // 悬停提示只在构造时设置一次，不在这里动：提示框正开着时去改 / 清掉它会抛 0x8000FFFF（灾难性故障）。
         AutomationProperties.SetName(Pill, TitleText.Text);
 
@@ -417,8 +411,11 @@ public sealed partial class TaskIsland : UserControl
         foreach (var entry in active.Take(3))
         {
             var row = new Grid { ColumnSpacing = 10 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            if (entry.TargetIcon is { } icon)
+                row.Children.Add(new Image { Source = icon, Width = 24, Height = 24, VerticalAlignment = VerticalAlignment.Top });
 
             var text = new StackPanel { Spacing = 3 };
             text.Children.Add(new TextBlock
@@ -428,7 +425,7 @@ public sealed partial class TaskIsland : UserControl
             });
             text.Children.Add(new TextBlock
             {
-                Text = "进行中", FontSize = 11.5,
+                Text = string.IsNullOrWhiteSpace(entry.Detail) ? entry.Status : entry.Detail, FontSize = 11.5,
                 Foreground = (Brush)Application.Current.Resources["AppText3Brush"], TextTrimming = TextTrimming.CharacterEllipsis,
             });
             text.Children.Add(new ProgressBar
@@ -436,6 +433,7 @@ public sealed partial class TaskIsland : UserControl
                 Height = 3, Minimum = 0, Maximum = 100, Value = entry.Progress, IsIndeterminate = entry.IsIndeterminate,
                 Foreground = (Brush)Application.Current.Resources["TintTasksBrush"],
             });
+            Grid.SetColumn(text, 1);
             row.Children.Add(text);
 
             if (TaskCenter.CanCancel(entry))
@@ -448,7 +446,7 @@ public sealed partial class TaskIsland : UserControl
                 ToolTipService.SetToolTip(cancel, "取消");
                 AutomationProperties.SetName(cancel, $"取消 {entry.Title}");
                 cancel.Click += (s, e) => { if (((FrameworkElement)s).Tag is TaskEntry t) TaskCenter.Cancel(t); };
-                Grid.SetColumn(cancel, 1);
+                Grid.SetColumn(cancel, 2);
                 row.Children.Add(cancel);
             }
             _taskHost.Children.Add(row);

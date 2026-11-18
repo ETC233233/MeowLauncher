@@ -12,6 +12,7 @@ public sealed class Snapshot
     public string GameDir { get; set; } = "";
     public VersionInfo? Current { get; set; }
     public List<VersionInfo> Versions { get; set; } = new();
+    public List<string> HiddenVersionIds { get; set; } = new();
     public MemoryInfo? Memory { get; set; }
     public ShotInfo? Shots { get; set; }
     public OnlineInfo? Online { get; set; }

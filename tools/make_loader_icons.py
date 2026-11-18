@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""生成实例的「加载器徽标」：Fabric / Quilt / Forge / NeoForge（原版沿用 Assets/default_icon.png）。
+"""重绘原版实例使用的草方块。
 
-全部是自己画的简化几何图形（圆角方块 + 白色图形），不拷贝各加载器的官方 logo，也不用任何字体，
-避免商标 / 许可问题。输出到 MeowLauncher.WinUI/Assets/Icons/loaders/，128×128 透明底 PNG。
-
-用法（在 mclauncher/ 下）：python tools/make_loader_icons.py
+用法：python tools/make_loader_icons.py
+四种 Mod 加载器的图标来自官方项目，来源见 THIRD-PARTY-NOTICES.md。
 """
 from pathlib import Path
 
@@ -31,48 +29,6 @@ def finish(im, name):
 
 def u(v):
     return int(v * SS)
-
-
-def fabric():
-    # 编织：三条斜向白色条带，像经纬线
-    im, d = canvas((184, 158, 112, 255))
-    for k, off in enumerate((-30, 6, 42)):
-        d.polygon([(u(20 + off), u(110)), (u(46 + off), u(110)), (u(112 + off), u(18)), (u(86 + off), u(18))], fill=W)
-    # 裁掉超出圆角方块的部分
-    mask = Image.new("L", im.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle([0, 0, S * SS - 1, S * SS - 1], radius=26 * SS, fill=255)
-    base = Image.new("RGBA", im.size, (0, 0, 0, 0))
-    base.paste(im, (0, 0), mask)
-    finish(base, "fabric")
-
-
-def quilt():
-    # 拼布：2×2 四块白色方块，间隔均匀，四个色调略不同
-    im, d = canvas((142, 91, 209, 255))
-    tones = [(255, 255, 255, 255), (232, 220, 250, 255), (232, 220, 250, 255), (255, 255, 255, 255)]
-    size, gap, x0, y0 = 36, 8, 26, 26
-    for i in range(4):
-        cx, cy = x0 + (i % 2) * (size + gap), y0 + (i // 2) * (size + gap)
-        d.rounded_rectangle([u(cx), u(cy), u(cx + size), u(cy + size)], radius=u(6), fill=tones[i])
-    finish(im, "quilt")
-
-
-def anvil(d, color):
-    # 铁砧：顶面 + 腰 + 底座
-    d.polygon([(u(22), u(38)), (u(100), u(38)), (u(112), u(52)), (u(78), u(58)), (u(70), u(78)), (u(88), u(96)),
-               (u(88), u(104)), (u(40), u(104)), (u(40), u(96)), (u(58), u(78)), (u(52), u(58)), (u(22), u(52))], fill=color)
-
-
-def forge():
-    im, d = canvas((52, 67, 92, 255))
-    anvil(d, (240, 140, 60, 255))
-    finish(im, "forge")
-
-
-def neoforge():
-    im, d = canvas((232, 129, 47, 255))
-    anvil(d, W)
-    finish(im, "neoforge")
 
 
 def vanilla():
@@ -117,9 +73,5 @@ def vanilla():
 
 
 if __name__ == "__main__":
-    fabric()
-    quilt()
-    forge()
-    neoforge()
     vanilla()
     print("loader icons ->", OUT)

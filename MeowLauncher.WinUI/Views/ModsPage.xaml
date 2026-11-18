@@ -12,7 +12,8 @@
     </Page.Resources>
 
     <!-- 语义色：Mod = 绿（TintRecent）。卡片/胶囊/字号全部走 Themes 令牌。 -->
-    <Grid x:Name="PageRoot" Padding="0,20,0,24" RowSpacing="12">
+    <Grid x:Name="PageRoot" Padding="0,20,0,24" RowSpacing="12" Background="Transparent"
+          AllowDrop="True" DragOver="Mods_DragOver" Drop="Mods_Drop">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -123,6 +124,13 @@
             <ListView x:Name="ModList" SelectionMode="None" IsItemClickEnabled="True" ItemClick="ModList_ItemClick"
                       ScrollViewer.VerticalScrollBarVisibility="Auto"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListView.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <AddDeleteThemeTransition />
+                        <ReorderThemeTransition />
+                        <RepositionThemeTransition IsStaggeringEnabled="False" />
+                    </TransitionCollection>
+                </ListView.ItemContainerTransitions>
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />

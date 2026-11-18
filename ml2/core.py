@@ -353,6 +353,10 @@ class Version:
     def base_version(self) -> str:
         # 加载器版本（Fabric/Quilt）的 id 是 fabric-loader-x-y，依赖 inheritsFrom/clientVersion
         # 才能找到原版客户端 jar；只靠 id 正则会把父版本认成自己。
+        # 整合包的直接父版本可能是另一层加载器，clientVersion 则直接指向游戏 jar。
+        client = str(self.raw.get("clientVersion") or "")
+        if client:
+            return client
         try:
             parent = str(self.raw.get("inheritsFrom") or "")
         except Exception:

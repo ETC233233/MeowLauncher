@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
@@ -9,7 +10,9 @@ namespace MeowLauncher.WinUI.Views;
 
 /// <summary>打开下载子页要带的东西：版本、宿主（关闭用）、开始安装的回调（由列表页负责装，列表页一直活着）。</summary>
 public sealed record DownloadDetailArgs(MojangVersionInfo Version, ISubPageHost Host,
-    Action<string, string, bool, string> StartInstall);
+    Action<string, string, DownloadApiSelection?, string> StartInstall);
+
+public sealed record DownloadApiSelection(string ProjectId, string VersionId);
 
 /// <summary>
 /// 「获取 › 下载版本 › x.y.z」子页：选加载器（整行列表）+ 底部固定「开始下载」。
@@ -32,12 +35,14 @@ public sealed partial class DownloadDetailPage : Page
         {
             Kind = kind;
             Name = name;
+            Icon = InstanceIcon.ForLoader(kind);
             _base = status;
             _enabled = enabled;
         }
 
         public string Kind { get; }
         public string Name { get; }
+        public Microsoft.UI.Xaml.Media.ImageSource Icon { get; }
         public bool Visible { get; set; }
         // 已安装就一定写「已安装」（版本号拿不到时只写这两个字），不再退回「可以添加 · N 个版本」。
         public string Status => _failed
@@ -106,6 +111,19 @@ public sealed partial class DownloadDetailPage : Page
         public override string ToString() => Recommended ? $"{Version}（推荐）" : Version;
     }
 
+    private sealed record ApiChoice(string ProjectId, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
+    private static readonly ApiChoice FabricApi = new("P7dR8mSH", "Fabric API");
+    private static readonly ApiChoice QuiltedApi = new("qvIfYCYJ", "Quilted Fabric API (QFAPI) / Quilt Standard Libraries (QSL)");
+    private static readonly ApiChoice NoApi = new("", "不安装");
+
+    private string _apiLoader = "";
+    private int _apiRequest;
+    private string _appliedLoader = "";
+
     private static readonly Dictionary<string, LoaderSupportResult> _supportCache = new(StringComparer.Ordinal);
 
     private DownloadDetailArgs? _args;
@@ -131,26 +149,23 @@ public sealed partial class DownloadDetailPage : Page
 
         DetailTitle.Text = v.Id;
         DetailMeta.Text = $"{v.TypeText} · {v.DateText}";
-        var (icon, stretch) = DownloadPage.IconFor(v.Id);
-        DetailIconBrush.ImageSource = icon;
-        DetailIconBrush.Stretch = stretch;
-        try
-        {
-            var prefs = AppPreferencesStore.Load();
-            var dirs = GameDirectoryResolver.Resolve(prefs);
-            DetailDir.Text = dirs.Count > 0 ? "安装到 " + dirs[0] : "未设置游戏目录";
-        }
-        catch { DetailDir.Text = "未设置游戏目录"; }
+        _selKind = "vanilla";
+        _appliedLoader = "";
+        ConfigureApi("");
+        _loaderRows.Clear();
+        var dirs = GameDirectoryResolver.Resolve(App.MainWindow?.Preferences ?? AppPreferencesStore.Load());
+        DetailDir.ItemsSource = dirs;
+        DetailDir.SelectedIndex = dirs.Count > 0 ? 0 : -1;
 
         SetLoaderNote("");
-        _loaderRows.Add(new LoaderRow("vanilla", "原版", "不带 Mod 加载器", true) { Visible = true, Installed = v.Installed });
+        _loaderRows.Add(new LoaderRow("vanilla", "原版", "不带 Mod 加载器", true) { Visible = true });
         foreach (var kind in new[] { "fabric", "forge", "neoforge", "quilt" })
             _loaderRows.Add(new LoaderRow(kind, LoaderLabel(kind), "正在查询…", false) { Visible = true });
         RefreshLoaderList();
 
         DetailAncientNote.Visibility = v.Type is "old_beta" or "old_alpha" ? Visibility.Visible : Visibility.Collapsed;
         ApplyLoaderSelection();
-        _ = LoadInstalledKindsAsync(v);
+        _ = RefreshInstalledKindsAsync(v);
         await LoadSupportAsync(v);
     }
 
@@ -166,40 +181,52 @@ public sealed partial class DownloadDetailPage : Page
         _ => "原版",
     };
 
-    /// <summary>同一个 Minecraft 版本下已经装过哪些加载器（来自实例列表），给对应行打「已安装」。</summary>
-    private async Task LoadInstalledKindsAsync(MojangVersionInfo v)
+    private string SelectedInstallDir => DetailDir.SelectedItem as string ?? "";
+
+    private async void DetailDir_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_version is { } version && _loaderRows.Count > 0)
+            await RefreshInstalledKindsAsync(version);
+    }
+
+    private async Task RefreshInstalledKindsAsync(MojangVersionInfo version)
+    {
+        var folder = SelectedInstallDir;
+        foreach (var row in _loaderRows)
+        {
+            row.InstalledNote = "";
+            row.Installed = false;
+        }
+        UpdateSummary();
+        if (folder.Length == 0) return;
+
         try
         {
-            var snap = await App.Backend.GetSnapshotAsync();
-            if (snap is null || _version is null || _version.Id != v.Id) return;
-            // 只认「同一个 MC 版本 + 该加载器」的实例；原版实例（loader 为空）不算任何加载器。
-            var found = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var x in snap.Versions)
+            var snap = await App.Backend.ScanDirAsync(folder);
+            if (snap is null || _version != version || SelectedInstallDir != folder) return;
+            var versions = snap.Versions.Where(v => v.Valid && string.Equals(
+                v.GameVersion, version.Id, StringComparison.OrdinalIgnoreCase)).ToList();
+            foreach (var row in _loaderRows)
             {
-                if (!string.Equals(x.GameVersion, v.Id, StringComparison.OrdinalIgnoreCase)) continue;
-                var kind = KindOfLoader(x.Loader);
-                if (kind.Length > 0 && !found.ContainsKey(kind)) found[kind] = (x.LoaderVersion ?? "").Trim();
-            }
-            foreach (var row in _loaderRows.Skip(1))
-            {
-                var has = found.TryGetValue(row.Kind, out var ver);
-                row.InstalledNote = has ? ver ?? "" : "";
-                row.Installed = has;
+                var installed = row.Kind == "vanilla"
+                    ? versions.FirstOrDefault(v => string.Equals(v.Id, version.Id, StringComparison.OrdinalIgnoreCase)
+                        && string.IsNullOrWhiteSpace(v.Loader))
+                    : versions.FirstOrDefault(v => row.Kind == KindOfLoader(v.Loader));
+                row.InstalledNote = installed?.LoaderVersion?.Trim() ?? "";
+                row.Installed = installed is not null;
             }
         }
         catch
         {
-            // 读不到实例列表就不打标记，不影响安装。
+            // 已安装标记只用于展示，实际安装前会再次检查目标文件夹。
         }
     }
 
-    /// <summary>实例的加载器字符串 → fabric / forge / neoforge / quilt；认不出（含原版、modded）返回空。neoforge 要先判，它包含 "forge"。</summary>
     private static string KindOfLoader(string? raw)
     {
-        var t = (raw ?? "").Trim().ToLowerInvariant();
-        foreach (var k in new[] { "neoforge", "fabric", "quilt", "forge" })
-            if (t.Contains(k)) return k;
+        var loader = raw ?? "";
+        foreach (var kind in new[] { "neoforge", "fabric", "quilt", "forge" })
+            if (loader.Contains(kind, StringComparison.OrdinalIgnoreCase)) return kind;
         return "";
     }
 
@@ -375,12 +402,17 @@ public sealed partial class DownloadDetailPage : Page
         RefreshLoaderNote();
 
         var kind = _selKind;
+        var changed = kind != _appliedLoader;
+        var previousVersion = changed ? null : (DetailLoaderVersion.SelectedItem as LoaderChoice)?.Version;
+        _appliedLoader = kind;
+        DetailIconBrush.ImageSource = _loaderRows.FirstOrDefault(row => row.Kind == kind)?.Icon;
+        if (changed && IsLoaded) Motion.Enter(DetailIcon, fromY: 4, durationMs: 155);
         DetailLoaderVersion.ItemsSource = null;
 
         if (kind == "vanilla")
         {
             DetailLoaderVersionCard.Visibility = Visibility.Collapsed;
-            DetailPrereqRow.Visibility = Visibility.Collapsed;
+            ConfigureApi("");
             UpdateSummary();
             return;
         }
@@ -393,7 +425,7 @@ public sealed partial class DownloadDetailPage : Page
         {
             DetailLoaderVersionCard.Visibility = Visibility.Collapsed;
             DetailLoaderVersion.IsEnabled = false;
-            DetailPrereqRow.Visibility = Visibility.Collapsed;
+            ConfigureApi("");
             if (info is not null && !info.Ok)
                 SetLoaderNote($"{LoaderLabel(kind)} 的版本清单没有读到（{ShortReason(info.Message)}）。", retry: true);
             UpdateSummary();
@@ -403,38 +435,82 @@ public sealed partial class DownloadDetailPage : Page
         var choices = info.Versions
             .Select(v => new LoaderChoice(v, v == info.Recommended))
             .ToList();
+        var showingOptions = changed || DetailLoaderVersionCard.Visibility != Visibility.Visible;
         DetailLoaderVersionCard.Visibility = Visibility.Visible;
         DetailLoaderVersion.ItemsSource = choices;
         // 默认：后端判定的稳定版；没有稳定版标记就取最新，不乱贴「推荐」。
-        var defaultIndex = Math.Max(0, choices.FindIndex(c => c.Recommended));
-        DetailLoaderVersion.SelectedIndex = defaultIndex;
+        var previousIndex = choices.FindIndex(choice => choice.Version == previousVersion);
+        DetailLoaderVersion.SelectedIndex = previousIndex >= 0 ? previousIndex : Math.Max(0, choices.FindIndex(c => c.Recommended));
         DetailLoaderVersion.IsEnabled = true;
 
-        // 前置（Fabric API）默认带上，但允许用户自己挑版本、或者干脆不装。
-        var needPrereq = kind is "fabric" or "quilt";
-        DetailPrereqRow.Visibility = needPrereq ? Visibility.Visible : Visibility.Collapsed;
-        DetailPrereq.Content = kind == "quilt" ? "一起安装前置（Quilted Fabric API）" : "一起安装前置（Fabric API）";
-        _ = LoadPrereqVersionsAsync(needPrereq);
+        ConfigureApi(kind is "fabric" or "quilt" ? kind : "");
+        if (showingOptions && IsLoaded) Motion.Enter(DetailLoaderVersionCard, fromY: 6, durationMs: 175);
         UpdateSummary();
     }
 
-    /// <summary>按当前游戏版本拉 Fabric API 的可用版本，填进前置那一行的下拉。</summary>
-    private async Task LoadPrereqVersionsAsync(bool needed)
+    private string SelectedApiProject => DetailPrereqRow.Visibility == Visibility.Visible
+        ? (DetailPrereq.SelectedItem as ApiChoice)?.ProjectId ?? ""
+        : "";
+
+    private void ConfigureApi(string loader)
     {
+        if (_apiLoader == loader) return;
+        _apiLoader = loader;
+        _apiRequest++;
+        DetailPrereqRow.Visibility = loader.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DetailPrereqVersion.ItemsSource = null;
+        DetailPrereq.ItemsSource = loader switch
+        {
+            "fabric" => new[] { FabricApi, NoApi },
+            "quilt" => new[] { QuiltedApi, FabricApi, NoApi },
+            _ => null,
+        };
+        if (loader.Length > 0) DetailPrereq.SelectedIndex = 0;
+    }
+
+    private async void DetailPrereq_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        await LoadApiVersionsAsync();
+
+    private async void DetailPrereqRetry_Click(object sender, RoutedEventArgs e) =>
+        await LoadApiVersionsAsync();
+
+    private void DetailPrereqVersion_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateSummary();
+
+    private async Task LoadApiVersionsAsync()
+    {
+        var request = ++_apiRequest;
+        var project = SelectedApiProject;
         DetailPrereqVersion.ItemsSource = null;
         DetailPrereqVersion.IsEnabled = false;
-        DetailPrereqVersion.PlaceholderText = "前置版本";
-        if (!needed || _version is null) return;
+        DetailPrereqRetry.Visibility = Visibility.Collapsed;
+        DetailPrereqVersions.Visibility = project.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (project.Length == 0 || _version is null)
+        {
+            UpdateSummary();
+            return;
+        }
 
-        var mc = _version.Id;
-        var list = await App.Backend.GetFabricApiVersionsAsync(mc);
-        // 等待期间可能又切到别的加载器了，回来先确认还需要它。
-        if (DetailPrereqRow.Visibility != Visibility.Visible || _selKind is not ("fabric" or "quilt")) return;
-
-        DetailPrereqVersion.ItemsSource = list;
-        DetailPrereqVersion.IsEnabled = list.Count > 0;
-        if (list.Count > 0) DetailPrereqVersion.SelectedIndex = 0;
-        else DetailPrereqVersion.PlaceholderText = "没有找到适配版本";
+        DetailPrereqVersion.PlaceholderText = "正在查询版本…";
+        UpdateSummary();
+        var versions = await App.Backend.GetApiVersionsAsync(_version.Id, project);
+        if (request != _apiRequest) return;
+        if (versions is null)
+        {
+            DetailPrereqVersion.PlaceholderText = "版本查询失败";
+            DetailPrereqRetry.Visibility = Visibility.Visible;
+        }
+        else if (versions.Count == 0)
+        {
+            DetailPrereqVersion.PlaceholderText = "没有适配版本";
+        }
+        else
+        {
+            DetailPrereqVersion.ItemsSource = versions;
+            DetailPrereqVersion.SelectedIndex = 0;
+            DetailPrereqVersion.IsEnabled = true;
+        }
+        UpdateSummary();
     }
 
     private static string ShortReason(string message)
@@ -447,6 +523,12 @@ public sealed partial class DownloadDetailPage : Page
     private void UpdateSummary()
     {
         if (_version is null) return;
+        if (SelectedInstallDir.Length == 0)
+        {
+            DetailSummary.Text = "请先在实例管理中添加游戏目录。";
+            DetailInstall.IsEnabled = false;
+            return;
+        }
         var kind = _selKind;
         if (kind == "vanilla")
         {
@@ -459,7 +541,7 @@ public sealed partial class DownloadDetailPage : Page
         {
             DetailSummary.Text = $"将安装 {_version.Id} + {LoaderLabel(kind)} {choice.Version}";
             row?.SetExtra($"将添加 {choice.Version}");
-            DetailInstall.IsEnabled = true;
+            DetailInstall.IsEnabled = SelectedApiProject.Length == 0 || DetailPrereqVersion.SelectedItem is ApiRelease;
         }
         else
         {
@@ -472,6 +554,8 @@ public sealed partial class DownloadDetailPage : Page
     private async void DetailInstall_Click(object sender, RoutedEventArgs e)
     {
         if (_args is null || _version is null) return;
+        var folder = SelectedInstallDir;
+        if (folder.Length == 0) return;
         var kind = _selKind;
         var loaderVersion = (DetailLoaderVersion.SelectedItem as LoaderChoice)?.Version ?? "";
         if (kind != "vanilla" && loaderVersion.Length == 0) return;
@@ -497,10 +581,15 @@ public sealed partial class DownloadDetailPage : Page
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         }
-        var withPrereq = DetailPrereqRow.Visibility == Visibility.Visible && DetailPrereq.IsChecked == true;
-        var prereqVersion = withPrereq ? DetailPrereqVersion.SelectedItem as string ?? "" : "";
+        DownloadApiSelection? api = null;
+        var project = SelectedApiProject;
+        if (project.Length > 0)
+        {
+            if (DetailPrereqVersion.SelectedItem is not ApiRelease release) return;
+            api = new DownloadApiSelection(project, release.Id);
+        }
         // 安装交给列表页（它一直活着，进度走任务中心），子页关掉回到列表。
-        _args.StartInstall(kind, loaderVersion, withPrereq, prereqVersion);
+        _args.StartInstall(kind, loaderVersion, api, folder);
         _args.Host.CloseSubPage();
     }
 }

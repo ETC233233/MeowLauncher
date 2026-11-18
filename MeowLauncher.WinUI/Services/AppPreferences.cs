@@ -10,8 +10,35 @@ public sealed class AppPreferences
     /// <summary>主题模式：System（跟随系统）/ Dark / Light；旧配置没有该字段时默认跟随系统。</summary>
     public string ThemeMode { get; set; } = "System";
 
-    /// <summary>Acrylic / Mica / Solid / Wallpaper（跟随系统壁纸）/ PixelWallpaper（像素壁纸）/ Image</summary>
+    /// <summary>Acrylic / AcrylicThin / Mica / Solid / Wallpaper（跟随系统壁纸）/ PixelWallpaper（像素壁纸）/ Image</summary>
     public string BackgroundMode { get; set; } = "Acrylic";
+
+    public string WindowMaterial { get; set; } = "";
+    public string BackgroundTheme { get; set; } = "";
+    public double WallpaperBlur { get; set; } = 20;
+    public double WallpaperShade { get; set; } = 0.35;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string EffectiveWindowMaterial => !string.IsNullOrWhiteSpace(WindowMaterial) ? WindowMaterial
+        : BackgroundMode is "Mica" or "Solid" or "AcrylicThin" ? BackgroundMode
+        : BackgroundMode is "Wallpaper" or "PixelWallpaper" or "Image" ? "Solid" : "Acrylic";
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string EffectiveBackgroundTheme => !string.IsNullOrWhiteSpace(BackgroundTheme) ? BackgroundTheme
+        : BackgroundMode is "Wallpaper" or "PixelWallpaper" or "Image" ? BackgroundMode : "None";
+
+    public bool NormalizeAppearanceSelection()
+    {
+        var material = EffectiveWindowMaterial;
+        var background = EffectiveBackgroundTheme;
+        if (material != "Solid" && background != "None") background = "None";
+        var legacy = background == "None" ? material : background;
+        var changed = WindowMaterial != material || BackgroundTheme != background || BackgroundMode != legacy;
+        WindowMaterial = material;
+        BackgroundTheme = background;
+        BackgroundMode = legacy;
+        return changed;
+    }
 
     /// <summary>自定义背景图的绝对路径；仅 BackgroundMode=Image 时使用。</summary>
     public string BackgroundImage { get; set; } = "";
@@ -19,7 +46,7 @@ public sealed class AppPreferences
     /// <summary>自定义背景缩放方式：UniformToFill / Uniform。</summary>
     public string BackgroundStretch { get; set; } = "UniformToFill";
 
-    /// <summary>亚克力 / 图片 / 壁纸上的暗色遮罩强度（契约 1：≤ 0.12）。</summary>
+    /// <summary>旧版全局遮罩，仅保留配置兼容；现由图片背景的 WallpaperShade 取代。</summary>
     public double VeilOpacity { get; set; } = 0.05;
 
     /// <summary>窗口内容不透明度 0.5 - 1.0，对应旧版“窗口透明度”。</summary>
@@ -141,6 +168,17 @@ public sealed class AppPreferences
     /// <summary>已知游戏目录列表，第一个是主目录；空 = 首次使用时用后端报告的目录补齐。</summary>
     public List<string> McDirs { get; set; } = new();
 
+    /// <summary>新手引导是否已完成：全新安装为 false，引导走完写 true，之后启动不再显示。</summary>
+    public bool Onboarded { get; set; }
+
+    /// <summary>引导里选的账号类型（microsoft / offline / skip），只用于引导汇总与后续提示。</summary>
+    public string OnboardAccountKind { get; set; } = "";
+
+    /// <summary>引导里选的自动更新三开关：检查 / 下载 / 安装。</summary>
+    public bool AutoDownloadUpdate { get; set; } = true;
+
+    public bool AutoInstallUpdate { get; set; }
+
     /// <summary>实例自定义顺序：目录 → 实例 id 列表（只记用户拖过/上下移过的目录）。</summary>
     public Dictionary<string, List<string>> VersionOrder { get; set; } = new();
 }
@@ -157,14 +195,21 @@ public static class AppPreferencesStore
         try
         {
             if (!File.Exists(FilePath)) return new AppPreferences();
-            return JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(FilePath)) ?? new AppPreferences();
+            var preferences = JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(FilePath)) ?? new AppPreferences();
+            if (preferences.NormalizeAppearanceSelection()) Save(preferences);
+            return preferences;
         }
         catch
         {
             try
             {
                 var bak = FilePath + ".bak";
-                if (File.Exists(bak)) return JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(bak)) ?? new AppPreferences();
+                if (File.Exists(bak))
+                {
+                    var preferences = JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(bak)) ?? new AppPreferences();
+                    if (preferences.NormalizeAppearanceSelection()) Save(preferences);
+                    return preferences;
+                }
             }
             catch { }
             return new AppPreferences();
@@ -175,6 +220,7 @@ public static class AppPreferencesStore
     {
         try
         {
+            preferences.NormalizeAppearanceSelection();
             Directory.CreateDirectory(FolderPath);
             var json = JsonSerializer.Serialize(preferences, new JsonSerializerOptions { WriteIndented = true });
             var tmp = FilePath + ".tmp";

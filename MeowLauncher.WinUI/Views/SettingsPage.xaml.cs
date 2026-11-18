@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using MeowLauncher.WinUI.Models;
+using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -44,13 +45,16 @@ public sealed partial class SettingsPage : Page
     {
         App.Trace("Settings ctor: before InitializeComponent");
         InitializeComponent();
+        NavigationCacheMode = NavigationCacheMode.Required;
         App.Trace("Settings ctor: after InitializeComponent");
         Loaded += OnLoaded;
         Unloaded += (_, _) =>
         {
             _alive = false;
+            CancelSectionEntrance();
             UpdateService.Changed -= OnUpdateChanged;
             OnlineComponent.UpdateAvailable -= OnUpdateChanged;
+            _wallpaperEffectsTimer?.Stop();
             FlushPending();
         };
         ExtraPanel.Changed += ExtraPanel_Changed;
@@ -111,7 +115,6 @@ public sealed partial class SettingsPage : Page
     private void FillAboutInfo()
     {
         var cur = BuildInfo.Current;
-        AboutVersionText.Text = cur.Display;
         AboutRuntimeText.Text = $"运行环境 .NET {Environment.Version.Major}";
         AboutSummaryText.Text = $"Minecraft 启动器 · {cur.ChannelName}";
         // 正式版多一行「功能版本」（它晋升前的开发构建号）；开发版 / 测试版常驻提示
@@ -124,7 +127,15 @@ public sealed partial class SettingsPage : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _alive = true;
-        if (_loaded) return;
+        UpdateService.Changed += OnUpdateChanged;
+        OnlineComponent.UpdateAvailable += OnUpdateChanged;
+        if (_loaded)
+        {
+            RefreshPreferences();
+            ShowSection(_section);
+            _ = LoadAllAsync();
+            return;
+        }
         _loaded = true;
         App.Trace("Settings OnLoaded: start");
         FillAboutInfo();
@@ -142,9 +153,16 @@ public sealed partial class SettingsPage : Page
         ShowSection(_section);
         App.Trace("Settings OnLoaded: ShowSection ok");
         _ = LoadAllAsync();
-        UpdateService.Changed += OnUpdateChanged;
-        OnlineComponent.UpdateAvailable += OnUpdateChanged;
         App.Trace("Settings OnLoaded: end");
+    }
+
+    public void RefreshPreferences()
+    {
+        if (!_alive) return;
+        SyncAppearance();
+        SyncNotifyAndUpdate();
+        SyncHomeStartScreen();
+        UpdateValueTexts();
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -164,7 +182,7 @@ public sealed partial class SettingsPage : Page
             "theme" => ThemeBox,
             "themecolor" => ThemeColorBox,
             "background" => BackgroundBox,
-            "veil" => VeilSlider,
+            "veil" => BackgroundThemeBox,
             "opacity" => OpacitySlider,
             "fontscale" => FontScaleSlider,
             "network" => DownloadSourceBox,
@@ -195,7 +213,7 @@ public sealed partial class SettingsPage : Page
             "network" or "proxy" or "mirror" or "threads" => "network",
             "notifydone" or "taskisland" => "notify",
             "updatechannel" or "checkupdate" => "update",
-            "hidden" => "advanced",
+            "hidden" => "launch",
             "about" => "about",
             _ => "",
         };
@@ -218,7 +236,7 @@ public sealed partial class SettingsPage : Page
     // ------------------------------------------------------------------ //
     // 一级分类导航（顶部 5 个标签）
     // ------------------------------------------------------------------ //
-    private static readonly string[] SectionNames = ["launch", "appearance", "java", "network", "notify", "update", "advanced", "dev", "about"];
+    private static readonly string[] SectionNames = ["launch", "appearance", "java", "network", "about", "dev"];
 
     // 「开发者测试」分类：通过开发者认证后才出现（第一版发布不带联机，默认隐藏）
     private bool _devUnlocked;
@@ -235,12 +253,22 @@ public sealed partial class SettingsPage : Page
     {
         if (sender is not Button { Tag: string key }) return;
         ShowSection(key);
+        SettingsScroll.ChangeView(null, 0, null, disableAnimation: true);
     }
 
     private void ShowSection(string key)
     {
+        key = key switch
+        {
+            "notify" => "launch",
+            "update" or "advanced" => "about",
+            _ => key,
+        };
         if (!SectionNames.Contains(key)) return;
         if (key == "dev" && !_devUnlocked) return;   // 没认证：这个分类不存在
+        CancelSectionEntrance();
+        if (CardFor(_section) is { } outgoing) Motion.AttachLayout(outgoing, false);
+        foreach (var panel in SectionMotionPanels(_section)) Motion.AttachVisibility(panel, false);
         _section = key;
         if (key == "network") ResourceMirrorBox.SelectedIndex = McimClient.PreferOfficial ? 1 : 0;
         foreach (var name in SectionNames)
@@ -248,12 +276,19 @@ public sealed partial class SettingsPage : Page
             if (CardFor(name) is { } card)
                 card.Visibility = name == key ? Visibility.Visible : Visibility.Collapsed;
         }
-        // 「已隐藏版本」是独立卡，但归属常规分区，跟启动卡一起出现。
-        HiddenVersionsCard.Visibility = key == "launch" ? Visibility.Visible : Visibility.Collapsed;
+        var isGeneral = key == "launch";
+        HiddenVersionsCard.Visibility = NotifyCard.Visibility = isGeneral ? Visibility.Visible : Visibility.Collapsed;
         UpdateNavSelected();
         if (CardFor(key) is { } shown) FadeIn(shown);
-        if (key == "launch") FadeIn(HiddenVersionsCard);
     }
+
+    private FrameworkElement[] SectionMotionPanels(string key) => key switch
+    {
+        "appearance" => new FrameworkElement[] { AcrylicKindRow, WallpaperEffectsPanel, BackgroundImageRow, CustomSizeRow },
+        "network" => new FrameworkElement[] { GithubAccelHostRow, ProxyCustomRow, ProxyAuthRow },
+        "dev" => new FrameworkElement[] { DevFeaturesPanel },
+        _ => Array.Empty<FrameworkElement>(),
+    };
 
     private FrameworkElement? CardFor(string key) => key switch
     {
@@ -261,9 +296,6 @@ public sealed partial class SettingsPage : Page
         "appearance" => AppearanceCard,
         "java" => JavaCard,
         "network" => NetworkCard,
-        "notify" => NotifyCard,
-        "update" => UpdateCard,
-        "advanced" => AdvancedCard,
         "dev" => DevCard,
         "about" => AboutCard,
         _ => null,
@@ -275,9 +307,6 @@ public sealed partial class SettingsPage : Page
         "appearance" => NavAppearance,
         "java" => NavJava,
         "network" => NavNetwork,
-        "notify" => NavNotify,
-        "update" => NavUpdate,
-        "advanced" => NavAdvanced,
         "dev" => NavDev,
         "about" => NavAbout,
         _ => null,
@@ -301,20 +330,69 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    /// <summary>分类切换 83ms 淡入（对标 RESEARCH-EXTERNAL 的过渡要求；Storyboard 不触发 guard A3）。</summary>
+    private Storyboard? _sectionEntranceAnimation;
+    private EventHandler<object>? _sectionRender;
+    private FrameworkElement? _enteringSection;
+    private int _sectionEntranceVersion;
+
+    private void CancelSectionEntrance()
+    {
+        _sectionEntranceVersion++;
+        _sectionEntranceAnimation?.Stop();
+        _sectionEntranceAnimation = null;
+        if (_sectionRender is not null)
+        {
+            CompositionTarget.Rendering -= _sectionRender;
+            _sectionRender = null;
+        }
+        if (_enteringSection is { } previous)
+        {
+            previous.Opacity = 1;
+            if (previous.RenderTransform is TranslateTransform shift) shift.Y = 0;
+        }
+        _enteringSection = null;
+    }
+
+    /// <summary>等布局与首帧完成后才启动，避免冷初始化耗尽动画时钟。</summary>
     private void FadeIn(FrameworkElement element)
     {
-        var storyboard = new Storyboard();
-        var animation = new DoubleAnimation
+        CancelSectionEntrance();
+        if (!Motion.Enabled) { element.Opacity = 1; return; }
+        var version = _sectionEntranceVersion;
+        var elapsed = Stopwatch.StartNew();
+        var frames = 0;
+        _enteringSection = element;
+        element.Opacity = 0;
+        _sectionRender = (_, _) =>
         {
-            From = 0,
-            To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(83)),
+            if (++frames < 2) return;
+            CompositionTarget.Rendering -= _sectionRender;
+            _sectionRender = null;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (!_alive || version != _sectionEntranceVersion || element.Visibility != Visibility.Visible) return;
+                // Initial layout has settled. Only now enable movement of
+                // neighbours; otherwise first-load positions animate from zero.
+                Motion.AttachLayout(element);
+                foreach (var panel in SectionMotionPanels(_section)) Motion.AttachVisibility(panel);
+                if (Motion.Enabled) Motion.Enter(element, fromY: 8, durationMs: 167, onCreated: animation =>
+                {
+                    _sectionEntranceAnimation = animation;
+                    animation.Completed += (_, _) =>
+                    {
+                        if (version != _sectionEntranceVersion) return;
+                        animation.Stop();
+                        element.Opacity = 1;
+                        if (element.RenderTransform is TranslateTransform shift) shift.Y = 0;
+                        _sectionEntranceAnimation = null;
+                        _enteringSection = null;
+                    };
+                });
+                else { element.Opacity = 1; _enteringSection = null; }
+                App.Trace($"Settings entrance: after layout/render {elapsed.ElapsedMilliseconds}ms, section={_section}");
+            });
         };
-        Storyboard.SetTarget(animation, element);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-        storyboard.Children.Add(animation);
-        storyboard.Begin();
+        CompositionTarget.Rendering += _sectionRender;
     }
 
     // ------------------------------------------------------------------ //
@@ -361,14 +439,15 @@ public sealed partial class SettingsPage : Page
         ToolTipService.SetToolTip(ThemeBox, main.SystemThemeSupported
             ? "跟随系统时会随 Windows 的深浅色模式切换"
             : "当前 Windows 版本没有深浅色应用模式，主题固定跟随系统。");
-        BackgroundBox.SelectedIndex = BackgroundIndex(prefs.BackgroundMode);
-        App.Trace("Sync#3");
-        BackgroundImageRow.Visibility = BackgroundIndex(prefs.BackgroundMode) == 3
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        BackgroundBox.SelectedIndex = BackgroundIndex(prefs.EffectiveWindowMaterial);
+        AcrylicKindBox.SelectedIndex = string.Equals(prefs.EffectiveWindowMaterial, "AcrylicThin", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        BackgroundThemeBox.SelectedIndex = BackgroundThemeIndex(prefs.EffectiveBackgroundTheme);
+        WallpaperBlurSlider.Value = Math.Clamp(prefs.WallpaperBlur, 0, 40);
+        WallpaperShadeSlider.Value = Math.Clamp(prefs.WallpaperShade, 0, 0.8);
+        UpdateWallpaperEffectLabels();
+        SyncBackgroundControls();
         BackgroundImageValue.Text = ImageLabel(prefs.BackgroundImage);
         App.Trace("Sync#4");
-        VeilSlider.Value = Math.Clamp(prefs.VeilOpacity, 0, 0.12);
         App.Trace("Sync#5");
         OpacitySlider.Value = Math.Clamp(prefs.UiOpacity, 0.5, 1);
         App.Trace("Sync#6");
@@ -403,12 +482,57 @@ public sealed partial class SettingsPage : Page
 
     private static int BackgroundIndex(string mode) => mode switch
     {
-        var m when string.Equals(m, "Mica", StringComparison.OrdinalIgnoreCase) => 1,
-        var m when string.Equals(m, "Wallpaper", StringComparison.OrdinalIgnoreCase) => 2,
-        var m when string.Equals(m, "Image", StringComparison.OrdinalIgnoreCase) => 3,
-        var m when string.Equals(m, "PixelWallpaper", StringComparison.OrdinalIgnoreCase) => 4,
+        "Mica" => 1,
+        "Solid" => 2,
         _ => 0,
     };
+
+    private static int BackgroundThemeIndex(string theme) => theme switch
+    {
+        "PixelWallpaper" => 1,
+        "Wallpaper" => 2,
+        "Image" => 3,
+        _ => 0,
+    };
+
+    private void SyncBackgroundControls()
+    {
+        var background = SelectedTag(BackgroundThemeBox);
+        var useMaterial = background == "None";
+        BackgroundBox.IsEnabled = useMaterial;
+        BackgroundThemeBox.IsEnabled = SelectedTag(BackgroundBox) == "Solid";
+        AcrylicKindRow.Visibility = useMaterial && SelectedTag(BackgroundBox) == "Acrylic" ? Visibility.Visible : Visibility.Collapsed;
+        BackgroundImageRow.Visibility = background == "Image" ? Visibility.Visible : Visibility.Collapsed;
+        WallpaperEffectsPanel.Visibility = background is "Wallpaper" or "Image" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private DispatcherTimer? _wallpaperEffectsTimer;
+
+    private void UpdateWallpaperEffectLabels()
+    {
+        WallpaperBlurValue.Text = $"{WallpaperBlurSlider.Value:0}";
+        WallpaperShadeValue.Text = $"{WallpaperShadeSlider.Value:P0}";
+    }
+
+    private void WallpaperEffects_Changed(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppress || !_ready || App.MainWindow is not { } main) return;
+        UpdateWallpaperEffectLabels();
+        main.Preferences.WallpaperBlur = Math.Round(WallpaperBlurSlider.Value);
+        main.Preferences.WallpaperShade = Math.Round(WallpaperShadeSlider.Value, 2);
+        _wallpaperEffectsTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _wallpaperEffectsTimer.Tick -= ApplyWallpaperEffects;
+        _wallpaperEffectsTimer.Tick += ApplyWallpaperEffects;
+        _wallpaperEffectsTimer.Stop();
+        _wallpaperEffectsTimer.Start();
+        ArmAppearanceSave();
+    }
+
+    private void ApplyWallpaperEffects(object? sender, object e)
+    {
+        _wallpaperEffectsTimer?.Stop();
+        App.MainWindow?.RefreshAppearance(false);
+    }
 
     private static string ImageLabel(string path) =>
         string.IsNullOrWhiteSpace(path) ? "未选择" : System.IO.Path.GetFileName(path);
@@ -617,7 +741,6 @@ public sealed partial class SettingsPage : Page
 
     private void UpdateAppearanceTexts()
     {
-        VeilValueText.Text = $"{VeilSlider.Value * 100:0}%";
         OpacityValueText.Text = $"{OpacitySlider.Value * 100:0}%";
         FontScaleValueText.Text = $"{FontScaleSlider.Value * 100:0}%";
     }
@@ -716,8 +839,9 @@ public sealed partial class SettingsPage : Page
     {
         if (_suppress || !_ready) return;
         var mode = SelectedTag(BackgroundBox);
-        BackgroundImageRow.Visibility = mode == "Image" ? Visibility.Visible : Visibility.Collapsed;
-        App.MainWindow?.SetBackgroundMode(mode, null, persist: true);
+        if (mode == "Acrylic" && SelectedTag(AcrylicKindBox) == "thin") mode = "AcrylicThin";
+        SyncBackgroundControls();
+        App.MainWindow?.SetAppearanceSelection(mode, SelectedTag(BackgroundThemeBox), null, persist: true);
         MarkSaved();
     }
 
@@ -732,22 +856,15 @@ public sealed partial class SettingsPage : Page
         var file = await picker.PickSingleFileAsync();
         if (file is null) return;
 
-        main.SetBackgroundMode("Image", file.Path, persist: true);
+        main.SetAppearanceSelection(null, "Image", file.Path, persist: true);
         _suppress = true;
-        BackgroundBox.SelectedIndex = 3;
+        BackgroundThemeBox.SelectedIndex = 3;
         _suppress = false;
         BackgroundImageRow.Visibility = Visibility.Visible;
         BackgroundImageValue.Text = file.Name;
         MarkSaved();
     }
 
-    private void Veil_Changed(object sender, RangeBaseValueChangedEventArgs e)
-    {
-        if (_suppress || !_ready) return;
-        VeilValueText.Text = $"{VeilSlider.Value * 100:0}%";
-        App.MainWindow?.SetVeilOpacity(VeilSlider.Value, persist: false);
-        ArmAppearanceSave();
-    }
 
     private void Opacity_Changed(object sender, RangeBaseValueChangedEventArgs e)
     {
@@ -773,7 +890,7 @@ public sealed partial class SettingsPage : Page
         var dialog = new ContentDialog
         {
             Title = "恢复默认外观",
-            Content = "主题、窗口材质、遮罩、界面不透明度与字体缩放都会回到默认值。",
+            Content = "主题、窗口材质、背景主题、图片模糊与遮罩、界面不透明度和字体缩放都会回到默认值。",
             PrimaryButtonText = "恢复默认",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close,
@@ -785,15 +902,23 @@ public sealed partial class SettingsPage : Page
         _suppress = true;
         ThemeBox.SelectedIndex = 0;
         BackgroundBox.SelectedIndex = 0;
-        VeilSlider.Value = defaults.VeilOpacity;
+        BackgroundThemeBox.SelectedIndex = 0;
+        AcrylicKindBox.SelectedIndex = 0;
+        BackgroundBox.IsEnabled = true;
+        AcrylicKindRow.Visibility = Visibility.Visible;
+        WallpaperEffectsPanel.Visibility = Visibility.Collapsed;
+        WallpaperBlurSlider.Value = defaults.WallpaperBlur;
+        WallpaperShadeSlider.Value = defaults.WallpaperShade;
+        main.Preferences.WallpaperBlur = defaults.WallpaperBlur;
+        main.Preferences.WallpaperShade = defaults.WallpaperShade;
+        UpdateWallpaperEffectLabels();
         OpacitySlider.Value = defaults.UiOpacity;
         FontScaleSlider.Value = defaults.FontScale;
         ThemeColorBox.SelectedIndex = 0;
         _suppress = false;
 
         main.SetThemeMode(defaults.ThemeMode, persist: false);
-        main.SetBackgroundMode("Acrylic", "", persist: false);
-        main.SetVeilOpacity(defaults.VeilOpacity, persist: false);
+        main.SetAppearanceSelection("Acrylic", "None", "", persist: false);
         main.SetUiOpacity(defaults.UiOpacity, persist: false);
         main.SetFontScale(defaults.FontScale, persist: false);
         main.Preferences.ThemeColorMode = defaults.ThemeColorMode;
@@ -1120,8 +1245,8 @@ public sealed partial class SettingsPage : Page
 
     private async void Unhide_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string id } || string.IsNullOrWhiteSpace(id)) return;
-        var result = await App.Backend.UnhideVersionAsync(id);
+        if (sender is not Button { Tag: HiddenVersionInfo item } || string.IsNullOrWhiteSpace(item.Id)) return;
+        var result = await App.Backend.UnhideVersionAsync(item.Id, item.Root);
         if (!result.Ok)
         {
             NetworkStatusText.Text = string.IsNullOrWhiteSpace(result.Message) ? "恢复失败。" : result.Message;
@@ -1157,52 +1282,85 @@ public sealed partial class SettingsPage : Page
             App.Trace("SyncDev: backend call failed: " + ex);
             return;
         }
-        if (!_alive) return;
-        _devUnlocked = s.Unlocked;
+        if (!_alive || !s.Ok) return;
+        _savedDev = s;
+        ApplyDevSettings(s);
+    }
+
+    private DevSettings? _savedDev;
+    private bool _savingDev;
+
+    private void ApplyDevSettings(DevSettings state)
+    {
+        _devUnlocked = state.Unlocked;
+        var suppress = _suppress;
         _suppress = true;
-        // 没通过认证：连「开发者测试」这个分类标签都不显示
-        NavDev.Visibility = s.Unlocked ? Visibility.Visible : Visibility.Collapsed;
-        DevFeaturesSwitch.IsOn = s.DevFeatures;
-        DevFeaturesSwitch.IsEnabled = !s.EnvOverride;
-        DevFeaturesPanel.Visibility = s.DevFeatures ? Visibility.Visible : Visibility.Collapsed;
-        OnlineEnabledSwitch.IsOn = s.OnlineEnabled;
-        OnlineEnabledSwitch.IsEnabled = !s.EnvOverride;
-        ShareOnlineSwitch.IsOn = s.ShareOnline;
-        OnlineEnvHint.Visibility = s.EnvOverride ? Visibility.Visible : Visibility.Collapsed;
-        _suppress = false;
+        try
+        {
+            NavDev.Visibility = state.Unlocked ? Visibility.Visible : Visibility.Collapsed;
+            DevFeaturesSwitch.IsOn = state.DevFeatures;
+            OnlineEnabledSwitch.IsOn = state.OnlineEnabled;
+            ShareOnlineSwitch.IsOn = state.ShareOnline;
+            OnlineEnvHint.Visibility = state.EnvOverride ? Visibility.Visible : Visibility.Collapsed;
+            UpdateDevControls(state.EnvOverride);
+        }
+        finally { _suppress = suppress; }
     }
 
-    /// <summary>保存三个开关并让主窗口的在线状态心跳跟上。关闭之前先把状态改回离线（关了之后后端就不再上报）。</summary>
-    private async Task SaveDevAsync(bool reportOfflineFirst)
+    private void UpdateDevControls(bool forced)
     {
-        if (reportOfflineFirst) await App.Backend.ReportPresenceAsync("OFFLINE");
-        var s = await App.Backend.SetDevSettingsAsync(DevFeaturesSwitch.IsOn, OnlineEnabledSwitch.IsOn, ShareOnlineSwitch.IsOn);
-        _suppress = true;
-        DevFeaturesPanel.Visibility = s.DevFeatures ? Visibility.Visible : Visibility.Collapsed;
-        OnlineEnabledSwitch.IsOn = s.OnlineEnabled;     // 后端会强制三层关系：上层关了下层一起关
-        _suppress = false;
-        if (App.MainWindow is { } main) await main.ApplyOnlineSettingAsync();
-        MarkSaved();
+        DevFeaturesPanel.Visibility = DevFeaturesSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        DevFeaturesSwitch.IsEnabled = !_savingDev && !forced;
+        OnlineEnabledSwitch.IsEnabled = !_savingDev && !forced && DevFeaturesSwitch.IsOn;
+        ShareOnlineSwitch.IsEnabled = !_savingDev && DevFeaturesSwitch.IsOn && OnlineEnabledSwitch.IsOn;
     }
 
-    private async void DevFeaturesSwitch_Toggled(object sender, RoutedEventArgs e)
+    private async Task SaveDevAsync()
     {
-        if (_suppress || !_ready) return;
-        // 关开发者测试 = 联机也一起关，所以关的时候要先报离线
-        await SaveDevAsync(reportOfflineFirst: !DevFeaturesSwitch.IsOn);
+        if (_suppress || !_ready || _savingDev || _savedDev is not { } previous) return;
+        var dev = DevFeaturesSwitch.IsOn;
+        var online = dev && OnlineEnabledSwitch.IsOn;
+        var share = ShareOnlineSwitch.IsOn;
+        _savingDev = true;
+        // 立即响应总开关，保存结果回来后再确认状态。
+        UpdateDevControls(previous.EnvOverride);
+        try
+        {
+            if (previous.DevFeatures && previous.OnlineEnabled && previous.ShareOnline && (!online || !share))
+                await App.Backend.ReportPresenceAsync("OFFLINE");
+            var saved = await App.Backend.SetDevSettingsAsync(dev, online, share);
+            if (!saved.Ok)
+            {
+                if (_alive) ShowDevSaveError();
+                return;
+            }
+            _savedDev = saved;
+            if (_alive) MarkSaved();
+            if (App.MainWindow is { } main) await main.ApplyOnlineSettingAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Trace("SaveDev: " + ex);
+            if (_alive) ShowDevSaveError();
+        }
+        finally
+        {
+            _savingDev = false;
+            if (_alive) ApplyDevSettings(_savedDev ?? previous);
+        }
     }
 
-    private async void OnlineEnabledSwitch_Toggled(object sender, RoutedEventArgs e)
+    private void ShowDevSaveError()
     {
-        if (_suppress || !_ready) return;
-        await SaveDevAsync(reportOfflineFirst: !OnlineEnabledSwitch.IsOn);
+        Toast.Title = "开发者测试设置保存失败";
+        Toast.Message = "已恢复上一次保存的设置。";
+        Toast.Severity = InfoBarSeverity.Error;
+        Toast.IsOpen = true;
     }
 
-    private async void ShareOnlineSwitch_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppress || !_ready) return;
-        await SaveDevAsync(reportOfflineFirst: !ShareOnlineSwitch.IsOn);
-    }
+    private async void DevFeaturesSwitch_Toggled(object sender, RoutedEventArgs e) => await SaveDevAsync();
+    private async void OnlineEnabledSwitch_Toggled(object sender, RoutedEventArgs e) => await SaveDevAsync();
+    private async void ShareOnlineSwitch_Toggled(object sender, RoutedEventArgs e) => await SaveDevAsync();
 
     private void NotifyTaskDoneSwitch_Toggled(object sender, RoutedEventArgs e)
     {
@@ -1367,6 +1525,8 @@ public sealed partial class SettingsPage : Page
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeowLauncher", "logs");
         OpenFolder(dir);
     }
+
+    private void OpenOnboarding_Click(object sender, RoutedEventArgs e) => App.MainWindow.OpenOnboarding();
 
     private void OpenLicenses_Click(object sender, RoutedEventArgs e)
     {

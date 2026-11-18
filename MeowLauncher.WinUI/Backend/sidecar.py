@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -22,7 +23,9 @@ import tempfile
 import threading
 import time
 import zipfile
+from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 _EMIT_LOCK = threading.Lock()
 
@@ -56,7 +59,8 @@ for _p in (_ROOT, _HERE if (_HERE / "ml2").is_dir() else None):
 
 
 from ml2.launch_profile import (
-    apply_memory_estimate, instance_record, recommended_java_major,
+    apply_memory_estimate, instance_record, jvm_defaults, merge_jvm_defaults,
+    recommended_java_major,
     resolve_launch_profile, save_instance_java,
 )
 
@@ -262,8 +266,6 @@ def add_offline_account(name: str, variant: str = "classic") -> dict:
     name = (name or "").strip()
     if not name:
         return {"ok": False, "message": "请先输入离线账号昵称"}
-    if len(name) > 16 or not re.fullmatch(r"[A-Za-z0-9_]{1,16}", name):
-        return {"ok": False, "message": "昵称只能用 1–16 位字母、数字、下划线"}
     variant = "slim" if str(variant or "").lower() == "slim" else "classic"
     root = Path(os.getcwd())
     sys.path.insert(0, str(root))
@@ -1453,6 +1455,8 @@ def instance_launch_settings(vid: str) -> dict:
         "globalMem": defaults.memory_mb,
         "globalMemAuto": defaults.automatic_memory,
         "globalJvm": defaults.jvm,
+        "jvmAuto": local.jvm_auto,
+        "globalJvmAuto": defaults.jvm_auto,
         "isolation": str(rec.get("isolation") or "follow"),
         "isolationDefault": str(st.get("isolationDefault") or "auto"),
         "isolated": bool(__import__("ml2.isolation", fromlist=["x"]).effective_isolated(root, vid)),
@@ -1471,6 +1475,8 @@ def set_instance_launch_settings(vid: str, data: dict) -> dict:
     mem = max(1024, min(65536, int(data.get("mem") or 4096)))
     use_global = bool(data.get("useGlobal"))
     jvm = str(data.get("jvm") or "").strip()
+    jvm_auto = data.get("jvmAuto")
+    jvm_auto = True if jvm_auto is None else bool(jvm_auto)
     save_instance_java(rec, root, java_path)
     rec.update({
         "useGlobal": use_global,
@@ -1478,13 +1484,15 @@ def set_instance_launch_settings(vid: str, data: dict) -> dict:
         "memMode": "auto" if bool(data.get("memAuto")) else "manual",
         "memOffset": 0,
         "jvm": jvm,
+        "jvmAuto": jvm_auto,
         "isolation": str(data.get("isolation") or "follow").lower(),
     })
     per[vid] = rec
     st["perInstance"] = per
     save_settings(st)
     return {"ok": True, "message": f"已保存 {vid} 的启动设置",
-            "mem": mem, "useGlobal": use_global, "javaPath": java_path, "jvm": jvm}
+            "mem": mem, "useGlobal": use_global, "javaPath": java_path, "jvm": jvm,
+            "jvmAuto": jvm_auto}
 
 
 import shlex as _shlex
@@ -1664,11 +1672,11 @@ def decode_json_arg(raw: str) -> dict:
         return {}
 
 
-def game_dir(st: dict) -> Path:
+def game_dir(st: dict, *, use_override: bool = True) -> Path:
     # WinUI 多目录：调用方用 MEOW_MC_DIR 指定这次操作要落在哪个游戏目录，
     # 没设时保持旧行为（settings4.json 的 mcDir）。
     override = str(os.environ.get("MEOW_MC_DIR") or "").strip()
-    if override:
+    if override and use_override:
         return Path(override)
     raw = st.get("mcDir") or st.get("gameDir") or ""
     if raw:
@@ -1739,8 +1747,10 @@ def hidden_map(st: dict) -> dict:
     return hm if isinstance(hm, dict) else {}
 
 
-def hidden_ids(st: dict) -> set[str]:
-    return {str(rec.get("id") or "") for rec in hidden_map(st).values() if isinstance(rec, dict)}
+def hidden_ids(st: dict, root: Path) -> set[str]:
+    resolved = root.resolve()
+    return {str(rec.get("id") or "").casefold() for rec in hidden_map(st).values()
+            if isinstance(rec, dict) and (not rec.get("root") or Path(rec["root"]).resolve() == resolved)}
 
 
 def hide_version(vid: str) -> dict:
@@ -1749,9 +1759,10 @@ def hide_version(vid: str) -> dict:
     mc = game_dir(st)
     if not vid or not (mc / "versions" / vid).is_dir():
         return {"ok": False, "message": "找不到这个实例。"}
-    selected = str(st.get("selected") or "")
-    if vid == selected:
-        return {"ok": False, "message": "无法隐藏正在使用的实例，请切换后再进行隐藏。"}
+    selected = str(st.get("selected") or st.get("currentVersion") or "")
+    if vid.casefold() == selected.casefold() and mc.resolve() == game_dir(st, use_override=False).resolve():
+        st.pop("selected", None)
+        st.pop("currentVersion", None)
     hm = dict(hidden_map(st))
     key = f"{mc.resolve()}|{vid}"
     hm[key] = {"id": vid, "root": str(mc), "time": int(time.time() * 1000)}
@@ -1760,12 +1771,14 @@ def hide_version(vid: str) -> dict:
     return {"ok": True, "message": f"已隐藏 {vid}"}
 
 
-def unhide_version(vid: str) -> dict:
+def unhide_version(vid: str, root: str = "") -> dict:
     vid = str(vid or "").strip()
     st = load_settings()
     hm = dict(hidden_map(st))
-    remove = [key for key, rec in hm.items()
-              if isinstance(rec, dict) and str(rec.get("id") or "") == vid]
+    resolved = Path(root).resolve() if root else None
+    remove = [key for key, rec in hm.items() if isinstance(rec, dict)
+              and str(rec.get("id") or "").casefold() == vid.casefold()
+              and (resolved is None or not rec.get("root") or Path(rec["root"]).resolve() == resolved)]
     if not remove:
         return {"ok": False, "message": "没有这条隐藏记录。"}
     for key in remove:
@@ -1782,6 +1795,8 @@ def select_version(vid: str) -> dict:
         return {"ok": False, "message": "没有指定版本。"}
     st = load_settings()
     base = game_dir(st)
+    if vid.casefold() in hidden_ids(st, base):
+        return {"ok": False, "message": "请先在设置中恢复这个隐藏实例。"}
     if not (base / "versions" / vid).is_dir():
         return {"ok": False, "message": f"找不到实例「{vid}」。"}
 
@@ -1821,10 +1836,11 @@ def _version_dir(st: dict, vid: str) -> Path | None:
 
 def _rename_version_records(st: dict, old: str, new: str) -> None:
     """改名后把 settings4 里所有以旧 id 为键的记录搬到新 id，避免当前/游玩时间/实例设置丢失。"""
-    if str(st.get("selected") or "") == old:
-        st["selected"] = new
-    if str(st.get("currentVersion") or "") == old:
-        st["currentVersion"] = new
+    if game_dir(st).resolve() == game_dir(st, use_override=False).resolve():
+        if str(st.get("selected") or "") == old:
+            st["selected"] = new
+        if str(st.get("currentVersion") or "") == old:
+            st["currentVersion"] = new
     for key in ("lastPlayed", "perInstance"):
         table = st.get(key)
         if isinstance(table, dict) and old in table:
@@ -1894,26 +1910,37 @@ def rename_version(old: str, new: str) -> dict:
 
 
 def delete_version(vid: str) -> dict:
-    """删实例：移动到回收站，而不是直接删除。"""
+    """归档实例到用户的回收目录，归档当前实例时清除该目录下的旧选择。"""
     vid = str(vid or "").strip()
-    if not vid:
-        return {"ok": False, "message": "没有指定实例。"}
+    if not vid or BAD_NAME_CHARS.search(vid) or vid in (".", ".."):
+        return {"ok": False, "message": "实例名无效。"}
     st = load_settings()
     src = _version_dir(st, vid)
     if src is None:
         return {"ok": False, "message": f"找不到实例「{vid}」。"}
-    if str(st.get("selected") or "") == vid:
-        return {"ok": False, "message": "无法删除正在使用的实例，请切换后再进行删除。"}
     if any(row.get("version") == vid for row in _prune_running()):
-        return {"ok": False, "message": "这个实例正在运行，先结束游戏再删除。"}
-    base = Path(os.environ.get("APPDATA") or str(Path.home())) / "MeowLauncher" / "trash"
+        return {"ok": False, "message": "这个实例正在运行，先结束游戏再归档。"}
+
+    root = game_dir(st)
+    current_root = game_dir(st, use_override=False)
+    selected = str(st.get("selected") or st.get("currentVersion") or "")
+    clear_selection = root.resolve() == current_root.resolve() and selected.casefold() == vid.casefold()
+    archive_dir = settings_path().parent / "trash"
+    dest = archive_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000_000:09d}-{vid}"
     try:
-        base.mkdir(parents=True, exist_ok=True)
-        dest = base / f"{time.strftime('%Y%m%d-%H%M%S')}-{vid}"
+        archive_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
+        if clear_selection:
+            st.pop("selected", None)
+            st.pop("currentVersion", None)
+            try:
+                save_settings(st)
+            except Exception:
+                shutil.move(str(dest), str(src))
+                raise
     except Exception as exc:
-        return {"ok": False, "message": f"删除失败：{exc}"}
-    return {"ok": True, "message": f"已删除 {vid}（移到了回收目录）", "trash": str(dest)}
+        return {"ok": False, "message": f"归档失败：{exc}"}
+    return {"ok": True, "message": f"已将 {vid} 移到回收目录", "trash": str(dest)}
 
 
 def change_version(vid: str, new_mc: str, loader_version: str = "", emit=None) -> dict:
@@ -2032,12 +2059,13 @@ def list_hidden() -> dict:
     st = load_settings()
     mc = game_dir(st)
     rows = []
-    for key, rec in hidden_map(st).items():
+    for rec in hidden_map(st).values():
         if not isinstance(rec, dict):
             continue
         vid = str(rec.get("id") or "")
-        if vid and (mc / "versions" / vid).is_dir():
-            rows.append({"id": vid, "time": int(rec.get("time") or 0)})
+        root = Path(rec["root"]) if rec.get("root") else mc
+        if vid and (root / "versions" / vid).is_dir():
+            rows.append({"id": vid, "root": str(root), "time": int(rec.get("time") or 0)})
     rows.sort(key=lambda item: item["time"], reverse=True)
     return {"ok": True, "versions": rows}
 
@@ -2048,7 +2076,7 @@ def scan_versions(gdir: Path, st: dict) -> list[dict]:
     if not vdir.is_dir():
         return out
     last_map = st.get("lastPlayed") if isinstance(st.get("lastPlayed"), dict) else {}
-    hidden = hidden_ids(st)
+    hidden = hidden_ids(st, gdir)
     for child in vdir.iterdir():
         if not child.is_dir():
             continue
@@ -2061,13 +2089,20 @@ def scan_versions(gdir: Path, st: dict) -> list[dict]:
         except Exception:
             continue
         loader, loader_version = _loader_of(meta)
+        pack = meta.get("meowlauncher") or {}
+        is_pack = isinstance(pack, dict) and bool(pack.get("pack"))
+        if is_pack:
+            pack_loader = pack.get("loader")
+            if pack_loader in ("Fabric", "Forge", "NeoForge", "Quilt"):
+                loader, loader_version = pack_loader, str(pack.get("loaderVersion") or "")
         try:
             from ml2 import isolation as _iso_m
             mods_dir = _iso_m.mods_dir_for(gdir, child.name)
         except Exception:
             mods_dir = child / "mods"
         mods = len([x for x in mods_dir.iterdir() if x.suffix.lower() == ".jar"]) if mods_dir.is_dir() else 0
-        base = str(meta.get("inheritsFrom") or meta.get("clientVersion") or "")
+        base = str((meta.get("clientVersion") if is_pack else None)
+                   or meta.get("inheritsFrom") or meta.get("clientVersion") or "")
         if not base:
             m = re.match(r"^(\d+\.\d+(?:\.\d+)?(?:-[a-z]+\d*)?)", child.name, re.I)
             base = m.group(1) if m else str(meta.get("id") or child.name)
@@ -2084,7 +2119,7 @@ def scan_versions(gdir: Path, st: dict) -> list[dict]:
             "mtime": int(jar.stat().st_mtime * 1000),
             "lastPlayed": int(last_map.get(child.name) or 0),
             "valid": True,
-            "hidden": child.name in hidden,
+            "hidden": child.name.casefold() in hidden,
         })
     out.sort(key=lambda v: (v["lastPlayed"], v["mtime"]), reverse=True)
     return out
@@ -2782,7 +2817,8 @@ def make_snapshot(with_status: bool = False) -> dict:
     gdir = game_dir(st)
     versions = scan_versions(gdir, st)
     selected = str(st.get("selected") or st.get("currentVersion") or "")
-    current = next((v for v in versions if v["id"] == selected), versions[0] if versions else None)
+    usable = [v for v in versions if v["valid"] and not v["hidden"]]
+    current = next((v for v in usable if v["id"] == selected), usable[0] if usable else None)
     acc = active_account(st)
 
     try:
@@ -2835,6 +2871,8 @@ def make_snapshot(with_status: bool = False) -> dict:
         "selected": selected,
         "current": current,
         "versions": versions,
+        "hiddenVersionIds": sorted({str(rec["id"]) for rec in hidden_map(st).values()
+                                    if isinstance(rec, dict) and rec.get("id")}),
         "lastPlayed": st.get("lastPlayed") if isinstance(st.get("lastPlayed"), dict) else {},
         "memory": memory_info(),
         "shots": screenshots_info(gdir, versions, st.get("lastPlayed") if isinstance(st.get("lastPlayed"), dict) else {}),
@@ -2921,11 +2959,11 @@ def _instance_tuning(st: dict, vid: str, root: Path):
     return apply_memory_estimate(profile, vid, estimate_memory)
 
 def _current_version_id(st: dict) -> str:
+    root = game_dir(st)
     selected = str(st.get("selected") or st.get("currentVersion") or "")
-    if selected:
+    if selected and selected.casefold() not in hidden_ids(st, root):
         return selected
-    versions = scan_versions(game_dir(st), st)
-    return str(versions[0]["id"]) if versions else ""
+    return next((str(v["id"]) for v in scan_versions(root, st) if v["valid"] and not v["hidden"]), "")
 
 
 def _mods_context(vid: str = "") -> tuple[Path, str, Path]:
@@ -3105,8 +3143,24 @@ def import_asset(kind: str, vid: str, src: str) -> dict:
             return {"ok": False, "message": "资源包/光影要选 .zip 文件。"}
         dest_dir = _iso.resourcepacks_dir_for(mc, use_id) if kind == "resourcepack" else _iso.run_dir_for(mc, use_id) / "shaderpacks"
     elif kind == "mod":
-        if src_path.is_dir():
-            return {"ok": False, "message": "Mod 要选 .jar 文件。"}
+        if not src_path.is_file() or src_path.suffix.lower() not in (".jar", ".zip"):
+            return {"ok": False, "message": "Mod 要选 .jar 或 .zip 文件。"}
+        if src_path.suffix.lower() == ".zip":
+            try:
+                with zipfile.ZipFile(src_path) as archive:
+                    names = archive.namelist()
+                    is_pack = "modrinth.index.json" in names
+                    if not is_pack and "manifest.json" in names:
+                        manifest = json.loads(archive.read("manifest.json").decode("utf-8-sig"))
+                        is_pack = isinstance(manifest, dict) and manifest.get("manifestType") == "minecraftModpack"
+                    if is_pack:
+                        return {"ok": False, "message": "这是整合包，请到「获取」页导入。"}
+            except zipfile.BadZipFile:
+                return {"ok": False, "message": "这个 .zip 文件无法读取。"}
+            except (UnicodeError, ValueError):
+                pass
+        if not (mc / "versions" / use_id / f"{use_id}.json").is_file():
+            return {"ok": False, "message": "目标实例已不存在。"}
         root = Path(os.getcwd())
         if str(root) not in sys.path:
             sys.path.insert(0, str(root))
@@ -3661,6 +3715,17 @@ def launch_version(vid: str, emit=None, *, java_once: str = "") -> dict:
             java = preferred
     log(f"运行时 {java}")
 
+    # 自动优化：只补"没被用户显式写过"的保守参数，用户的写法永远优先。
+    if getattr(tuning, "jvm_auto", True):
+        try:
+            _major = core.java_major(java) or need_java
+        except Exception:
+            _major = need_java
+        _merged = merge_jvm_defaults(extra_jvm, int(_major or 0), int(mem_mb))
+        if _merged != extra_jvm:
+            log(f"自动优化参数 {_merged}")
+            extra_jvm = _merged
+
     from ml2 import isolation as _iso
     isolated = bool(_iso.effective_isolated(mc, vid))
     run_dir = _iso.run_dir_for(mc, vid)
@@ -3800,22 +3865,16 @@ def list_mojang_versions() -> dict:
     return {"ok": True, "versions": rows}
 
 
-def fabric_api_versions(mc_version: str) -> dict:
-    """列某个游戏版本可用的 Fabric API 版本号（新→旧），给安装页的下拉用。"""
-    root = Path(os.getcwd())
-    sys.path.insert(0, str(root))
-    from ml2 import net
+def fabric_api_versions(mc_version: str, project_id: str = "") -> dict:
+    """返回某个 API 的 Modrinth 发布版本，由新到旧。"""
+    from ml2 import loaders
     try:
-        items = net.modrinth_versions(
-            "P7dR8mSH",
-            loaders=["fabric", "quilt"],
-            game_versions=[mc_version] if mc_version else None,
-        ) or []
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "message": f"{type(exc).__name__}: {exc}", "versions": []}
-    versions = [str(v.get("version_number") or "") for v in items]
-    versions = [v for v in versions if v]
-    return {"ok": True, "versions": versions}
+        rows = loaders.api_mod_versions(project_id or loaders.FABRIC_API[0], mc_version)
+    except Exception as exc:
+        return {"ok": False, "message": str(exc), "versions": [], "items": []}
+    items = [{"id": row["id"], "version": row["version_number"]} for row in rows
+             if row.get("id") and row.get("version_number")]
+    return {"ok": True, "versions": [item["version"] for item in items], "items": items}
 
 
 def loader_versions(mc_version: str, kind: str) -> dict:
@@ -3955,7 +4014,7 @@ def loader_support(mc_version: str) -> dict:
 
 def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
                     emit=None, with_prereq: bool = False,
-                    prereq_version: str = "", custom_name: str = "") -> dict:
+                    prereq_version: str = "", custom_name: str = "", prereq_project: str = "") -> dict:
     root = Path(os.getcwd())
     sys.path.insert(0, str(root))
     from ml2 import net
@@ -3982,11 +4041,21 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
     _loader_label = _LOADER_NAMES.get(_loader, (_loader.title() if _loader else "加载器"))
     _inst_step = f"下载{_loader_label}安装文件"
     _STEPS = ["下载依赖库", "下载游戏主文件", "下载资源文件"]
-    if _loader != "vanilla":
+    if _loader in ("forge", "neoforge"):
         _STEPS.append(_inst_step)
+    if _loader != "vanilla":
         _STEPS.append("安装加载器")
+    prereq = None
     if with_prereq and _loader in ("fabric", "quilt"):
-        _STEPS.append("安装前置 Fabric API")
+        from ml2 import loaders
+        allowed_projects = loaders.API_MODS[_loader]
+        prereq = next((item for item in allowed_projects if item[0] == prereq_project), None) \
+            if prereq_project else allowed_projects[0]
+        if prereq is None:
+            return {"ok": False, "message": "这个 API 与所选加载器不兼容。"}
+    prereq_name = prereq[1] if prereq else ""
+    if prereq:
+        _STEPS.append(prereq_name)
     _STEPS.append("写入实例配置")
     _IDX = {name: i for i, name in enumerate(_STEPS)}
     overall = [0.0]
@@ -4028,28 +4097,31 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         return (" · " + " · ".join(parts)) if parts else ""
 
     last_txt = [0.0]
-    last_bytes_t = [0.0]
+    last_bytes_t = [0.0, 0.0, 0.0]
 
     def progress(phase: str, done: int, total: int, info: dict | None = None) -> None:
         info = info or {}
         total = max(int(total or 1), 1)
+        download_steps = ("下载依赖库", "下载游戏主文件", "下载资源文件")
+        if phase == "failed":
+            step(si(download_steps[done]), 3, text=str(info.get("message") or ""))
+            return
         if phase == "bytes":
             # 字节口径：总进度 = 已下字节 / 本次要下的总字节，不再按「几个文件下完了」算。
             _net_step = int(info.get("step") or 0)
-            _bytes_names = ("下载依赖库", "下载游戏主文件", "下载资源文件")
-            si_idx = si(_bytes_names[min(max(_net_step, 0), 2)])
+            si_idx = si(download_steps[_net_step])
             sp = float(info.get("steppct") or 0)
+            complete = bool(info.get("complete"))
             allpct = 100.0 * done / total if total else 0.0
-            overall[0] = max(overall[0], 2.0 + 0.93 * allpct)
+            overall[0] = max(overall[0], 5.0 + 0.70 * allpct)
             # 资源是几千个小文件，逐条往界面上发会把 UI 线程刷爆（用户会感觉「下载卡死了」）。
             # 统一节流到 ~10 次/秒，只有阶段完成（sp>=99.5）时才强制发一次。
             now_b = time.monotonic()
-            if sp < 99.5 and now_b - last_bytes_t[0] < 0.1:
+            if not complete and now_b - last_bytes_t[_net_step] < 0.1:
                 return
-            last_bytes_t[0] = now_b
-            step(si_idx, 2 if sp >= 99.5 else 1, sp, "")
+            last_bytes_t[_net_step] = now_b
+            step(si_idx, 2 if complete else 1, sp, "")
             stat(float(info.get("speed") or 0), 0, str(info.get("name") or ""))
-            stage(0, f"{allpct:.1f}% · {str(info.get('name') or '')}")
             return
         # 同一阶段内文字刷新节流到 ~8 次/秒（进度百分比变化照常发）
         now = time.monotonic()
@@ -4064,26 +4136,28 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
             fs, fb = int(info.get("fsize") or 0), int(info.get("fbytes") or 0)
             # 主文件是分段下载，不走 bytes 分支；这里单独推进它的步骤，否则会一直显示「等待」。
             c = si("下载游戏主文件")
-            if fs and fb < fs:
-                step(c, 1, 100.0 * fb / fs)
-                stage(0, f"下载游戏主文件（{int(100 * fb / fs)}%）· {_mb(fb)} / {_mb(fs)}{_tail({'speed': info.get('speed')})}")
-                stat(float(info.get("speed") or 0), 0, "client.jar")
-            elif done == 0 and fs:
-                stage(0, f"下载游戏主文件（{int(100 * fb / fs)}%）· {_mb(fb)} / {_mb(fs)}{_tail({'speed': info.get('speed')})}")
-                stat(float(info.get("speed") or 0), 0, "client.jar")
-            else:
-                step(c, 2, 100)
-                stage(0, "游戏主文件下载完成")
+            step(c, 1, 100.0 * fb / fs if fs else -1)
+            stage(0, "下载游戏主文件")
         elif phase == "index":
+            step(si("下载资源文件"), 1, -1, "下载资源索引")
             stage(0, "下载资源索引")
         else:
             stage(0, f"下载资源文件 {done}/{total}（{pct_in}%）{_tail(info)}")
             stat(float(info.get("speed") or 0), max(0, total - done), str(info.get("name") or ""))
 
     declare_steps()
-    stage(2, "获取版本清单")
+    stage(1, "检查安装目录")
     st = load_settings()
     mc = game_dir(st)
+    versions_dir = mc / "versions"
+    try:
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".meow-install-", dir=versions_dir):
+            pass
+    except PermissionError:
+        return {"ok": False, "errorCode": "FILE-ACCESS",
+                "message": f"启动器无法写入安装目录：{versions_dir}。请选择其他安装目录。"}
+    stage(2, "获取版本清单")
     entry = next((v for v in net.mojang_versions() if str(v.get("id") or "") == vid), None)
     if not entry:
         raise RuntimeError(f"找不到 Mojang 版本 {vid}")
@@ -4100,7 +4174,6 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         expected = f"{vid}-Quilt_{lv}" if lv else ""
     else:
         expected = ""
-    versions_dir = mc / "versions"
     swap_dir = None
     if expected:
         target = versions_dir / expected
@@ -4142,49 +4215,57 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         _prefetch_th = threading.Thread(target=_prefetch_job, daemon=True)
         _prefetch_th.start()
 
-    # Fabric API 前置也提前并发下好：原来要等 vanilla 装到 92% 才去查 Modrinth、
-    # 再同步下一个 jar，界面会在末尾干停好几秒（用户说「fabric 在安装 api 的时候卡了一下」）。
+    # 与游戏文件并行准备所选 API，成功后再写进实例。
     _prereq_th: threading.Thread | None = None
     _prereq_box: dict = {}
-    if with_prereq and loader in ("fabric", "quilt"):
+    if prereq:
+        project_id = prereq[0]
+
         def _prereq_job() -> None:
             try:
                 from ml2 import core as _core
-                _vers = net.modrinth_versions(
-                    "P7dR8mSH",
-                    loaders=["fabric", "quilt"],
-                    game_versions=[vid] if vid else None,
-                ) or []
-                _picked = None
+                versions = loaders.api_mod_versions(project_id, vid)
                 if prereq_version:
-                    _picked = next((v for v in _vers
-                                    if (v.get("version_number") or "") == prereq_version), None)
-                if _picked is None and _vers:
-                    _picked = _vers[0]
-                if _picked is None:
-                    _prereq_box["note"] = "，没有找到适配的前置 Fabric API"
+                    # 旧版调用传版本号，新界面传 Modrinth 的唯一版本 ID。
+                    picked = next((v for v in versions if v.get("id") == prereq_version), None)
+                    if picked is None and not prereq_project:
+                        picked = next((v for v in versions if v.get("version_number") == prereq_version), None)
+                else:
+                    picked = versions[0] if versions else None
+                if picked is None:
+                    _prereq_box["note"] = f"，未找到所选的 {prereq_name} 版本"
                     return
-                _files = _picked.get("files") or []
-                _file = next((f for f in _files if f.get("primary")), _files[0] if _files else None)
-                if not _file or not _file.get("url"):
-                    _prereq_box["note"] = "，Fabric API 没有可下载文件"
+
+                files = picked.get("files") or []
+                file = next((f for f in files if f.get("primary")), files[0] if files else {})
+                name = str(file.get("filename") or "")
+                if not file.get("url") or not name.lower().endswith(".jar") or BAD_NAME_CHARS.search(name):
+                    _prereq_box["note"] = f"，{prereq_name} 没有可下载的 JAR"
                     return
-                _cache = _core.user_dir() / "cache" / "fabric-api"
-                _cache.mkdir(parents=True, exist_ok=True)
-                _dest = _cache / str(_file.get("filename") or "fabric-api.jar")
-                _want = int(_file.get("size") or 0)
-                if not _dest.exists() or (_want and _dest.stat().st_size != _want):
-                    step(si("安装前置 Fabric API"), 1, 0, "正在下载")
-                    net._download(
-                        str(_file["url"]), _dest,
-                        lambda d, t: step(si("安装前置 Fabric API"), 1,
-                                          100.0 * d / t if t else 0, "正在下载"),
-                        size=_want,
-                        sha1=str((_file.get("hashes") or {}).get("sha1") or ""),
-                    )
-                _prereq_box["path"] = _dest
-                _prereq_box["ver"] = _picked.get("version_number") or ""
-            except Exception as exc:  # noqa: BLE001
+                version_id = str(picked.get("id") or "")
+                if not version_id.isalnum():
+                    raise ValueError("API 版本 ID 无效")
+                cache = _core.user_dir() / "cache" / "loader-api" / project_id / version_id
+                cache.mkdir(parents=True, exist_ok=True)
+                dest = cache / name
+                sha1 = str((file.get("hashes") or {}).get("sha1") or "")
+                cache_hit = False
+                if sha1 and dest.is_file():
+                    with dest.open("rb") as existing:
+                        cache_hit = hashlib.file_digest(existing, "sha1").hexdigest() == sha1.lower()
+                if not cache_hit:
+                    step(si(prereq_name), 1, 0, "正在下载")
+                    with tempfile.TemporaryDirectory(prefix="download-", dir=cache) as temp:
+                        saved = net.install_modrinth_version(
+                            picked, Path(temp),
+                            lambda done, total: step(si(prereq_name), 1, 100.0 * done / total if total else 0, "正在下载"),
+                        )
+                        if not saved:
+                            raise RuntimeError("Modrinth 没有返回可下载的文件。")
+                        os.replace(saved[0], dest)
+                _prereq_box["path"] = dest
+                _prereq_box["ver"] = picked.get("version_number") or ""
+            except Exception as exc:
                 _prereq_box["err"] = str(exc)
 
         _prereq_th = threading.Thread(target=_prereq_job, daemon=True)
@@ -4212,14 +4293,16 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         result_id = vid
         if loader != "vanilla":
             from ml2 import loaders
-            step(si("安装加载器"), 1, -1)
-            stage(80, f"安装 {loader} 加载器")
+            waiting_for_installer = _loader in ("forge", "neoforge") and not _prefetch.get("jar")
+            if waiting_for_installer:
+                step(si(_inst_step), 1, -1)
+                stage(76, f"下载 {loader} 安装文件")
+            else:
+                step(si("安装加载器"), 1, -1)
+                stage(80, f"安装 {loader} 加载器")
             # 安装器是个独立 Java 进程，跑几十秒到几分钟、不吐百分比：
             # 后台线程跑它，主线程每 2 秒报一次「运行中」，别让任务看起来死了。
             _box: dict = {}
-
-            step(si(_inst_step), 1, -1)
-            stage(76, f"下载 {loader} 安装文件")
 
             def _run_loader() -> None:
                 def _log(line: str) -> None:
@@ -4250,28 +4333,31 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
             step(si("安装加载器"), 2, 100)
 
         prereq_note = ""
-        if with_prereq and loader in ("fabric", "quilt"):
+        if prereq:
+            api_installed = False
             try:
-                step(si("安装前置 Fabric API"), 1, 0, "正在写入实例")
-                stage(92, "安装前置 Fabric API")
+                step(si(prereq_name), 1, 0, "正在写入实例")
+                stage(92, prereq_name)
                 if _prereq_th is not None:
                     _prereq_th.join()
                 _err = _prereq_box.get("err")
                 _src = _prereq_box.get("path")
                 if _err:
-                    prereq_note = f"，前置安装失败：{_err}"
+                    prereq_note = f"，{prereq_name} 安装失败：{_err}"
                 elif _src is None:
-                    prereq_note = str(_prereq_box.get("note") or "，前置 Fabric API 未安装")
+                    prereq_note = str(_prereq_box.get("note") or f"，未安装 {prereq_name}")
                 else:
                     _mc, _target, base = _mods_context(result_id)
                     mods_dir = base / "mods"
                     mods_dir.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(_src), str(mods_dir / _src.name))
-                    prereq_note = ("，已包含 Fabric API " + str(_prereq_box.get("ver") or "")).rstrip()
+                    api_installed = True
+                    prereq_note = f"，已包含 {prereq_name} {_prereq_box.get('ver') or ''}".rstrip()
             except Exception as exc:
-                prereq_note = f"，前置安装失败：{exc}"
+                prereq_note = f"，{prereq_name} 安装失败：{exc}"
 
-        step(si("安装前置 Fabric API"), 2, 100)
+            step(si(prereq_name), 2 if api_installed else 3, 100 if api_installed else 0,
+                 "" if api_installed else prereq_note.lstrip("，"))
         step(si("写入实例配置"), 1, 0)
 
         if custom_name and custom_name != result_id:
@@ -4341,110 +4427,61 @@ def _online_cf_loader(kind: str, loader: str):
     return loader or None if (kind or "mod").strip().lower() in ("", "mod") else None
 
 
-def _find_pack_parent(mc: Path, mc_version: str, loader_name: str, loader_version: str) -> str:
-    root = mc / "versions"
-    if not root.is_dir():
-        return mc_version
-    want = (loader_version or "").lower()
-    for child in root.iterdir():
-        if not child.is_dir():
-            continue
-        meta = child / f"{child.name}.json"
-        try:
-            data = json.loads(meta.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if str(data.get("inheritsFrom") or "") != mc_version:
-            continue
-        name = child.name.lower()
-        if want and want in name:
-            return child.name
-    for child in root.iterdir():
-        if not child.is_dir():
-            continue
-        meta = child / f"{child.name}.json"
-        try:
-            data = json.loads(meta.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if str(data.get("inheritsFrom") or "") != mc_version:
-            continue
-        if loader_name and loader_name.lower() in child.name.lower():
-            return child.name
-    return mc_version
+def import_modpack(path: str, on_log=None) -> dict:
+    from ml2 import modpack
+    st, _, mc = _pack_context()
+    archive = Path(str(path or "").strip())
+    if not archive.is_file():
+        return {"ok": False, "errorCode": "FILE-MISSING", "message": "找不到要导入的整合包文件。"}
+    if archive.suffix.lower() not in (".mrpack", ".zip"):
+        return {"ok": False, "errorCode": "PACK-INVALID", "message": "请选择 Modrinth .mrpack 或 CurseForge 整合包 .zip。"}
+    info = modpack.install_archive(archive, mc, cf_key=str(st.get("cfApiKey") or "") or None,
+                                   on_log=on_log or (lambda _: None))
+    return {"ok": True, "message": f"已安装整合包 {info['vid']}",
+            "version": info["vid"], "path": info["dir"], "loader": info["loader"]}
 
 
-def _install_cf_modpack(pack: Path, mc: Path, net, st: dict) -> dict:
-    from ml2 import modpack as modpack_lib
-    with zipfile.ZipFile(pack) as zf:
-        try:
-            manifest = json.loads(zf.read("manifest.json").decode("utf-8-sig"))
-        except KeyError as exc:
-            raise RuntimeError("这不是有效的 CurseForge 整合包（缺少 manifest.json）") from exc
-        name = str(manifest.get("name") or pack.stem)
-        mc_version = str((manifest.get("minecraft") or {}).get("version") or "")
-        loaders = (manifest.get("minecraft") or {}).get("modLoaders") or []
-        loader_id = str((loaders[0] or {}).get("id") or "") if loaders else ""
-        loader_name, _, loader_version = loader_id.partition("-")
-        vid = modpack_lib._safe_name(name)
-        target = mc / "versions" / vid
-        if target.exists():
-            raise RuntimeError(f"实例已存在：{vid}")
-        target.mkdir(parents=True, exist_ok=True)
-        for member in zf.namelist():
-            if not member.startswith("overrides/") or member.endswith("/"):
-                continue
-            rel = member[len("overrides/"):]
-            out = target / rel
-            out.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(member) as src, open(out, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-
+def _install_online_pack(source: str, project_id: str, file_id: str = "", on_log=None) -> dict:
+    log = on_log or (lambda _: None)
+    log("读取在线整合包版本")
+    st, net, _ = _pack_context()
     key = str(st.get("cfApiKey") or "") or None
-    mods = target / "mods"
-    mods.mkdir(parents=True, exist_ok=True)
-    for entry in manifest.get("files") or []:
-        if not entry.get("required", True):
-            continue
-        try:
-            project_id = int(entry.get("projectID") or 0)
-            file_id = int(entry.get("fileID") or 0)
-            files = net.cf_mod_files(project_id, key=key) or []
-            chosen = next((f for f in files if int(f.get("id") or 0) == file_id), None)
-            if chosen:
-                net.install_curseforge_file(chosen, mods)
-        except Exception:
-            continue
-
-    parent = _find_pack_parent(mc, mc_version, loader_name, loader_version)
-    data = {
-        "id": vid,
-        "type": "release",
-        "inheritsFrom": parent,
-        "mainClass": "",
-        "libraries": [],
-        "arguments": {"game": [], "jvm": []},
-        "meowlauncher": {"pack": name, "loader": loader_name, "loaderVersion": loader_version},
-    }
-    (target / f"{vid}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "message": f"已安装整合包 {vid}", "path": str(target), "installedVersion": vid}
-
-
-def _install_modrinth_pack(net, versions: list, mc: Path, tmpdir: Path) -> dict:
-    from ml2 import modpack as modpack_lib
-    if not versions:
-        raise RuntimeError("没有找到可安装的整合包文件。")
-    version = versions[0]
-    files = version.get("files") or []
-    primary = next((f for f in files if f.get("primary")), files[0] if files else {})
-    url = str(primary.get("url") or "")
-    if not url:
-        raise RuntimeError("整合包没有可下载内容。")
-    pack = tmpdir / str(primary.get("filename") or "pack.mrpack")
-    net._download_via(url, pack)
-    info = modpack_lib.install_mrpack(pack, mc, on_log=lambda _msg: None)
-    return {"ok": True, "message": f"已安装整合包 {info['vid']}", "path": str(info["dir"]),
-            "installedVersion": info["vid"]}
+    with tempfile.TemporaryDirectory(prefix="meow-pack-") as tmp:
+        dest = Path(tmp)
+        if source == "modrinth":
+            if file_id:
+                version = net.modrinth_version(file_id)
+                # 搜索结果传项目 ID；也兼容带 slug 的旧入口。
+                owner = version.get("project_id")
+                if not owner or (owner != project_id and net.modrinth_project(project_id).get("id") != owner):
+                    raise RuntimeError("选中的 Modrinth 版本不属于这个整合包。")
+            else:
+                versions = sorted(net.modrinth_versions(project_id) or [],
+                                  key=lambda item: item.get("date_published") or "", reverse=True)
+                version = next((v for v in versions if v.get("version_type") == "release"),
+                               versions[0] if versions else {})
+            log("下载 Modrinth 整合包")
+            saved = net.install_modrinth_version(version, dest)
+            if not saved:
+                raise RuntimeError("这个 Modrinth 版本没有可下载的整合包。")
+            archive = saved[0]
+        else:
+            if file_id:
+                file = net.cf_mod_file(int(project_id), int(file_id), key)
+            else:
+                file = net.cf_pick_file(net.cf_mod_files(int(project_id), key=key))
+            if not file or (file_id and str(file.get("id") or "") != file_id):
+                raise RuntimeError("找不到 CurseForge 整合包文件。")
+            name = str(file.get("fileName") or "")
+            if not name.lower().endswith(".zip") or any(ch in name for ch in "/\\:"):
+                raise RuntimeError("这个 CurseForge 版本没有可安装的整合包 ZIP。")
+            log("下载 CurseForge 整合包")
+            archive = net.install_curseforge_file(file, dest)
+        result = import_modpack(str(archive), log)
+    result.update({"source": source, "kind": "modpack"})
+    if result["ok"]:
+        result["installedVersion"] = result["version"]
+    return result
 
 
 def _install_online_mod(source: str, project_id: str, file_id: str, context,
@@ -4567,7 +4604,7 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
 
 
 def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod",
-                   *, plan_only: bool = False, confirmation: str = "") -> dict:
+                   *, plan_only: bool = False, confirmation: str = "", on_log=None) -> dict:
     """安装在线资源：mod / 资源包 / 光影 / 数据包 / 整合包，按类型落到对应目录。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4581,43 +4618,11 @@ def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod
                                    plan_only=plan_only, confirmation=confirmation)
 
     if kind == "modpack":
-        # 整合包装成一个新实例：只要游戏根目录，不看当前实例的版本 / 加载器，也不要求先选实例。
-        st, net, mc = _pack_context()
-        target, base, mc_version, loader = "", mc, "", ""
-    else:
-        st, net, mc, target, base, mc_version, loader = _online_context(vid)
+        return _install_online_pack(source, project_id, on_log=on_log)
+
+    st, net, mc, target, base, mc_version, loader = _online_context(vid)
     loaders = _online_loaders(kind, loader)
     game_filter = _online_game_filter(kind, mc_version)
-
-    if kind == "modpack":
-        if source == "modrinth":
-            versions = net.modrinth_versions(project_id, loaders=loaders, game_versions=game_filter) or []
-            with tempfile.TemporaryDirectory(prefix="meow-pack-") as tmp:
-                result = _install_modrinth_pack(net, versions, mc, Path(tmp))
-        else:
-            try:
-                mod_id = int(project_id)
-            except ValueError as exc:
-                raise RuntimeError("CurseForge 项目 id 无效。") from exc
-            files = net.cf_mod_files(mod_id, mc_version or None, None, limit=50,
-                                     key=str(st.get("cfApiKey") or "") or None) or []
-            chosen = net.cf_pick_file(files, mc_version or None, None)
-            if not chosen:
-                raise RuntimeError("没有找到可安装的整合包文件。")
-            with tempfile.TemporaryDirectory(prefix="meow-pack-") as tmp:
-                pack = net.install_curseforge_file(chosen, Path(tmp))
-                if zipfile.is_zipfile(pack):
-                    with zipfile.ZipFile(pack) as zf:
-                        if "manifest.json" in zf.namelist():
-                            result = _install_cf_modpack(pack, mc, net, st)
-                        else:
-                            result = _install_modrinth_pack(net, [{"files": [{"url": net.cf_file_download_url(chosen),
-                                                                            "filename": chosen.get("fileName") or "pack.mrpack"}]}], mc, Path(tmp))
-                else:
-                    raise RuntimeError("下载到的整合包不是压缩包。")
-        result.update({"version": result.get("installedVersion") or target, "source": source, "kind": kind})
-        return result
-
     dest = _online_dest(kind, net, mc, base, target)
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -4679,16 +4684,17 @@ def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod")
     if not project_id:
         raise RuntimeError("没有指定项目。")
     if kind == "modpack":
-        # 整合包装成一个新实例：只要游戏根目录，不看当前实例的版本 / 加载器，也不要求先选实例。
-        st, net, mc = _pack_context()
-        target, base, mc_version, loader = "", mc, "", ""
+        st, net, _ = _pack_context()
+        target = mc_version = loader = ""
     else:
-        st, net, mc, target, base, mc_version, loader = _online_context(vid)
+        st, net, _, target, _, mc_version, loader = _online_context(vid)
     loaders = _online_loaders(kind, loader)
     game_filter = _online_game_filter(kind, mc_version)
     rows = []
     if source == "modrinth":
         versions = net.modrinth_versions(project_id, loaders=loaders, game_versions=game_filter) or []
+        if kind == "modpack":
+            versions = sorted(versions, key=lambda v: str(v.get("date_published") or ""), reverse=True)
         for version in versions[:60]:
             files = version.get("files") or []
             primary = next((f for f in files if f.get("primary")), files[0] if files else {})
@@ -4734,7 +4740,7 @@ def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod")
 
 
 def install_online_file(source: str, project_id: str, file_id: str, vid: str = "", kind: str = "mod",
-                        *, plan_only: bool = False, confirmation: str = "") -> dict:
+                        *, plan_only: bool = False, confirmation: str = "", on_log=None) -> dict:
     """安装用户从 online_files 中选中的具体文件。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4748,41 +4754,11 @@ def install_online_file(source: str, project_id: str, file_id: str, vid: str = "
         return _install_online_mod(source, project_id, file_id, _online_context(vid),
                                    plan_only=plan_only, confirmation=confirmation)
     if kind == "modpack":
-        # 整合包装成一个新实例：只要游戏根目录，不看当前实例的版本 / 加载器，也不要求先选实例。
-        st, net, mc = _pack_context()
-        target, base, mc_version, loader = "", mc, "", ""
-    else:
-        st, net, mc, target, base, mc_version, loader = _online_context(vid)
+        return _install_online_pack(source, project_id, file_id, on_log=on_log)
+
+    st, net, mc, target, base, mc_version, loader = _online_context(vid)
     loaders = _online_loaders(kind, loader)
     game_filter = _online_game_filter(kind, mc_version)
-    if kind == "modpack":
-        if source == "modrinth":
-            versions = net.modrinth_versions(project_id, loaders=loaders, game_versions=game_filter) or []
-            chosen_version = next((v for v in versions if str(v.get("id") or "") == file_id), None)
-            if not chosen_version:
-                raise RuntimeError("找不到选中的 Modrinth 文件。")
-            with tempfile.TemporaryDirectory(prefix="meow-pack-") as tmp:
-                result = _install_modrinth_pack(net, [chosen_version], mc, Path(tmp))
-        else:
-            try:
-                mod_id = int(project_id)
-            except ValueError as exc:
-                raise RuntimeError("CurseForge 项目 id 无效。") from exc
-            files = net.cf_mod_files(mod_id, mc_version or None, None, limit=50,
-                                     key=str(st.get("cfApiKey") or "") or None) or []
-            chosen = next((f for f in files if str(f.get("id") or "") == file_id), None)
-            if not chosen:
-                raise RuntimeError("找不到选中的 CurseForge 文件。")
-            with tempfile.TemporaryDirectory(prefix="meow-pack-") as tmp:
-                pack = net.install_curseforge_file(chosen, Path(tmp))
-                with zipfile.ZipFile(pack) as zf:
-                    if "manifest.json" in zf.namelist():
-                        result = _install_cf_modpack(pack, mc, net, st)
-                    else:
-                        raise RuntimeError("这个 CurseForge 文件不是整合包。")
-        result.update({"version": result.get("installedVersion") or target, "source": source, "kind": kind})
-        return result
-
     dest = _online_dest(kind, net, mc, base, target)
     dest.mkdir(parents=True, exist_ok=True)
     if source == "modrinth":
@@ -5033,7 +5009,7 @@ def ms_start() -> dict:
     }
 
 
-def ms_poll(device_code: str) -> dict:
+def ms_poll(device_code: str, on_authorized=None) -> dict:
     """单次轮询设备码：pending 由 C# 继续轮询；成功后写回账户。"""
     if not device_code:
         return {"ok": False, "message": "缺少设备码"}
@@ -5056,6 +5032,8 @@ def ms_poll(device_code: str) -> dict:
     msa = str(tok.get("access_token") or "")
     if not msa:
         return {"ok": False, "message": "微软未返回 access_token"}
+    if on_authorized is not None:
+        on_authorized("authorized")
     try:
         xbl = auth.xbox_live(msa)
         xt = auth.xsts(xbl["token"])
@@ -5189,8 +5167,51 @@ def online_project(project_id: str = "") -> dict:
     }
 
 
+def _exception_code(exc: Exception) -> str:
+    win = getattr(exc, "winerror", None)
+    if win in (32, 33):
+        return "FILE-IN-USE"
+    if win in (39, 112) or getattr(exc, "errno", None) == errno.ENOSPC:
+        return "FILE-DISK-FULL"
+    if isinstance(exc, PermissionError):
+        return "FILE-ACCESS"
+    if isinstance(exc, FileNotFoundError):
+        return "FILE-MISSING"
+    if isinstance(exc, FileExistsError):
+        return "FILE-EXISTS"
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)) or (
+            isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError)):
+        return "NET-TIMEOUT"
+    if isinstance(exc, zipfile.BadZipFile):
+        return "PACK-INVALID"
+    if isinstance(exc, HTTPError):
+        return f"NET-HTTP-{exc.code}"
+    if isinstance(exc, (URLError, ConnectionError)):
+        return "NET-CONNECTION"
+    return ""
+
+
 def main(argv: list[str]) -> int:
     _install_isolation_resolver()
+    failure_stage = ""
+
+    def track_phase(text: str) -> None:
+        nonlocal failure_stage
+        failure_stage = text
+
+    def emit_import(text: str) -> None:
+        if not text.startswith("@target|"):
+            track_phase(text)
+        if "--progress" in argv:
+            _emit_json({"stage": text})
+
+    def action_result(result: dict) -> dict:
+        if not result.get("ok"):
+            result.setdefault("errorAt", datetime.now().astimezone().isoformat(timespec="milliseconds"))
+            if failure_stage:
+                result.setdefault("errorStage", failure_stage)
+        return result
+
     try:
         if "--snapshot" in argv:
             with_status = "--with-status" in argv
@@ -5237,6 +5258,9 @@ def main(argv: list[str]) -> int:
             want_progress = "--progress" in argv
 
             def emit_stage(text: str) -> None:
+                parts = text.split("|", 2)
+                if len(parts) == 3 and parts[0].isdigit():
+                    track_phase(parts[2] or parts[1])
                 if want_progress:
                     _emit_json({"stage": text})
 
@@ -5245,7 +5269,7 @@ def main(argv: list[str]) -> int:
                 java_arg = argv.index("--java-once") + 1
                 if java_arg < len(argv):
                     java_once = str(decode_json_arg(argv[java_arg]).get("javaPath") or "")
-            print(json.dumps(launch_version(vid, emit_stage if want_progress else None, java_once=java_once),
+            print(json.dumps(action_result(launch_version(vid, emit_stage, java_once=java_once)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--java-install" in argv:
@@ -5331,7 +5355,8 @@ def main(argv: list[str]) -> int:
         if "--unhide-version" in argv:
             idx = argv.index("--unhide-version")
             vid = argv[idx + 1] if idx + 1 < len(argv) else ""
-            print(json.dumps(unhide_version(vid), ensure_ascii=False))
+            root = argv[idx + 2] if idx + 2 < len(argv) else ""
+            print(json.dumps(unhide_version(vid, root), ensure_ascii=False))
             return 0
         if "--select-version" in argv:
             idx = argv.index("--select-version")
@@ -5377,6 +5402,12 @@ def main(argv: list[str]) -> int:
             file = argv[idx + 1] if idx + 1 < len(argv) else ""
             vid = argv[idx + 2] if idx + 2 < len(argv) else ""
             print(json.dumps(toggle_mod(file, vid), ensure_ascii=False, separators=(",", ":")))
+            return 0
+        if "--import-modpack" in argv:
+            idx = argv.index("--import-modpack")
+            path = argv[idx + 1] if idx + 1 < len(argv) else ""
+            track_phase("打开整合包文件")
+            _emit_json(action_result(import_modpack(path, emit_import)))
             return 0
         if "--import-asset" in argv:
             idx = argv.index("--import-asset")
@@ -5474,9 +5505,10 @@ def main(argv: list[str]) -> int:
             kind = argv[idx + 5] if idx + 5 < len(argv) else "mod"
             confirmation = next((arg.partition("=")[2] for arg in argv
                                  if arg.startswith("--confirmed-dependencies=")), "")
-            print(json.dumps(install_online_file(source, project_id, file_id, vid, kind,
+            track_phase("安装在线资源")
+            print(json.dumps(action_result(install_online_file(source, project_id, file_id, vid, kind,
                                                  plan_only="--plan-online-mod" in argv,
-                                                 confirmation=confirmation),
+                                                 confirmation=confirmation, on_log=emit_import)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--install-online" in argv:
@@ -5485,8 +5517,9 @@ def main(argv: list[str]) -> int:
             project_id = argv[idx + 2] if idx + 2 < len(argv) else ""
             vid = argv[idx + 3] if idx + 3 < len(argv) else ""
             kind = argv[idx + 4] if idx + 4 < len(argv) else "mod"
-            print(json.dumps(install_online(source, project_id, vid, kind,
-                                           plan_only="--plan-online-mod" in argv),
+            track_phase("安装在线资源")
+            print(json.dumps(action_result(install_online(source, project_id, vid, kind,
+                                           plan_only="--plan-online-mod" in argv, on_log=emit_import)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--loader-versions" in argv:
@@ -5498,7 +5531,8 @@ def main(argv: list[str]) -> int:
         if "--fabric-api-versions" in argv:
             idx = argv.index("--fabric-api-versions")
             mc_version = argv[idx + 1] if idx + 1 < len(argv) else ""
-            print(json.dumps(fabric_api_versions(mc_version), ensure_ascii=False))
+            project_id = argv[idx + 2] if idx + 2 < len(argv) else ""
+            print(json.dumps(fabric_api_versions(mc_version, project_id), ensure_ascii=False))
             return 0
         if "--loader-support" in argv:
             idx = argv.index("--loader-support")
@@ -5519,8 +5553,13 @@ def main(argv: list[str]) -> int:
                 pi = argv.index("--prereq-version")
                 if pi + 1 < len(argv):
                     prereq_value = argv[pi + 1]
+            prereq_project = ""
+            if "--prereq-project" in argv:
+                pi = argv.index("--prereq-project")
+                if pi + 1 < len(argv):
+                    prereq_project = argv[pi + 1]
             skip = {"--progress", "--prereq", "--name", name_value,
-                    "--prereq-version", prereq_value}
+                    "--prereq-version", prereq_value, "--prereq-project", prereq_project}
             rest = [a for a in argv[idx + 1:] if a not in skip]
             vid = rest[0] if len(rest) > 0 else ""
             loader = rest[1] if len(rest) > 1 else "vanilla"
@@ -5529,14 +5568,24 @@ def main(argv: list[str]) -> int:
             want_prereq = "--prereq" in argv
 
             def emit_install(text: str) -> None:
+                if text.partition("|")[0].isdigit():
+                    track_phase(text.partition("|")[2])
                 if want_progress:
                     _emit_json({"stage": text})
 
-            _emit_json(install_version(vid, loader, loader_version,
-                                       emit_install if want_progress else None,
+            track_phase("准备安装实例")
+            _emit_json(action_result(install_version(vid, loader, loader_version,
+                                       emit_install,
                                        with_prereq=want_prereq,
                                        prereq_version=prereq_value,
-                                       custom_name=name_value))
+                                       custom_name=name_value,
+                                       prereq_project=prereq_project)))
+            return 0
+        if "--add-offline-json" in argv:
+            idx = argv.index("--add-offline-json")
+            data = decode_json_arg(argv[idx + 1] if idx + 1 < len(argv) else "")
+            print(json.dumps(add_offline_account(str(data.get("name") or ""),
+                             str(data.get("variant") or "classic")), ensure_ascii=False))
             return 0
         if "--add-offline" in argv:
             idx = argv.index("--add-offline")
@@ -5709,13 +5758,20 @@ def main(argv: list[str]) -> int:
         if "--ms-poll" in argv:
             idx = argv.index("--ms-poll")
             device_code = argv[idx + 1] if idx + 1 < len(argv) else ""
-            print(json.dumps(ms_poll(device_code), ensure_ascii=False, separators=(",", ":")))
+            progress = (lambda phase: _emit_json({"stage": phase})) if "--progress" in argv else None
+            _emit_json(ms_poll(device_code, progress))
             return 0
         print(json.dumps({"ok": False, "message": "usage: sidecar.py --snapshot | --launch <vid> | --mods [vid] | --mojang-versions | --install-version <id> [loader]"},
                          ensure_ascii=False))
         return 2
     except Exception as exc:
-        print(json.dumps({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
+        error = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+        if phase := getattr(exc, "install_stage", ""):
+            error["errorStage"] = phase
+        code = _exception_code(exc)
+        if code:
+            error["errorCode"] = code
+        _emit_json(action_result(error))
         return 1
 
 

@@ -12,6 +12,12 @@
         <SolidColorBrush x:Key="ContinueLaunchHoverBrush" Color="#FF6FD79C"/>
         <SolidColorBrush x:Key="ContinueLaunchPressedBrush" Color="#FF9BE8BD"/>
         <!-- 品牌绿实心主按钮：底色固定语义绿，hover/pressed 只提亮，不换色相 -->
+        <Style x:Key="StopGameButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource AppStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
         <Style x:Key="ContinueLaunchButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="{ThemeResource TintNewsBrush}"/>
             <Setter Property="Foreground" Value="{ThemeResource ContinueLaunchForegroundBrush}"/>
@@ -399,15 +405,21 @@
                                             Style="{StaticResource ContinueLaunchButtonStyle}"
                                             Click="ContinueLaunch_Click" AutomationProperties.Name="启动当前实例">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon x:Name="ContinueLaunchIcon" Glyph="&#xE768;" FontSize="15" Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                            <Grid Width="16" Height="16">
+                                                <FontIcon x:Name="ContinueLaunchIcon" Glyph="&#xE768;" FontSize="15" Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                                <Rectangle x:Name="ContinueStopIcon" Width="10" Height="10" RadiusX="1" RadiusY="1"
+                                                           Fill="{ThemeResource AppTextBrush}" Visibility="Collapsed" />
+                                            </Grid>
                                             <TextBlock x:Name="ContinueLaunchText" Text="启动" FontSize="16" FontWeight="Bold"
                                                        Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                            <TextBlock x:Name="ContinueStopText" Text="结束游戏" FontSize="16" FontWeight="SemiBold"
+                                                       Foreground="{ThemeResource AppTextBrush}" Visibility="Collapsed" />
                                         </StackPanel>
                                     </Button>
                                     <Button x:Name="ContinueSwitchButton" Width="32" Height="52" Padding="0" CornerRadius="0,10,10,0"
                                             Style="{StaticResource ContinueLaunchButtonStyle}"
                                             AutomationProperties.Name="展开实例列表" ToolTipService.ToolTip="切换实例">
-                                        <FontIcon Glyph="&#xE70D;" FontSize="11" Foreground="{ThemeResource ContinueLaunchForegroundBrush}"/>
+                                        <FontIcon Glyph="&#xE70D;" FontSize="11" Foreground="{Binding Foreground, ElementName=ContinueSwitchButton}"/>
                                         <Button.Flyout>
                                             <Flyout x:Name="ContinuePickerFlyout" Placement="TopEdgeAlignedRight"
                                                     Opening="ContinuePickerFlyout_Opening" Opened="ContinuePickerFlyout_Opened">
@@ -1617,34 +1629,35 @@
             </StackPanel>
         </Grid>
 
-        <!-- 首次读取本机数据（实例 / 账户）：不让玩家对着空白发愣 -->
-        <Border x:Name="HomeLoading" Grid.RowSpan="2" Canvas.ZIndex="45" Visibility="Collapsed"
-                IsHitTestVisible="False" Background="#99000000">
-            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Background="#F21C1C1C" BorderBrush="#33FFFFFF" BorderThickness="1"
-                    CornerRadius="{StaticResource CardCornerRadius}" Padding="36,26" MinWidth="300">
-                <controls:LoadingBlock x:Name="HomeLoadingBlock" Text="正在读取实例和账户…"
-                                       Tint="{ThemeResource TintRecentBrush}" />
-            </Border>
+        <!-- 首页读取和游戏启动状态放在页脚，不再用遮罩阻断整页。 -->
+        <Border x:Name="HomeLoading" Grid.Row="2" Canvas.ZIndex="45" Visibility="Collapsed"
+                IsHitTestVisible="False" HorizontalAlignment="Left" VerticalAlignment="Center" Padding="8,6">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <ProgressRing x:Name="HomeLoadingRing" Width="18" Height="18" IsActive="False" />
+                <TextBlock Text="正在读取实例和账户…" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{ThemeResource AppText2Brush}" />
+            </StackPanel>
         </Border>
-
-        <!-- 启动遮罩：点启动后立刻盖住整页，避免「点了没反应」，直到游戏进程被检测到 -->
-        <Grid x:Name="LaunchOverlay" Grid.RowSpan="2" Canvas.ZIndex="50"
-              Background="#B8050505" Visibility="Collapsed" Opacity="0">
-            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Background="#F21C1C1C" BorderBrush="#33FFFFFF" BorderThickness="1"
-                    CornerRadius="{StaticResource CardCornerRadius}" Padding="32,26" MinWidth="360">
-                <StackPanel Spacing="14" HorizontalAlignment="Center">
-                    <ProgressRing x:Name="LaunchOverlayRing" Width="38" Height="38"
-                                  IsActive="True" AutomationProperties.Name="正在启动游戏"/>
-                    <TextBlock x:Name="LaunchOverlayTitle" Text="正在启动" FontSize="20" FontWeight="SemiBold"
-                               Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="LaunchOverlayName" Text="" FontSize="14"
-                               Foreground="{ThemeResource AppText2Brush}" HorizontalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" MaxWidth="320"/>
-                    <TextBlock x:Name="LaunchOverlayStage" Text="正在准备启动…" FontSize="12"
-                               Foreground="{ThemeResource AppText3Brush}" HorizontalAlignment="Center"/>
-                </StackPanel>
+        <Grid x:Name="LaunchOverlay" Grid.Row="2" Canvas.ZIndex="50"
+              HorizontalAlignment="Left" VerticalAlignment="Center" MaxWidth="360"
+              Visibility="Collapsed" Opacity="0" IsHitTestVisible="False">
+            <Border Background="{ThemeResource AppCardBrush}" BorderBrush="{ThemeResource CardStrokeBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="12,8">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <ProgressRing x:Name="LaunchOverlayRing" Width="22" Height="22" IsActive="False"
+                                  VerticalAlignment="Center" AutomationProperties.Name="正在启动游戏" />
+                    <StackPanel Grid.Column="1" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock x:Name="LaunchOverlayTitle" Text="正在启动" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource AppTextBrush}" />
+                            <TextBlock x:Name="LaunchOverlayName" FontSize="12" MaxWidth="210" TextTrimming="CharacterEllipsis"
+                                       Foreground="{ThemeResource AppText2Brush}" />
+                        </StackPanel>
+                        <TextBlock x:Name="LaunchOverlayStage" Text="正在准备启动…" FontSize="11" TextTrimming="CharacterEllipsis"
+                                   Foreground="{ThemeResource AppText3Brush}" />
+                    </StackPanel>
+                </Grid>
             </Border>
         </Grid>
 

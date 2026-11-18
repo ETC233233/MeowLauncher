@@ -13,6 +13,7 @@ class LaunchProfile:
     automatic_memory: bool
     java_path: str
     jvm: str
+    jvm_auto: bool = True
 
 
 def instance_record(settings: dict, version_id: str) -> dict:
@@ -56,13 +57,15 @@ def resolve_launch_profile(settings: dict, version_id: str, root: Path,
         use_global = bool(record.get("useGlobal", True))
     if use_global:
         return LaunchProfile(True, global_memory, bool(settings.get("memAuto")),
-                             "", str(settings.get("jvm") or ""))
+                             "", str(settings.get("jvm") or ""),
+                             bool(settings.get("jvmAuto", True)))
     return LaunchProfile(
         False,
         _memory_mb(record.get("mem"), global_memory),
         str(record.get("memMode") or "").lower() == "auto",
         instance_java(record, root),
         str(record.get("jvm") or ""),
+        bool(record.get("jvmAuto", True)),
     )
 
 
@@ -87,3 +90,31 @@ def recommended_java_major(metadata: dict) -> int:
         return max(0, int(declared.get("majorVersion") or 0))
     except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def jvm_defaults(java_major: int, memory_mb: int) -> list[str]:
+    """按 Java 大版本与分配内存给一组保守的 JVM 参数。
+
+    只放"没有争议、且确实影响体验"的几条：
+    - Java 8 的默认回收器是 Parallel，客户端要 G1 必须显式开；
+    - Java 11/17/21 默认就是 G1，不要再加任何 GC 参数（加了常见的是变慢）；
+    - 堆 >= 4G 时预触内存，减少开局第一次扩张带来的卡顿；
+    - 旧版本（1.12 及更早）读系统编码，UTF-8 能避免中文路径与日志乱码。
+    """
+    out: list[str] = []
+    if 0 < java_major <= 8:
+        out.append("-XX:+UseG1GC")
+    if memory_mb >= 4096:
+        out.append("-XX:+AlwaysPreTouch")
+    out.append("-Dfile.encoding=UTF-8")
+    return out
+
+
+def merge_jvm_defaults(extra_jvm: str, java_major: int, memory_mb: int) -> str:
+    """把推荐参数并进用户的额外参数：用户写过的同名项优先，不会被覆盖。"""
+    auto = jvm_defaults(java_major, memory_mb)
+    mine = [x.split("=")[0] for x in (extra_jvm or "").split()]
+    auto = [a for a in auto if a.split("=")[0] not in mine]
+    if not auto:
+        return extra_jvm or ""
+    return " ".join(auto + ([extra_jvm] if extra_jvm else []))

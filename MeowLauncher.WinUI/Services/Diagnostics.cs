@@ -1,23 +1,41 @@
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace MeowLauncher.WinUI.Services;
 
+public sealed record FailureInfo(string Code, DateTimeOffset At, string Stage)
+{
+    public string TimeText => At.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff zzz");
+}
+
 /// <summary>启动失败的诊断信息：给用户一个可复制的错误码与上下文，而不是只看到一句异常。</summary>
 public static class Diagnostics
 {
-    public static string ErrorCodeFor(string? message)
+    public static string ErrorCodeFor(string? message, TaskKind kind = TaskKind.Other)
     {
         var text = message ?? "";
-        if (text.Contains("Java", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("JVM", StringComparison.OrdinalIgnoreCase)) return "JAVA-01";
-        if (text.Contains("登录") || text.Contains("账号") || text.Contains("账户")) return "ACC-01";
-        if (text.Contains("超时") || text.Contains("timeout", StringComparison.OrdinalIgnoreCase)) return "NET-01";
-        if (text.Contains("FileNotFound") || text.Contains("不存在") || text.Contains("找不到版本")) return "VER-01";
-        if (text.Contains("版本")) return "VER-02";
-        return "LAUNCH-01";
+        bool Has(string value) => text.Contains(value, StringComparison.OrdinalIgnoreCase);
+        if (Has("WinError 32") || Has("WinError 33") || Has("被占用")) return "FILE-IN-USE";
+        if (Has("WinError 112") || Has("磁盘空间不足")) return "FILE-DISK-FULL";
+        if (Has("权限") || Has("拒绝访问") || Has("PermissionError") || Has("access denied") || Has("无法写入")) return "FILE-ACCESS";
+        if (Has("超时") || Has("timeout") || Has("timed out")) return "NET-TIMEOUT";
+        if (Has("下载失败") || Has("连接失败") || Has("连不上网络")) return "NET-DOWNLOAD";
+        if (Has("不完整") || Has("校验失败") || Has("hash mismatch") || Has("sha1 mismatch")) return "FILE-INTEGRITY";
+        if (Has("BadZipFile") || Has("整合包格式") || Has("整合包清单") || Has("不是有效的 Modrinth 整合包")) return "PACK-INVALID";
+        if (Has("FileNotFound") || Has("DirectoryNotFound") || Has("找不到要导入")) return "FILE-MISSING";
+        if (Has("已经有叫") || Has("FileExistsError")) return "FILE-EXISTS";
+        if (Has("Java") || Has("JVM")) return "JAVA-RUNTIME";
+        if (Has("登录") || Has("账号") || Has("账户")) return "ACCOUNT-SIGNIN";
+        if (Has("找不到版本") || Has("找不到 Mojang 版本") || Has("没有指定要安装的版本")) return "VERSION-MISSING";
+        if (Has("检测到崩溃报告")) return "GAME-CRASH";
+        if (Has("退出码") && kind == TaskKind.Launch) return "GAME-EXIT";
+        return kind switch
+        {
+            TaskKind.Launch => "LAUNCH-UNEXPECTED",
+            TaskKind.Install => "INSTALL-UNEXPECTED",
+            _ => "TASK-UNEXPECTED",
+        };
     }
 
     /// <summary>把 .NET 异常翻译成一句用户能懂的话；技术细节仍留在诊断报告里。</summary>
@@ -35,15 +53,15 @@ public static class Diagnostics
         return "操作没有完成，请重试一次。";
     }
 
-    public static string BuildReport(string code, string stage, string message, string versionId, string? lastStage)
+    public static string BuildReport(FailureInfo failure, string task, string message, string versionId = "")
     {
         var sb = new StringBuilder();
         sb.AppendLine("MeowLauncher 诊断报告");
-        sb.AppendLine($"时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine($"错误码：{code}");
-        sb.AppendLine($"环节：{stage}");
+        sb.AppendLine($"发生时间：{failure.TimeText}");
+        sb.AppendLine($"错误码：{failure.Code}");
+        sb.AppendLine($"任务：{task}");
         if (!string.IsNullOrWhiteSpace(versionId)) sb.AppendLine($"实例：{versionId}");
-        if (!string.IsNullOrWhiteSpace(lastStage)) sb.AppendLine($"最后阶段：{lastStage}");
+        if (!string.IsNullOrWhiteSpace(failure.Stage)) sb.AppendLine($"失败环节：{failure.Stage}");
         sb.AppendLine($"说明：{message}");
         sb.AppendLine($"启动器：{VersionText()}");
         sb.AppendLine($"系统：{Environment.OSVersion} · {RuntimeInformation.OSArchitecture}");
