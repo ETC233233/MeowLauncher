@@ -1096,27 +1096,17 @@ public sealed partial class AccountPage : Page
     {
         var input = new TextBox
         {
-            PlaceholderText = "请输入玩家名",
+            PlaceholderText = "1–16 位字母、数字或下划线",
+            MaxLength = 16,
             Width = 320,
         };
         var hint = new TextBlock
         {
-            Text = "离线账户不适用于开启了正版验证的服务器或正版账号玩家所开启的非自定义局域网联机。"
-                 + "此外，在联机时为了显示自己的皮肤，需要玩家同时安装皮肤补丁模组。"
-                 + "离线账户仅供体验使用，如需完整的游玩体验，请支持正版 Minecraft。",
+            Text = "离线账户只在本机使用，不能进入正版服务器。",
             FontSize = 11.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
         };
-        var buyLink = new HyperlinkButton
-        {
-            Content = "购买 Minecraft",
-            Padding = new Thickness(0, 0, 0, 0),
-            FontSize = 11.5,
-            HorizontalAlignment = HorizontalAlignment.Left,
-        };
-        buyLink.Click += async (_, _) =>
-            await Windows.System.Launcher.LaunchUriAsync(new Uri("https://www.minecraft.net/store"));
         var model = new RadioButtons
         {
             Header = "皮肤模型",
@@ -1128,7 +1118,6 @@ public sealed partial class AccountPage : Page
         var body = new StackPanel { Spacing = 12, Width = 340 };
         body.Children.Add(input);
         body.Children.Add(hint);
-        body.Children.Add(buyLink);
         body.Children.Add(model);
 
         var dialog = new ContentDialog

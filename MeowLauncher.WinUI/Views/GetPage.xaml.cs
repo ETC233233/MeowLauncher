@@ -6,9 +6,6 @@ using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using MeowLauncher.WinUI.Services;
-using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
-using Windows.Storage.Pickers;
 
 namespace MeowLauncher.WinUI.Views;
 
@@ -22,7 +19,6 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
     private string _pendingQuery = "";
     private bool _ready;
     private bool _subOpen;
-    private bool _importingPack;
 
     public GetPage()
     {
@@ -56,144 +52,10 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         if (tab == "online") _pendingQuery = "";
         if (InnerFrame.Content?.GetType() == target) return;
         var switching = InnerFrame.Content is not null;   // 首次载入由整页的滑入负责，只有标签互切才补进场
-        InnerFrame.Navigate(target, new TabNav(query, true, this), switching ? MeowLauncher.WinUI.Controls.Motion.Sibling(tab == "online") : MeowLauncher.WinUI.Controls.Motion.PageRefresh());
+        InnerFrame.Navigate(target, new TabNav(query, true, this), new SuppressNavigationTransitionInfo());
         // 在线资源的搜索框在本页顶栏（来源切换右边），交给新建的 OnlinePage 使用。
         if (InnerFrame.Content is OnlinePage online) online.AttachQueryBox(OnlineQueryBox);
-    }
-
-    private static bool IsPackFile(StorageFile file) =>
-        file.FileType.Equals(".mrpack", StringComparison.OrdinalIgnoreCase)
-        || file.FileType.Equals(".zip", StringComparison.OrdinalIgnoreCase);
-
-    private void Pack_DragOver(object sender, DragEventArgs e)
-    {
-        if (_importingPack || !e.DataView.Contains(StandardDataFormats.StorageItems)) return;
-        e.AcceptedOperation = DataPackageOperation.Copy;
-        e.DragUIOverride.Caption = "导入整合包（.mrpack 或 .zip）";
-        e.Handled = true;
-    }
-
-    private async void Pack_Drop(object sender, DragEventArgs e)
-    {
-        if (_importingPack || !e.DataView.Contains(StandardDataFormats.StorageItems)) return;
-        e.Handled = true;
-        var deferral = e.GetDeferral();
-        List<StorageFile> files;
-        try
-        {
-            files = (await e.DataView.GetStorageItemsAsync()).OfType<StorageFile>().Where(IsPackFile).ToList();
-        }
-        catch (Exception ex)
-        {
-            ShowPackNotice(InfoBarSeverity.Error, "无法读取拖入的文件", ex.Message);
-            return;
-        }
-        finally { deferral.Complete(); }
-        await ImportPacksAsync(files.Select(file => file.Path).ToArray());
-    }
-
-    private async void ImportPack_Click(object sender, RoutedEventArgs e)
-    {
-        if (_importingPack || App.MainWindow is not { } main) return;
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, main.WindowHandle);
-        picker.FileTypeFilter.Add(".mrpack");
-        picker.FileTypeFilter.Add(".zip");
-        try
-        {
-            var files = await picker.PickMultipleFilesAsync();
-            if (files.Count > 0) await ImportPacksAsync(files.Select(file => file.Path).ToArray());
-        }
-        catch (Exception ex) { ShowPackNotice(InfoBarSeverity.Error, "无法打开文件", ex.Message); }
-    }
-
-    internal async Task ImportPacksAsync(IReadOnlyList<string> files)
-    {
-        if (_importingPack || App.MainWindow is not { } main) return;
-        if (files.Count == 0)
-        {
-            ShowPackNotice(InfoBarSeverity.Warning, "没有整合包", "请拖入 Modrinth .mrpack 或 CurseForge 整合包 .zip。");
-            return;
-        }
-        var dirs = GameDirectoryResolver.Resolve(main.Preferences);
-        if (dirs.Count == 0)
-        {
-            ShowPackNotice(InfoBarSeverity.Warning, "没有游戏目录", "请先在全部实例中添加游戏目录。");
-            return;
-        }
-
-        _importingPack = true;
-        ImportPackButton.IsEnabled = false;
-        try
-        {
-            var directory = new ComboBox { Header = "安装目录", ItemsSource = dirs, SelectedIndex = 0,
-                                           HorizontalAlignment = HorizontalAlignment.Stretch };
-            var panel = new StackPanel { Spacing = 12 };
-            panel.Children.Add(new TextBlock { Text = files.Count == 1 ? Path.GetFileName(files[0]) : $"将新建 {files.Count} 个整合包实例",
-                                               TextWrapping = TextWrapping.Wrap });
-            panel.Children.Add(directory);
-            var dialog = new ContentDialog
-            {
-                XamlRoot = main.Content.XamlRoot,
-                Title = "导入整合包",
-                Content = panel,
-                PrimaryButtonText = "导入",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Close,
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || directory.SelectedItem is not string root)
-                return;
-
-            var installed = 0;
-            var error = "";
-            foreach (var file in files)
-            {
-                var task = TaskCenter.Add($"导入整合包 {Path.GetFileNameWithoutExtension(file)}", Path.GetFileName(file),
-                    "versions", "\uE8B5", InstanceIcon.ForLoader(null));
-                try
-                {
-                    var progress = new Progress<string>(stage => TaskCenter.Report(task, stage));
-                    var result = await App.Backend.ImportModpackAsync(file, root, progress, task.Id);
-                    if (result.Ok)
-                    {
-                        installed++;
-                        task.TargetIcon = InstanceIcon.ForInstalledPack(result);
-                        TaskCenter.Complete(task, result.Message);
-                    }
-                    else
-                    {
-                        error = result.Message;
-                        TaskCenter.Fail(task, error, result.Failure);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    error = ex.Message;
-                    TaskCenter.Fail(task, error);
-                }
-            }
-            if (installed > 0) await main.RefreshShellAsync(force: true);
-            ShowPackNotice(installed == files.Count ? InfoBarSeverity.Success
-                : installed == 0 ? InfoBarSeverity.Error : InfoBarSeverity.Warning,
-                installed == 0 ? "整合包导入失败" : $"已导入 {installed} / {files.Count} 个整合包", error);
-        }
-        catch (Exception ex)
-        {
-            ShowPackNotice(InfoBarSeverity.Error, "无法导入整合包", ex.Message);
-        }
-        finally
-        {
-            _importingPack = false;
-            ImportPackButton.IsEnabled = true;
-        }
-    }
-
-    private void ShowPackNotice(InfoBarSeverity severity, string title, string message)
-    {
-        PackImportNotice.Severity = severity;
-        PackImportNotice.Title = title;
-        PackImportNotice.Message = message;
-        PackImportNotice.IsOpen = true;
+        if (switching) MeowLauncher.WinUI.Controls.Motion.Enter(InnerFrame, 0, 8, 200);
     }
 
     // 「获取」只是个壳：本页过滤和 Ctrl+K 都转给里面的 DownloadPage / OnlinePage。
@@ -217,10 +79,10 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         var first = !_subOpen;
         _subOpen = true;
         ApplyHeaderMode();
-        // 详情是下一级页面，使用系统 DrillIn 过渡。
+        // 不用 DrillIn：它的缩放动画会让截图/视觉上子页比列表窄一圈，整页替换直接出现更干净。
         try
         {
-            SubFrame.Navigate(page, args, MeowLauncher.WinUI.Controls.Motion.Enabled ? new DrillInNavigationTransitionInfo() : new SuppressNavigationTransitionInfo());
+            SubFrame.Navigate(page, args, new SuppressNavigationTransitionInfo());
         }
         catch (Exception ex)
         {
@@ -230,6 +92,7 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
             throw;
         }
         MeowLauncher.WinUI.Controls.Motion.Enter(SubHeader, 0, 6, 200);
+        MeowLauncher.WinUI.Controls.Motion.Enter(SubFrame, 40, 10, 240);
         // 标题栏返回键 / Alt+Left 走同一条历史：只关子页，不换整页。
         if (first) App.MainWindow?.PushSubPage(() => CloseSubPageCore(popHistory: false));
     }
@@ -342,7 +205,6 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         Paint(TabDownload, _tab == "download");
         Paint(TabOnline, _tab == "online");
         OnlineHeaderActions.Visibility = _tab == "online" ? Visibility.Visible : Visibility.Collapsed;
-        ImportPackButton.Visibility = _tab == "download" ? Visibility.Visible : Visibility.Collapsed;
         ResourceMirrorBox.SelectedIndex = McimClient.PreferOfficial ? 1 : 0;
 
         // 来源切换跟着「在线资源」走：选中时从按钮右边滑出来，切到下载版本就收起。

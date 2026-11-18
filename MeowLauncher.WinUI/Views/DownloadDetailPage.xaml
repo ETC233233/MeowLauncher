@@ -30,13 +30,12 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       HorizontalScrollMode="Disabled">
             <StackPanel Spacing="12" Padding="0,0,0,4">
-                <!-- 版本卡：图标 + Minecraft x.y + 类型·日期 -->
+                <!-- 版本卡：图标 + Minecraft x.y + 类型·日期；安装目录一行 -->
                 <Border Background="{ThemeResource AppCardBrush}" BorderBrush="{ThemeResource CardStrokeBrush}"
                         BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
                     <Grid Padding="18,16" ColumnSpacing="16">
@@ -44,7 +43,7 @@
                             <ColumnDefinition Width="48" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border x:Name="DetailIcon" Width="48" Height="48" CornerRadius="8" VerticalAlignment="Top">
+                        <Border Width="48" Height="48" CornerRadius="8" VerticalAlignment="Top">
                             <Border.Background>
                                 <ImageBrush x:Name="DetailIconBrush" Stretch="Uniform" />
                             </Border.Background>
@@ -58,6 +57,9 @@
                             </StackPanel>
                             <TextBlock x:Name="DetailMeta" FontSize="{StaticResource FontSizeCaption}"
                                        Foreground="{ThemeResource AppText3Brush}" />
+                            <TextBlock x:Name="DetailDir" FontSize="{StaticResource FontSizeCaption}"
+                                       Foreground="{ThemeResource AppText3Brush}"
+                                       TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -84,20 +86,17 @@
                                         Visibility="{Binding SelectedVisibility}" />
                                 <Grid Padding="18,0,16,0" ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="32" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Image Source="{Binding Icon}" Width="28" Height="28" Stretch="Uniform"
-                                           VerticalAlignment="Center" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
                                         <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
                                                    Foreground="{ThemeResource AppTextBrush}" />
                                         <TextBlock Text="{Binding Status}" FontSize="{StaticResource FontSizeCaption}"
                                                    Foreground="{ThemeResource AppText3Brush}"
                                                    TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14"
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14"
                                                 VerticalAlignment="Center">
                                         <StackPanel Orientation="Horizontal" Spacing="6"
                                                     Visibility="{Binding InstalledVisibility}">
@@ -139,18 +138,12 @@
                             <ComboBox x:Name="DetailLoaderVersion" Width="280"
                                       SelectionChanged="DetailLoaderVersion_SelectionChanged" />
                         </StackPanel>
-                        <StackPanel x:Name="DetailPrereqRow" Spacing="8" Visibility="Collapsed">
-                            <ComboBox x:Name="DetailPrereq" HorizontalAlignment="Stretch"
-                                      AutomationProperties.Name="选择 API"
-                                      SelectionChanged="DetailPrereq_SelectionChanged" />
-                            <StackPanel x:Name="DetailPrereqVersions" Orientation="Horizontal" Spacing="8">
-                                <ComboBox x:Name="DetailPrereqVersion" Width="280"
-                                          AutomationProperties.Name="API 版本"
-                                          PlaceholderText="选择版本"
-                                          SelectionChanged="DetailPrereqVersion_SelectionChanged" />
-                                <Button x:Name="DetailPrereqRetry" Content="重试" Visibility="Collapsed"
-                                        Style="{StaticResource QuietButtonStyle}" Click="DetailPrereqRetry_Click" />
-                            </StackPanel>
+                        <StackPanel x:Name="DetailPrereqRow" Orientation="Horizontal" Spacing="10"
+                                    Visibility="Collapsed">
+                            <CheckBox x:Name="DetailPrereq" Content="一起安装前置（Fabric API）"
+                                      IsChecked="True" VerticalAlignment="Center" />
+                            <ComboBox x:Name="DetailPrereqVersion" Width="240"
+                                      PlaceholderText="前置版本" VerticalAlignment="Center" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -162,33 +155,8 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="1" Background="{ThemeResource AppCardBrush}"
-                BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
-                CornerRadius="{StaticResource CardCornerRadius}">
-            <Grid Padding="18,10" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="2*" />
-                </Grid.ColumnDefinitions>
-                <FontIcon Glyph="&#xE8B7;" FontSize="18" VerticalAlignment="Center"
-                          Foreground="{ThemeResource AppText2Brush}" />
-                <TextBlock x:Name="InstallDirLabel" Grid.Column="1" Text="安装目录"
-                           FontSize="{StaticResource FontSizeBody}" VerticalAlignment="Center" />
-                <ComboBox x:Name="DetailDir" Grid.Column="2" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                          PlaceholderText="请先添加游戏目录" AutomationProperties.LabeledBy="{Binding ElementName=InstallDirLabel}"
-                          SelectionChanged="DetailDir_SelectionChanged">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding}" />
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
-            </Grid>
-        </Border>
-
         <!-- 底部固定：要装什么 + 开始下载 -->
-        <Border Grid.Row="2" Background="{ThemeResource AppCardBrush}"
+        <Border Grid.Row="1" Background="{ThemeResource AppCardBrush}"
                 BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
                 CornerRadius="{StaticResource CardCornerRadius}">
             <Grid Padding="18,12" ColumnSpacing="16">

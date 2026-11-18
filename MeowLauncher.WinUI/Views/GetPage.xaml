@@ -7,8 +7,7 @@
 
     <!-- 「获取」把下载版本与在线资源并成一页，用顶部两个胶囊切换；
          两个子页仍复用原页面的 XAML 与业务代码，这里只负责导航与页头。 -->
-    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12" Background="Transparent"
-          AllowDrop="True" DragOver="Pack_DragOver" Drop="Pack_Drop">
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="52" />
             <RowDefinition Height="Auto" />
@@ -22,13 +21,6 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="获取" FontSize="28" FontWeight="SemiBold"
                        Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
-            <Button x:Name="ImportPackButton" Grid.Column="1" VerticalAlignment="Center"
-                    Click="ImportPack_Click" ToolTipService.ToolTip="也可以把 .mrpack 或整合包 .zip 拖到此页">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE8B5;" FontSize="14" />
-                    <TextBlock Text="导入整合包" />
-                </StackPanel>
-            </Button>
             <!-- 在线资源装到哪个实例：和实例页同一个切换器，放右上角；下载版本页用不到，隐藏 -->
             <StackPanel x:Name="OnlineHeaderActions" Grid.Column="1" Orientation="Horizontal" Spacing="8"
                         VerticalAlignment="Center" Visibility="Collapsed">
@@ -110,8 +102,5 @@
              第 1 行（胶囊）收起后 RowSpacing 还会占一格，这里用负边距补回。 -->
         <Frame x:Name="SubFrame" Grid.Row="2" Background="Transparent" Margin="0,-12,0,0"
                IsNavigationStackEnabled="False" Visibility="Collapsed" />
-        <InfoBar x:Name="PackImportNotice" Grid.RowSpan="3" Canvas.ZIndex="10"
-                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="400"
-                 IsClosable="True" Visibility="Visible" />
     </Grid>
 </Page>

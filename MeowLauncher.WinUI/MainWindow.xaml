@@ -6,7 +6,6 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:converters="using:MeowLauncher.WinUI.Converters"
     xmlns:controls="using:MeowLauncher.WinUI.Controls"
-    xmlns:views="using:MeowLauncher.WinUI.Views"
     mc:Ignorable="d"
     Title="MeowLauncher">
 
@@ -38,11 +37,9 @@
 
         <controls:WallpaperLayer x:Name="Wallpaper" Grid.RowSpan="2" Grid.ColumnSpan="2" />
 
-        <Border x:Name="BackgroundImageBase" Grid.RowSpan="2" Grid.ColumnSpan="2"
-                Visibility="Collapsed" IsHitTestVisible="False" />
         <Image x:Name="BackgroundImageHost" Grid.RowSpan="2" Grid.ColumnSpan="2"
                Stretch="UniformToFill" Visibility="Collapsed" IsHitTestVisible="False"
-               Opacity="1" />
+               Opacity="0.95" />
 
         <Border x:Name="RootVeil" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="#0D0B0D10" IsHitTestVisible="False" />
 
@@ -231,8 +228,7 @@
                         HorizontalContentAlignment="Stretch">
                     <!-- 悬浮概览：贴入口上沿弹出，宽 380（内容 352 + 内边距 28），只给最近 3 条进行中与 3 条结束。 -->
                     <Button.Flyout>
-                        <Flyout x:Name="TaskFlyout" Placement="TopEdgeAlignedLeft" AreOpenCloseAnimationsEnabled="True"
-                                Opening="TaskFlyout_Opening" Opened="TaskFlyout_Opened">
+                        <Flyout x:Name="TaskFlyout" Placement="TopEdgeAlignedLeft" Opening="TaskFlyout_Opening" Opened="TaskFlyout_Opened">
                             <Flyout.FlyoutPresenterStyle>
                                 <Style TargetType="FlyoutPresenter">
                                     <Setter Property="Padding" Value="14" />
@@ -401,143 +397,6 @@
             <Grid VerticalAlignment="Bottom" Height="8" Background="#22FFFFFF">
                 <Border x:Name="StartupBar" Background="{ThemeResource AppBrandBrush}" HorizontalAlignment="Left" Width="0">
                 </Border>
-            </Grid>
-        </Grid>
-
-        <!-- 新手引导已改成独立窗口（Views/OnboardingWindow），不再盖住主界面；
-             这里只剩「进入启动器」之后的手绘线稿转场。 -->
-
-        <!-- 进入启动器的过渡：先铺一层灰色骨架占位，真实数据就绪后骨架渐隐、露出真界面 -->
-        <Grid x:Name="ShellSkeleton" Grid.RowSpan="2" Grid.ColumnSpan="2" Canvas.ZIndex="62"
-              Visibility="Collapsed" Opacity="0"
-              Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
-            <Grid.OpacityTransition><ScalarTransition Duration="0:0:0.42"/></Grid.OpacityTransition>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="48"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="218"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.RowSpan="2" Margin="28,18,28,0" Spacing="16">
-                <Border Width="24" Height="24" CornerRadius="12" HorizontalAlignment="Left"
-                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                <StackPanel Spacing="14" Margin="2,16,0,0">
-                    <Border Height="13" Width="124" CornerRadius="6" HorizontalAlignment="Left" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                    <Border Height="13" Width="104" CornerRadius="6" HorizontalAlignment="Left" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                    <Border Height="13" Width="116" CornerRadius="6" HorizontalAlignment="Left" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                    <Border Height="13" Width="92" CornerRadius="6" HorizontalAlignment="Left" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                    <Border Height="13" Width="110" CornerRadius="6" HorizontalAlignment="Left" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                </StackPanel>
-            </StackPanel>
-            <Border Grid.Column="1" Width="240" Height="14" Margin="26,17,0,0" HorizontalAlignment="Left"
-                    CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-            <StackPanel Grid.Row="1" Grid.Column="1" Margin="26,26,26,26" Spacing="16">
-                <Border Height="208" CornerRadius="12" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                <Grid ColumnSpacing="16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition/><ColumnDefinition/><ColumnDefinition/>
-                    </Grid.ColumnDefinitions>
-                    <Border Height="136" CornerRadius="12" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                    <Border Grid.Column="1" Height="136" CornerRadius="12" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                    <Border Grid.Column="2" Height="136" CornerRadius="12" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                </Grid>
-                <Border Height="14" Width="240" HorizontalAlignment="Left" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-            </StackPanel>
-        </Grid>
-
-        <!-- 新手引导 → 主界面：手绘线稿转场。顶栏、侧栏、卡片框都是 1px 细线，按顺序一笔一笔「画」出来，
-             画完整层淡出，露出已经加载好的真实界面。 -->
-        <Grid x:Name="OnboardingSketch" Grid.RowSpan="2" Grid.ColumnSpan="2" Canvas.ZIndex="62"
-              Visibility="Collapsed" Opacity="0"
-              Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
-            <Grid.OpacityTransition><ScalarTransition Duration="0:0:0.45"/></Grid.OpacityTransition>
-            <Grid.Resources>
-                <Storyboard x:Key="SketchStoryboard">
-                    <DoubleAnimation Storyboard.TargetName="SkTop" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.26" BeginTime="0:0:0.00"/>
-                    <DoubleAnimation Storyboard.TargetName="SkSide" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" From="0" To="1" Duration="0:0:0.30" BeginTime="0:0:0.22"/>
-                    <DoubleAnimation Storyboard.TargetName="SkAvatar" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.18" BeginTime="0:0:0.42"/>
-                    <DoubleAnimation Storyboard.TargetName="SkAvatarScale" Storyboard.TargetProperty="ScaleX" From="0.55" To="1" Duration="0:0:0.22" BeginTime="0:0:0.42"/>
-                    <DoubleAnimation Storyboard.TargetName="SkAvatarScale" Storyboard.TargetProperty="ScaleY" From="0.55" To="1" Duration="0:0:0.22" BeginTime="0:0:0.42"/>
-                    <DoubleAnimation Storyboard.TargetName="SkNav1" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:0.52"/>
-                    <DoubleAnimation Storyboard.TargetName="SkNav2" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:0.60"/>
-                    <DoubleAnimation Storyboard.TargetName="SkNav3" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:0.68"/>
-                    <DoubleAnimation Storyboard.TargetName="SkNav4" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:0.78"/>
-                    <DoubleAnimation Storyboard.TargetName="SkNav5" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:0.86"/>
-                    <DoubleAnimation Storyboard.TargetName="SkNav6" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:0.94"/>
-                    <DoubleAnimation Storyboard.TargetName="SkCardT" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.20" BeginTime="0:0:1.08"/>
-                    <DoubleAnimation Storyboard.TargetName="SkCardR" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" From="0" To="1" Duration="0:0:0.18" BeginTime="0:0:1.24"/>
-                    <DoubleAnimation Storyboard.TargetName="SkCardB" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.20" BeginTime="0:0:1.40"/>
-                    <DoubleAnimation Storyboard.TargetName="SkCardL" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" From="0" To="1" Duration="0:0:0.18" BeginTime="0:0:1.56"/>
-                    <DoubleAnimation Storyboard.TargetName="SkInner1" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.16" BeginTime="0:0:1.72"/>
-                    <DoubleAnimation Storyboard.TargetName="SkInner2" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" From="0" To="1" Duration="0:0:0.14" BeginTime="0:0:1.80"/>
-                </Storyboard>
-            </Grid.Resources>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="48"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="218"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <!-- 顶栏底线 -->
-            <Rectangle x:Name="SkTop" Grid.ColumnSpan="2" Height="1" VerticalAlignment="Bottom" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-
-            <!-- 侧栏右边界 -->
-            <Rectangle x:Name="SkSide" Grid.Row="1" Width="1" HorizontalAlignment="Right" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleY="0" CenterY="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-
-            <!-- 侧栏头像圆 -->
-            <Ellipse x:Name="SkAvatar" Grid.Row="1" Width="26" Height="26" Margin="24,58,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" Stroke="{ThemeResource AppStrokeBrush}" StrokeThickness="1.2">
-                <Ellipse.RenderTransform><ScaleTransform x:Name="SkAvatarScale" CenterX="13" CenterY="13" ScaleX="0.55" ScaleY="0.55"/></Ellipse.RenderTransform>
-            </Ellipse>
-
-            <!-- 侧栏六条导航 -->
-            <Rectangle x:Name="SkNav1" Grid.Row="1" Width="112" Height="1" Margin="24,102,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-            <Rectangle x:Name="SkNav2" Grid.Row="1" Width="112" Height="1" Margin="24,160,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-            <Rectangle x:Name="SkNav3" Grid.Row="1" Width="112" Height="1" Margin="24,198,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-            <Rectangle x:Name="SkNav4" Grid.Row="1" Width="112" Height="1" Margin="24,241,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-            <Rectangle x:Name="SkNav5" Grid.Row="1" Width="112" Height="1" Margin="24,283,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-            <Rectangle x:Name="SkNav6" Grid.Row="1" Width="112" Height="1" Margin="24,325,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-            </Rectangle>
-
-            <!-- 主卡片四边：上(左→右) 右(上→下) 下(右→左) 左(下→上)，像一笔把框描完 -->
-            <Grid Grid.Row="1" Grid.Column="1" Margin="44,26,44,26">
-                <Rectangle x:Name="SkCardT" Height="1" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                    <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-                </Rectangle>
-                <Rectangle x:Name="SkCardR" Width="1" HorizontalAlignment="Right" Fill="{ThemeResource AppStrokeBrush}">
-                    <Rectangle.RenderTransform><ScaleTransform ScaleY="0" CenterY="0"/></Rectangle.RenderTransform>
-                </Rectangle>
-                <Rectangle x:Name="SkCardB" Height="1" VerticalAlignment="Bottom" Fill="{ThemeResource AppStrokeBrush}">
-                    <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="1"/></Rectangle.RenderTransform>
-                </Rectangle>
-                <Rectangle x:Name="SkCardL" Width="1" HorizontalAlignment="Left" Fill="{ThemeResource AppStrokeBrush}">
-                    <Rectangle.RenderTransform><ScaleTransform ScaleY="0" CenterY="1"/></Rectangle.RenderTransform>
-                </Rectangle>
-                <Rectangle x:Name="SkInner1" Width="190" Height="1" Margin="30,38,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                    <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-                </Rectangle>
-                <Rectangle x:Name="SkInner2" Width="124" Height="1" Margin="30,64,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{ThemeResource AppStrokeBrush}">
-                    <Rectangle.RenderTransform><ScaleTransform ScaleX="0" CenterX="0"/></Rectangle.RenderTransform>
-                </Rectangle>
             </Grid>
         </Grid>
 

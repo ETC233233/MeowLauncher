@@ -46,12 +46,3 @@ MeowLauncher 是非官方的第三方启动器，与 Mojang、Microsoft、Minecr
 ## 四、联机服务
 
 联机功能连接 Cloudflare Workers 上的账号 / 房间 / 配置服务；联机组件的下载来源由云端清单指定，可能经过 GitHub 或第三方加速代理。登录使用 Minecraft 玩家证书，不会读取或上传你的 Microsoft / Mojang 令牌。详见联机模块仓库的 SECURITY.md。
-
-## 加载器图标
-
-图标仅用于标识加载器；各项目的名称和商标归其权利人所有。
-
-- Fabric Loader — [官方资源图标](https://github.com/FabricMC/fabric-loader/blob/cb9523bc29ef775c50b6aef5e43bc56927cd8e67/src/main/resources/assets/fabricloader/icon.png)，Apache-2.0，见 `Apache-2.0.txt`。
-- Quilt Project — [官网方形图标](https://github.com/QuiltMC/quiltmc.org/blob/main/public/assets/img/logo-square.png)，见官网随附的 `Quilt-Art-NOTICE.md` 和 `Apache-2.0.txt`。
-- Minecraft Forge — [官方安装页图标](https://files.minecraftforge.net/static/images/favicon-32x32.png)。
-- NeoForged 团队 / Ridanisaurus — [官方狐狸图标](https://github.com/neoforged/.github/blob/main/art/neoforged.ico)，从 ICO 转为 PNG，许可 CC BY 4.0，见 `NeoForged-Art-CC-BY-4.0.txt`。

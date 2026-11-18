@@ -7,7 +7,9 @@
     Background="Transparent">
 
     <!--
-      设置页：常规 / 外观 / 游戏与进程 / 下载与网络 / 关于与更新，认证后显示开发者测试。
+      设置页（契约 3/5/6/7）：左侧一级分类（对标 PCL-CE PageSetupLeft 左栏 + PrismLauncher 类页切换），
+      右侧只显示当前分类；语义色 = 灰蓝（附录 A clock）。
+      五个分类：启动 / 外观 / 下载与网络 / 游戏与进程 / 高级。
       全部自动保存（去抖 650ms），没有保存按钮、没有只读路径陈列卡。
     -->
     <Page.Resources>
@@ -16,12 +18,11 @@
             <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="16,10" />
+            <Setter Property="Padding" Value="16,6" />
             <Setter Property="MinHeight" Value="52" />
         </Style>
         <Style x:Key="RowLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
-            <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
@@ -43,34 +44,23 @@
             <Setter Property="Foreground" Value="{ThemeResource AppText3Brush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
-        <Style x:Key="SettingsActionStyle" TargetType="Button">
-            <Setter Property="Height" Value="32" />
-            <Setter Property="MinWidth" Value="96" />
-            <Setter Property="Padding" Value="12,0" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style x:Key="SettingsComboStyle" TargetType="ComboBox">
-            <Setter Property="Width" Value="224" />
-            <Setter Property="MinHeight" Value="32" />
-            <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <Style x:Key="SettingsToggleStyle" TargetType="ToggleSwitch">
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="HorizontalAlignment" Value="Right" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="OnContent" Value="" />
-            <Setter Property="OffContent" Value="" />
+        <Style x:Key="PillButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="CornerRadius" Value="17" />
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="{ThemeResource AppChipBrush}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
         </Style>
         <Style x:Key="SettingsTabStyle" TargetType="Button">
             <Setter Property="Height" Value="34" />
-            <Setter Property="MinWidth" Value="70" />
+            <Setter Property="MinWidth" Value="78" />
             <Setter Property="Padding" Value="14,0" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Background" Value="Transparent" />
+            <Setter Property="IsTabStop" Value="False" />
         </Style>
         <Style x:Key="SegmentRadioStyle" TargetType="RadioButton">
             <Setter Property="MinWidth" Value="72" />
@@ -145,10 +135,12 @@
                 </StackPanel>
             </Grid>
 
-        <Border Grid.Row="1" Margin="0,12,0,0" HorizontalAlignment="Left"
-                Padding="3" CornerRadius="10" BorderThickness="1"
-                BorderBrush="{ThemeResource CardStrokeBrush}" Background="{ThemeResource AppCardBrush}">
-            <StackPanel Orientation="Horizontal" Spacing="2">
+        <ScrollViewer Grid.Row="1" Margin="0,12,0,0" HorizontalScrollMode="Enabled"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled"
+                      VerticalScrollBarVisibility="Disabled" HorizontalContentAlignment="Left">
+            <Border Padding="3" CornerRadius="10" BorderThickness="1"
+                    BorderBrush="{ThemeResource CardStrokeBrush}" Background="{ThemeResource AppCardBrush}">
+                <StackPanel Orientation="Horizontal" Spacing="2">
                 <Button x:Name="NavLaunch" Tag="launch" Style="{StaticResource SettingsTabStyle}"
                         HorizontalAlignment="Left" HorizontalContentAlignment="Center"
                         AutomationProperties.Name="常规设置" Click="Nav_Click">
@@ -165,15 +157,15 @@
                         <TextBlock Text="外观" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="NavJava" Tag="java" Style="{StaticResource SettingsTabStyle}"
+                <Button x:Name="NavJava" Tag="java" MinWidth="120" Style="{StaticResource SettingsTabStyle}"
                         HorizontalAlignment="Left" HorizontalContentAlignment="Center"
                         AutomationProperties.Name="游戏与进程设置" Click="Nav_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE8A5;" Style="{StaticResource NavIconStyle}" />
-                        <TextBlock Text="游戏" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
+                        <TextBlock Text="游戏与进程" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="NavNetwork" Tag="network" Style="{StaticResource SettingsTabStyle}"
+                <Button x:Name="NavNetwork" Tag="network" MinWidth="120" Style="{StaticResource SettingsTabStyle}"
                         HorizontalAlignment="Left" HorizontalContentAlignment="Center"
                         AutomationProperties.Name="下载与网络设置" Click="Nav_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -181,7 +173,31 @@
                         <TextBlock Text="下载与网络" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="NavDev" Tag="dev" Style="{StaticResource SettingsTabStyle}" Visibility="Collapsed"
+                <Button x:Name="NavNotify" Tag="notify" Style="{StaticResource SettingsTabStyle}"
+                        HorizontalAlignment="Left" HorizontalContentAlignment="Center"
+                        AutomationProperties.Name="通知设置" Click="Nav_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE7E7;" Style="{StaticResource NavIconStyle}" />
+                        <TextBlock Text="通知" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="NavUpdate" Tag="update" Style="{StaticResource SettingsTabStyle}"
+                        HorizontalAlignment="Left" HorizontalContentAlignment="Center"
+                        AutomationProperties.Name="更新设置" Click="Nav_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE895;" Style="{StaticResource NavIconStyle}" />
+                        <TextBlock Text="更新" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="NavAdvanced" Tag="advanced" Style="{StaticResource SettingsTabStyle}"
+                        HorizontalAlignment="Left" HorizontalContentAlignment="Center"
+                        AutomationProperties.Name="诊断设置" Click="Nav_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE713;" Style="{StaticResource NavIconStyle}" />
+                        <TextBlock Text="诊断" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="NavDev" Tag="dev" MinWidth="120" Style="{StaticResource SettingsTabStyle}" Visibility="Collapsed"
                         HorizontalAlignment="Left" HorizontalContentAlignment="Center"
                         AutomationProperties.Name="开发者测试" Click="Nav_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -191,17 +207,18 @@
                 </Button>
                 <Button x:Name="NavAbout" Tag="about" Style="{StaticResource SettingsTabStyle}"
                         HorizontalAlignment="Left" HorizontalContentAlignment="Center"
-                        AutomationProperties.Name="关于与更新" Click="Nav_Click">
+                        AutomationProperties.Name="关于" Click="Nav_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE946;" Style="{StaticResource NavIconStyle}" />
                         <TextBlock Text="关于" FontSize="14" Foreground="{ThemeResource AppTextBrush}" Opacity="0.6" />
                     </StackPanel>
                 </Button>
-            </StackPanel>
-        </Border>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
 
         <!-- 当前分类的设置分组 -->
-        <ScrollViewer x:Name="SettingsScroll" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto"
+        <ScrollViewer Grid.Row="2" Grid.ColumnSpan="2" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
                 <StackPanel HorizontalAlignment="Stretch" Spacing="14">
 
@@ -223,13 +240,13 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="启动时显示" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" x:Name="HomeStartScreenBox" Grid.Column="2"
-                                              SelectionChanged="HomeStartScreen_Changed"
+                                    <ComboBox x:Name="HomeStartScreenBox" Grid.Column="2" VerticalAlignment="Center" Width="220" Height="32"
+                                              HorizontalAlignment="Right" SelectionChanged="HomeStartScreen_Changed"
                                               AutomationProperties.Name="启动时显示哪一屏">
                                         <ComboBoxItem Content="继续玩（负一屏）" Tag="continue" />
                                         <ComboBoxItem Content="组件板" Tag="board" />
@@ -240,48 +257,96 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="游戏目录" Style="{StaticResource RowLabelStyle}" />
-                                    <Button VerticalAlignment="Center" Grid.Column="2" Content="管理游戏目录…" Style="{StaticResource SettingsActionStyle}"
+                                    <Button VerticalAlignment="Center" Grid.Column="2" Content="管理游戏目录…" Style="{StaticResource PillButtonStyle}"
                                             AutomationProperties.Name="管理游戏目录" Click="ManageGameDirs_Click" />
                                 </Grid>
 
                             </Border>
                         </StackPanel>
-                        
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="窗口" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                        <Grid ColumnSpacing="14" MinHeight="38">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="窗口尺寸" Style="{StaticResource RowLabelStyle}" />
+                                                                <Border Grid.Column="2" Style="{StaticResource SegmentFrameStyle}" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="0">
+                                                                    <RadioButton x:Name="AutoSizeChip" GroupName="WindowSizeMode" Content="自适应"
+                                                                                 Style="{StaticResource SegmentRadioStyle}"
+                                                                                 AutomationProperties.Name="窗口尺寸自适应"
+                                                                                 Checked="WindowMode_Checked" />
+                                                                    <RadioButton x:Name="FixedSizeChip" GroupName="WindowSizeMode" Content="固定"
+                                                                                 Style="{StaticResource SegmentRadioStyle}"
+                                                                                 AutomationProperties.Name="窗口尺寸固定"
+                                                                                 Checked="WindowMode_Checked" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </Grid>
+                            
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=CustomSizeRow}">
+                                                            <Grid x:Name="CustomSizeRow" ColumnSpacing="14" MinHeight="38" Visibility="Collapsed">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="自定义尺寸" Style="{StaticResource RowLabelStyle}" />
+                                                                <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                                    <NumberBox x:Name="WindowWidthBox" Width="116" Height="32" Minimum="880"
+                                                                               Maximum="3840" SpinButtonPlacementMode="Compact"
+                                                                               SmallChange="40" LargeChange="160" ValueChanged="WindowSize_Changed" />
+                                                                    <TextBlock Text="×" Style="{StaticResource RowLabelStyle}" />
+                                                                    <NumberBox x:Name="WindowHeightBox" Width="116" Height="32" Minimum="620"
+                                                                               Maximum="2160" SpinButtonPlacementMode="Compact"
+                                                                               SmallChange="40" LargeChange="160" ValueChanged="WindowSize_Changed" />
+                                                                </StackPanel>
+                                                            </Grid>
+                            
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                                            <Grid ColumnSpacing="14" MinHeight="38">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="记住尺寸" Style="{StaticResource RowLabelStyle}" />
+                                                                <ToggleSwitch Grid.Column="2" x:Name="RememberWindowSwitch" HorizontalAlignment="Right" Margin="0,0,-12,0"
+                                                                              OnContent="" OffContent=""
+                                                                              Toggled="RememberWindow_Toggled" MinWidth="0" />
+                                                            </Grid>
+
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                                            <Grid ColumnSpacing="14" MinHeight="38">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="忽略系统缩放" Style="{StaticResource RowLabelStyle}" />
+                                                                <ToggleSwitch Grid.Column="2" x:Name="IgnoreDpiSwitch" HorizontalAlignment="Right" Margin="0,0,-12,0"
+                                                                              OnContent="" OffContent=""
+                                                                              AutomationProperties.Name="忽略系统缩放比例"
+                                                                              Toggled="IgnoreDpi_Toggled" MinWidth="0" />
+                                                            </Grid>
+                            
+
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- ② 已隐藏版本（独立卡：本质是实例管理的恢复入口） -->
-                    <!-- 通知 -->
-                    <StackPanel x:Name="NotifyCard" Spacing="4" Visibility="Collapsed">
-                        <TextBlock Text="通知" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                        <Border Style="{StaticResource SettingsRowCardStyle}">
-                            <Grid ColumnSpacing="14" MinHeight="34">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="156" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="任务完成时在启动器里提醒" Grid.ColumnSpan="2" TextTrimming="CharacterEllipsis" Style="{StaticResource RowLabelStyle}" />
-                                <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="NotifyTaskDoneSwitch" Grid.Column="2" Toggled="NotifyTaskDoneSwitch_Toggled" />
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource SettingsRowCardStyle}">
-                            <Grid ColumnSpacing="14" MinHeight="34">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="156" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="显示任务药丸" Style="{StaticResource RowLabelStyle}" />
-                                <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="ShowTaskIslandSwitch" Grid.Column="2" Toggled="ShowTaskIslandSwitch_Toggled" />
-                            </Grid>
-                        </Border>
-                    </StackPanel>
-
                     <Border x:Name="HiddenVersionsCard" Style="{StaticResource WidgetCardStyle}" Visibility="Collapsed">
                         <StackPanel Spacing="8" Margin="0,4,0,0">
                                                             <Grid ColumnSpacing="10">
@@ -305,17 +370,13 @@
                                                                             <StackPanel Spacing="2" VerticalAlignment="Center">
                                                                                 <TextBlock Text="{Binding Id}" FontSize="{StaticResource FontSizeBody}"
                                                                                            Foreground="{ThemeResource AppTextBrush}" />
-                                                                                <TextBlock Text="{Binding Root}" TextTrimming="CharacterEllipsis"
-                                                                                           ToolTipService.ToolTip="{Binding Root}"
-                                                                                           FontSize="{StaticResource FontSizeCaption}"
-                                                                                           Foreground="{ThemeResource AppText2Brush}" />
                                                                                 <TextBlock Text="{Binding SinceText}"
                                                                                            FontSize="{StaticResource FontSizeCaption}"
                                                                                            Foreground="{ThemeResource AppText3Brush}" />
                                                                             </StackPanel>
-                                                                            <Button VerticalAlignment="Center" Grid.Column="1" Content="恢复" Style="{StaticResource SettingsActionStyle}"
+                                                                            <Button VerticalAlignment="Center" Grid.Column="1" Content="恢复" Style="{StaticResource PillButtonStyle}"
                                                                                     AutomationProperties.Name="恢复这个版本"
-                                                                                    Tag="{Binding}" Click="Unhide_Click" />
+                                                                                    Tag="{Binding Id}" Click="Unhide_Click" />
                                                                         </Grid>
                                                                     </DataTemplate>
                                                                 </ItemsControl.ItemTemplate>
@@ -345,13 +406,13 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="主题" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" Grid.Column="2" x:Name="ThemeBox"
-                                              SelectionChanged="Theme_Changed"
+                                    <ComboBox Grid.Column="1" VerticalAlignment="Center" x:Name="ThemeBox" Height="32" MinWidth="200"
+                                              HorizontalAlignment="Right" SelectionChanged="Theme_Changed"
                                               AutomationProperties.Name="主题模式">
                                         <ComboBoxItem Content="跟随系统" Tag="system" />
                                         <ComboBoxItem Content="深色" Tag="dark" />
@@ -364,14 +425,14 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="主题色" Style="{StaticResource RowLabelStyle}" />
                                     <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="10">
-                                        <ComboBox Style="{StaticResource SettingsComboStyle}" x:Name="ThemeColorBox"
-                                                  SelectionChanged="ThemeColor_Changed">
+                                        <ComboBox x:Name="ThemeColorBox" Height="32" MinWidth="200"
+                                                  HorizontalAlignment="Left" SelectionChanged="ThemeColor_Changed">
                                             <ComboBoxItem Content="跟随壁纸取色" Tag="wallpaper" />
                                             <ComboBoxItem Content="跟随系统强调色" Tag="accent" />
                                             <ComboBoxItem Content="自定义颜色" Tag="custom" />
@@ -389,102 +450,57 @@
 
 
                             </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="外观设置" Style="{StaticResource RowLabelStyle}" />
+                                    <Button Grid.Column="1" Content="恢复默认" Style="{StaticResource PillButtonStyle}"
+                                            VerticalAlignment="Center" AutomationProperties.Name="恢复默认外观" Click="ResetAppearance_Click" />
+                                </Grid>
+                            </Border>
                         </StackPanel>
                         <StackPanel Spacing="4">
-                            <TextBlock Text="材质与主题" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                            <TextBlock Text="窗口材质与背景主题无法共存，仅能选择一者启用" Style="{StaticResource GroupDescStyle}" Margin="0,0,0,8" />
+                            <TextBlock Text="背景" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="窗口材质" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" Grid.Column="2" x:Name="BackgroundBox"
-                                              SelectionChanged="Background_Changed">
-                                        <ComboBoxItem Content="Acrylic" Tag="Acrylic" />
-                                        <ComboBoxItem Content="Mica" Tag="Mica" />
-                                        <ComboBoxItem Content="无效果" Tag="Solid" />
+                                    <ComboBox Grid.Column="1" VerticalAlignment="Center" x:Name="BackgroundBox" Height="32" MinWidth="200"
+                                              HorizontalAlignment="Right" SelectionChanged="Background_Changed">
+                                        <ComboBoxItem Content="亚克力" Tag="Acrylic" />
+                                        <ComboBoxItem Content="云母" Tag="Mica" />
+                                        <ComboBoxItem Content="跟随壁纸" Tag="Wallpaper" />
+                                        <ComboBoxItem Content="自定义图片" Tag="Image" />
+                                        <ComboBoxItem Content="像素壁纸" Tag="PixelWallpaper" />
                                     </ComboBox>
                                 </Grid>
 
                             </Border>
-                            <Border x:Name="AcrylicKindRow" Style="{StaticResource SettingsRowCardStyle}" Visibility="Collapsed">
-                                <Grid ColumnSpacing="14" MinHeight="34">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="亚克力样式" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox x:Name="AcrylicKindBox" Grid.Column="2" Style="{StaticResource SettingsComboStyle}"
-                                              AutomationProperties.Name="亚克力样式" SelectionChanged="Background_Changed">
-                                        <ComboBoxItem Content="正常" Tag="normal" />
-                                        <ComboBoxItem Content="轻质" Tag="thin" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="34">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="背景主题" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox x:Name="BackgroundThemeBox" Grid.Column="2" Style="{StaticResource SettingsComboStyle}"
-                                              AutomationProperties.Name="背景主题" SelectionChanged="Background_Changed">
-                                        <ComboBoxItem Content="无" Tag="None" />
-                                        <ComboBoxItem Content="像素小猫" Tag="PixelWallpaper" />
-                                        <ComboBoxItem Content="跟随壁纸" Tag="Wallpaper" />
-                                        <ComboBoxItem Content="自定义图片" Tag="Image" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-                            <StackPanel x:Name="WallpaperEffectsPanel" Visibility="Collapsed" Spacing="4">
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="38">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="64" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="模糊程度" Style="{StaticResource RowLabelStyle}" />
-                                        <Slider x:Name="WallpaperBlurSlider" Grid.Column="1" Width="210" Minimum="0" Maximum="40" StepFrequency="1"
-                                                HorizontalAlignment="Right" AutomationProperties.Name="壁纸模糊程度" ValueChanged="WallpaperEffects_Changed" />
-                                        <TextBlock x:Name="WallpaperBlurValue" Grid.Column="2" Style="{StaticResource RowValueStyle}" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="38">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="64" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="遮罩强度" Style="{StaticResource RowLabelStyle}" />
-                                        <Slider x:Name="WallpaperShadeSlider" Grid.Column="1" Width="210" Minimum="0" Maximum="0.8" StepFrequency="0.01"
-                                                HorizontalAlignment="Right" AutomationProperties.Name="壁纸遮罩强度" ValueChanged="WallpaperEffects_Changed" />
-                                        <TextBlock x:Name="WallpaperShadeValue" Grid.Column="2" Style="{StaticResource RowValueStyle}" />
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
                             <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=BackgroundImageRow}">
                                 <Grid x:Name="BackgroundImageRow" ColumnSpacing="14" MinHeight="38"
                                       Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="背景图片" Style="{StaticResource RowLabelStyle}" />
-                                    <TextBlock x:Name="BackgroundImageValue" Grid.Column="1"
-                                               Style="{StaticResource RowValueStyle}" Text="未选择"
-                                               HorizontalAlignment="Left" TextAlignment="Left" />
-                                    <Button x:Name="ChooseImageButton" Grid.Column="2" Content="选择图片"
-                                            Style="{StaticResource SettingsActionStyle}"
+                                    <Button VerticalAlignment="Center" Grid.Column="1" x:Name="ChooseImageButton" Content="选择图片" Height="32"
+                                            Padding="12,0" CornerRadius="15"
+                                            HorizontalAlignment="Right" BorderThickness="0"
+                                            FontSize="{StaticResource FontSizeCaption}"
+                                            Background="{ThemeResource AppChipBrush}"
+                                            Foreground="{ThemeResource AppTextBrush}"
                                             AutomationProperties.Name="选择背景图片" Click="ChooseImage_Click" />
+                                    <TextBlock x:Name="BackgroundImageValue" VerticalAlignment="Center" Grid.Column="2"
+                                               Style="{StaticResource RowValueStyle}" Text="未选择" />
                                 </Grid>
 
                             </Border>
@@ -494,24 +510,29 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="字体缩放" Style="{StaticResource RowLabelStyle}" />
-                                    <Slider Grid.Column="1" x:Name="FontScaleSlider" Width="210" Minimum="0.85" Maximum="1.25"
-                                            StepFrequency="0.05" HorizontalAlignment="Right"
-                                            VerticalAlignment="Center" ValueChanged="FontScale_Changed" />
-                                    <TextBlock x:Name="FontScaleValueText" VerticalAlignment="Center" Grid.Column="2"
-                                               Style="{StaticResource RowValueStyle}" />
+                                    <TextBlock Text="对比遮罩" Style="{StaticResource RowLabelStyle}" />
+                                    <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                        <Slider x:Name="VeilSlider" Width="210" Minimum="0" Maximum="0.12"
+                                                StepFrequency="0.01" VerticalAlignment="Center"
+                                                ValueChanged="Veil_Changed" />
+                                        <TextBlock Text="0–12%" FontSize="{StaticResource FontSizeCaption}"
+                                                   Foreground="{ThemeResource AppText3Brush}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="VeilValueText" Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource RowValueStyle}" />
                                 </Grid>
+
                             </Border>
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="界面不透明度" Style="{StaticResource RowLabelStyle}" />
                                     <Slider Grid.Column="1" x:Name="OpacitySlider" Width="210" Minimum="0.5" Maximum="1"
@@ -522,93 +543,22 @@
                                 </Grid>
 
                             </Border>
-                            
-                        </StackPanel>
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="窗口" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
-                        <Grid ColumnSpacing="14" MinHeight="38">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="156" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Text="窗口尺寸" Style="{StaticResource RowLabelStyle}" />
-                                                                <Border Grid.Column="2" Style="{StaticResource SegmentFrameStyle}" VerticalAlignment="Center" HorizontalAlignment="Right">
-                                                                    <StackPanel Orientation="Horizontal" Spacing="0">
-                                                                    <RadioButton x:Name="AutoSizeChip" GroupName="WindowSizeMode" Content="自适应"
-                                                                                 Style="{StaticResource SegmentRadioStyle}"
-                                                                                 AutomationProperties.Name="窗口尺寸自适应"
-                                                                                 Checked="WindowMode_Checked" />
-                                                                    <RadioButton x:Name="FixedSizeChip" GroupName="WindowSizeMode" Content="固定"
-                                                                                 Style="{StaticResource SegmentRadioStyle}"
-                                                                                 AutomationProperties.Name="窗口尺寸固定"
-                                                                                 Checked="WindowMode_Checked" />
-                                                                    </StackPanel>
-                                                                </Border>
-                                                            </Grid>
-                            
-                            </Border>
-                            <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=CustomSizeRow}">
-                                                            <Grid x:Name="CustomSizeRow" ColumnSpacing="14" MinHeight="38" Visibility="Collapsed">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="156" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Text="自定义尺寸" Style="{StaticResource RowLabelStyle}" />
-                                                                <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                                                    <NumberBox x:Name="WindowWidthBox" Width="116" Height="32" Minimum="880"
-                                                                               Maximum="3840" SpinButtonPlacementMode="Compact"
-                                                                               SmallChange="40" LargeChange="160" ValueChanged="WindowSize_Changed" />
-                                                                    <TextBlock Text="×" Style="{StaticResource RowLabelStyle}" />
-                                                                    <NumberBox x:Name="WindowHeightBox" Width="116" Height="32" Minimum="620"
-                                                                               Maximum="2160" SpinButtonPlacementMode="Compact"
-                                                                               SmallChange="40" LargeChange="160" ValueChanged="WindowSize_Changed" />
-                                                                </StackPanel>
-                                                            </Grid>
-                            
-                            </Border>
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                            <Grid ColumnSpacing="14" MinHeight="38">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="156" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Text="记住尺寸" Style="{StaticResource RowLabelStyle}" />
-                                                                <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" Grid.Column="2" x:Name="RememberWindowSwitch"
-                                                                              Toggled="RememberWindow_Toggled" />
-                                                            </Grid>
-
-                            </Border>
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                            <Grid ColumnSpacing="14" MinHeight="38">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="156" />
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Text="忽略系统缩放" Style="{StaticResource RowLabelStyle}" />
-                                                                <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" Grid.Column="2" x:Name="IgnoreDpiSwitch"
-                                                                              AutomationProperties.Name="忽略系统缩放比例"
-                                                                              Toggled="IgnoreDpi_Toggled" />
-                                                            </Grid>
-                            
-
-                            </Border>
-                        </StackPanel>
-                        <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14">
+                                <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="96" MinWidth="96" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="外观设置" Style="{StaticResource RowLabelStyle}" />
-                                    <Button Grid.Column="1" Content="恢复默认" Style="{StaticResource SettingsActionStyle}"
-                                            VerticalAlignment="Center" AutomationProperties.Name="恢复默认外观" Click="ResetAppearance_Click" />
+                                    <TextBlock Text="字体缩放" Style="{StaticResource RowLabelStyle}" />
+                                    <Slider Grid.Column="1" x:Name="FontScaleSlider" Width="210" Minimum="0.85" Maximum="1.25"
+                                            StepFrequency="0.05" HorizontalAlignment="Right"
+                                            VerticalAlignment="Center" ValueChanged="FontScale_Changed" />
+                                    <TextBlock x:Name="FontScaleValueText" VerticalAlignment="Center" Grid.Column="2"
+                                               Style="{StaticResource RowValueStyle}" />
                                 </Grid>
                             </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- ③ 下载与网络 -->
@@ -619,7 +569,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="游戏下载" Style="{StaticResource GroupTitleStyle}"
+                                    <TextBlock Text="下载源" Style="{StaticResource GroupTitleStyle}"
                                                VerticalAlignment="Center" />
                                     <TextBlock x:Name="NetworkStatusText" Grid.Column="1"
                                                Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left"
@@ -629,12 +579,29 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="默认资源来源" Style="{StaticResource RowLabelStyle}" />
+                                    <ComboBox Width="360" Grid.Column="1" VerticalAlignment="Center" x:Name="DownloadSourceBox" Height="32" MinWidth="240"
+                                              HorizontalAlignment="Right" SelectionChanged="DownloadSource_Changed">
+                                        <ComboBoxItem Content="Modrinth" Tag="priority:modrinth,curseforge" />
+                                        <ComboBoxItem Content="CurseForge" Tag="priority:curseforge,modrinth" />
+                                    </ComboBox>
+                                </Grid>
+
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="38">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="游戏下载源" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" x:Name="GameDownloadSourceBox" Grid.Column="2"
+                                    <ComboBox x:Name="GameDownloadSourceBox" Grid.Column="1" Height="32" Width="360"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
                                               AutomationProperties.Name="游戏下载源"
                                               SelectionChanged="GameDownloadSource_Changed">
                                         <ComboBoxItem Content="Mojang 官方" />
@@ -646,7 +613,7 @@
                             <Border x:Name="GameMirrorRow" Style="{StaticResource SettingsRowCardStyle}" Visibility="Collapsed">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="游戏镜像地址" Style="{StaticResource RowLabelStyle}" />
@@ -661,23 +628,7 @@
                                        Text="原游戏下载地址属于 GitHub 加速，已使用 Mojang 官方源。可在下方单独设置 GitHub 镜像。" />
                         </StackPanel>
                         <StackPanel Spacing="4">
-                            <TextBlock Text="在线资源" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="38">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="默认资源来源" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" Grid.Column="2" x:Name="DownloadSourceBox"
-                                              SelectionChanged="DownloadSource_Changed">
-                                        <ComboBoxItem Content="Modrinth" Tag="priority:modrinth,curseforge" />
-                                        <ComboBoxItem Content="CurseForge" Tag="priority:curseforge,modrinth" />
-                                    </ComboBox>
-                                </Grid>
-
-                            </Border>
+                            <TextBlock Text="在线资源加速" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14">
                                     <Grid.ColumnDefinitions>
@@ -689,8 +640,8 @@
                                         <TextBlock Text="用于 Modrinth 和 CurseForge 的搜索、版本查询及下载"
                                                    Style="{StaticResource GroupDescStyle}" />
                                     </StackPanel>
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" x:Name="ResourceMirrorBox" Grid.Column="1"
-                                              AutomationProperties.Name="在线资源镜像优先级"
+                                    <ComboBox x:Name="ResourceMirrorBox" Grid.Column="1" Width="200"
+                                              VerticalAlignment="Center" AutomationProperties.Name="在线资源镜像优先级"
                                               SelectionChanged="ResourceMirror_Changed">
                                         <ComboBoxItem Content="MCIM 优先" />
                                         <ComboBoxItem Content="官方优先" />
@@ -699,50 +650,11 @@
                             </Border>
                         </StackPanel>
                         <StackPanel Spacing="4">
-                            <TextBlock Text="下载并发" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="38">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="下载线程" Style="{StaticResource RowLabelStyle}" />
-                                    <StackPanel HorizontalAlignment="Right" Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                                        <NumberBox x:Name="DownloadThreadsBox" Width="130" Height="32" Minimum="1"
-                                                   Maximum="32" SmallChange="1" LargeChange="4"
-                                                   SpinButtonPlacementMode="Compact" Value="16"
-                                                   ValueChanged="NetworkThreads_Changed" />
-                                        <TextBlock Text="线程" Width="50" Style="{StaticResource RowValueStyle}"
-                                                   HorizontalAlignment="Left" TextAlignment="Left" />
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="38">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="同时下载" Style="{StaticResource RowLabelStyle}" />
-                                    <StackPanel HorizontalAlignment="Right" Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                                        <NumberBox x:Name="DownloadParallelBox" Width="130" Height="32" Minimum="1"
-                                                   Maximum="16" SmallChange="1" LargeChange="1"
-                                                   SpinButtonPlacementMode="Compact" Value="8"
-                                                   ValueChanged="DownloadParallel_Changed" />
-                                        <TextBlock Text="个任务" Width="50" Style="{StaticResource RowValueStyle}"
-                                                   HorizontalAlignment="Left" TextAlignment="Left" />
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
-                        </StackPanel>
-                        <StackPanel Spacing="4">
                             <TextBlock Text="GitHub 下载" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
@@ -750,19 +662,20 @@
                                     <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{StaticResource FontSizeCaption}"
                                                Foreground="{ThemeResource AppText2Brush}"
                                                Text="组件包和启动器更新在 GitHub 上，开启后先走镜像下载" />
-                                    <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" Grid.Column="2" x:Name="GithubAccelSwitch" Toggled="GithubAccel_Toggled" />
+                                    <ToggleSwitch Grid.Column="2" x:Name="GithubAccelSwitch" MinWidth="0" OnContent="" OffContent=""
+                                                  HorizontalAlignment="Right" Margin="0,0,-12,0" Toggled="GithubAccel_Toggled" />
                                 </Grid>
 
                             </Border>
                             <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=GithubAccelHostRow}">
                                 <Grid x:Name="GithubAccelHostRow" ColumnSpacing="14" MinHeight="38" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="GitHub 镜像" Style="{StaticResource RowLabelStyle}" />
-                                    <TextBox Grid.Column="2" VerticalAlignment="Center" x:Name="GithubAccelHostBox" Height="32" Width="520"
+                                    <TextBox Grid.Column="1" VerticalAlignment="Center" x:Name="GithubAccelHostBox" Height="32" Width="520"
                                              HorizontalAlignment="Right" PlaceholderText="留空用 https://gh-proxy.com/"
                                              TextChanged="GithubAccelHost_Changed" />
                                 </Grid>
@@ -774,13 +687,13 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="网络代理" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" Grid.Column="2" x:Name="ProxyModeBox"
-                                              SelectionChanged="Proxy_Changed">
+                                    <ComboBox Grid.Column="1" VerticalAlignment="Center" x:Name="ProxyModeBox" Height="32" Width="360"
+                                              HorizontalAlignment="Right" SelectionChanged="Proxy_Changed">
                                         <ComboBoxItem Content="跟随系统" Tag="system" />
                                         <ComboBoxItem Content="不使用代理" Tag="direct" />
                                         <ComboBoxItem Content="自定义" Tag="custom" />
@@ -791,7 +704,7 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=ProxyCustomRow}">
                                 <Grid x:Name="ProxyCustomRow" ColumnSpacing="14" MinHeight="38" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
@@ -815,7 +728,7 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=ProxyAuthRow}">
                                 <Grid x:Name="ProxyAuthRow" ColumnSpacing="14" MinHeight="38" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
@@ -834,10 +747,72 @@
 
                             </Border>
                         </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="速度" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="38">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="下载线程" Style="{StaticResource RowLabelStyle}" />
+                                    <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                        <NumberBox x:Name="DownloadThreadsBox" Width="130" Height="32" Minimum="1"
+                                                   Maximum="32" SmallChange="1" LargeChange="4"
+                                                   SpinButtonPlacementMode="Compact" Value="16"
+                                                   ValueChanged="NetworkThreads_Changed" />
+                                        <TextBlock Text="线程" Style="{StaticResource RowValueStyle}"
+                                                   HorizontalAlignment="Left" TextAlignment="Left" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="38">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="同时下载" Style="{StaticResource RowLabelStyle}" />
+                                    <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                        <NumberBox x:Name="DownloadParallelBox" Width="130" Height="32" Minimum="1"
+                                                   Maximum="16" SmallChange="1" LargeChange="1"
+                                                   SpinButtonPlacementMode="Compact" Value="8"
+                                                   ValueChanged="DownloadParallel_Changed" />
+                                        <TextBlock Text="个任务" Style="{StaticResource RowValueStyle}"
+                                                   HorizontalAlignment="Left" TextAlignment="Left" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- ④ 游戏与进程 -->
                     <StackPanel Spacing="12" x:Name="JavaCard" Visibility="Collapsed">
+                        <StackPanel Spacing="4">
+    <TextBlock Text="游戏启动" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="38" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="启动游戏后" Style="{StaticResource RowLabelStyle}" />
+                                    <ComboBox Grid.Column="1" x:Name="AfterLaunchBox" Height="32" MinWidth="200"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              SelectionChanged="AfterLaunch_Changed">
+                                        <ComboBoxItem Content="留在前台" Tag="keep" />
+                                        <ComboBoxItem Content="最小化到任务栏" Tag="minimize" />
+                                    </ComboBox>
+                                </Grid>
+
+
+                            
+
+                            </Border>
+                        </StackPanel>
                         <StackPanel Spacing="4">
                             <TextBlock Text="Java 运行时" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
@@ -848,7 +823,7 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="默认按实例版本自动选择" TextWrapping="Wrap"
                                                Style="{StaticResource RowLabelStyle}" />
-                                    <Button x:Name="ManageJavaButton" Grid.Column="1" Content="Java 管理…" Style="{StaticResource SettingsActionStyle}"
+                                    <Button x:Name="ManageJavaButton" Grid.Column="1" Content="Java 管理…" Style="{StaticResource PillButtonStyle}"
                                             VerticalAlignment="Center" Click="ManageJava_Click" />
                                 </Grid>
                             </Border>
@@ -856,35 +831,27 @@
                         <StackPanel Spacing="4">
                             <TextBlock Text="内存与 JVM" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14">
+                                <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="内存分配" Style="{StaticResource RowLabelStyle}" />
-                                    <ToggleSwitch x:Name="MemAutoSwitch" Grid.Column="1" HorizontalAlignment="Right"
-                                                  VerticalAlignment="Center" MinWidth="0"
-                                                  OnContent="自动估算" OffContent="固定值"
-                                                  Toggled="LaunchField_Toggled" />
-                                </Grid>
-                            </Border>
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="最大内存（MB）" Style="{StaticResource RowLabelStyle}" />
-                                    <NumberBox x:Name="MemoryBox" Grid.Column="1" Width="150" Height="32" Minimum="1024"
-                                               Maximum="65536" SmallChange="512" LargeChange="2048"
-                                               SpinButtonPlacementMode="Compact" Value="4096" VerticalAlignment="Center"
-                                               ValueChanged="LaunchMemory_Changed" />
+                                    <TextBlock Text="最大内存" Style="{StaticResource RowLabelStyle}" />
+                                    <StackPanel HorizontalAlignment="Right" Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                                        <NumberBox x:Name="MemoryBox" Width="150" Height="32" Minimum="1024"
+                                                   Maximum="65536" SmallChange="512" LargeChange="2048"
+                                                   SpinButtonPlacementMode="Compact" Value="4096"
+                                                   ValueChanged="LaunchMemory_Changed" />
+                                        <ToggleSwitch x:Name="MemAutoSwitch" OnContent="自动估算" OffContent="固定值"
+                                                      Toggled="LaunchField_Toggled" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="38">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
@@ -902,7 +869,7 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="启动参数" Style="{StaticResource RowLabelStyle}" />
-                                    <Button Grid.Column="1" Content="恢复默认" Style="{StaticResource SettingsActionStyle}"
+                                    <Button Grid.Column="1" Content="恢复默认" Style="{StaticResource PillButtonStyle}"
                                             VerticalAlignment="Center" AutomationProperties.Name="恢复默认启动参数" Click="ResetLaunch_Click" />
                                 </Grid>
                             </Border>
@@ -914,24 +881,110 @@
 
                             </Border>
                         </StackPanel>
+                    </StackPanel>
+
+                    <!-- ⑤ 高级 -->
+                    <StackPanel Spacing="12" x:Name="AdvancedCard" Visibility="Collapsed">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="游戏启动" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+
                             <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="38" Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="启动游戏后" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" Grid.Column="2" x:Name="AfterLaunchBox"
-                                              SelectionChanged="AfterLaunch_Changed">
-                                        <ComboBoxItem Content="留在前台" Tag="keep" />
-                                        <ComboBoxItem Content="最小化到任务栏" Tag="minimize" />
-                                    </ComboBox>
-                                </Grid>
+                                                            <Grid ColumnSpacing="14" MinHeight="34">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="日志目录" Style="{StaticResource RowLabelStyle}" />
+                                                                <Button Grid.Column="2" Content="打开" Style="{StaticResource PillButtonStyle}"
+                                                                        Click="OpenLogsFolder_Click" AutomationProperties.Name="打开日志目录" />
+                                                            </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                                            <Grid ColumnSpacing="14" MinHeight="34">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="配置目录" Style="{StaticResource RowLabelStyle}" />
+                                                                <Button Grid.Column="2" Content="打开" Style="{StaticResource PillButtonStyle}"
+                                                                        Click="OpenConfigFolder_Click" AutomationProperties.Name="打开配置目录" />
+                                                            </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                                            <Grid ColumnSpacing="14" MinHeight="34">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="诊断包" Style="{StaticResource RowLabelStyle}" />
+                                                                <TextBlock Grid.Column="1" Text="版本、最近崩溃与日志末尾，打成一个文本文件"
+                                                                           Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
+                                                                <Button Grid.Column="2" Content="导出" Style="{StaticResource PillButtonStyle}"
+                                                                        Click="ExportDiagnostics_Click" AutomationProperties.Name="导出诊断包" />
+                                                            </Grid>
                             </Border>
                         </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="维护" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                                            <Grid ColumnSpacing="14" MinHeight="34">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="清理缓存" Style="{StaticResource RowLabelStyle}" />
+                                                                <TextBlock Grid.Column="1" Text="头像与缩略图缓存，不会删除任何实例"
+                                                                           Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
+                                                                <Button Grid.Column="2" Content="清理" Style="{StaticResource PillButtonStyle}"
+                                                                        Click="ClearCache_Click" AutomationProperties.Name="清理缓存" />
+                                                            </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                                            <Grid ColumnSpacing="14" MinHeight="34">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="104" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Text="重置设置" Style="{StaticResource RowLabelStyle}" />
+                                                                <TextBlock Grid.Column="1" Text="偏好恢复默认，需要重启启动器"
+                                                                           Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
+                                                                <Button Grid.Column="2" Content="重置" Style="{StaticResource PillButtonStyle}"
+                                                                        Click="ResetSettings_Click" AutomationProperties.Name="重置设置" />
+                                                            </Grid>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- 通知 -->
+                    <StackPanel x:Name="NotifyCard" Spacing="4" Visibility="Collapsed">
+                        <Border Style="{StaticResource SettingsRowCardStyle}">
+                            <Grid ColumnSpacing="14" MinHeight="34">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="104" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="任务完成时在启动器里提醒" Grid.ColumnSpan="2" TextTrimming="CharacterEllipsis" Style="{StaticResource RowLabelStyle}" />
+                                <ToggleSwitch x:Name="NotifyTaskDoneSwitch" Grid.Column="2" HorizontalAlignment="Right"
+                                              OnContent="" OffContent="" Toggled="NotifyTaskDoneSwitch_Toggled" MinWidth="0" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingsRowCardStyle}">
+                            <Grid ColumnSpacing="14" MinHeight="34">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="104" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="显示任务药丸" Style="{StaticResource RowLabelStyle}" />
+                                <ToggleSwitch x:Name="ShowTaskIslandSwitch" Grid.Column="2" HorizontalAlignment="Right"
+                                              OnContent="" OffContent="" Toggled="ShowTaskIslandSwitch_Toggled" MinWidth="0" />
+                            </Grid>
+                        </Border>
                     </StackPanel>
 
                     <!-- 开发者测试（子菜单页）：通过开发者认证后才会出现这个分类标签；
@@ -942,12 +995,13 @@
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="34">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="启用开发者测试" Style="{StaticResource RowLabelStyle}" />
-                                    <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="DevFeaturesSwitch" Grid.Column="2" Toggled="DevFeaturesSwitch_Toggled" />
+                                    <ToggleSwitch x:Name="DevFeaturesSwitch" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,-12,0"
+                                                  OnContent="" OffContent="" Toggled="DevFeaturesSwitch_Toggled" MinWidth="0" />
                                 </Grid>
                             </Border>
                             <TextBlock Text="仅供通过开发者认证的账号使用。这里的功能还在测试中，可能不稳定，也不会出现在正式版里。打开后，下面的实验功能才可以使用。"
@@ -955,26 +1009,28 @@
 
                         </StackPanel>
                         <StackPanel Spacing="4">
-                            <Border x:Name="DevFeaturesPanel" Style="{StaticResource SettingsRowCardStyle}" Visibility="Collapsed">
-                                <StackPanel Spacing="10">
+                            <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=DevFeaturesPanel}">
+                                <StackPanel x:Name="DevFeaturesPanel" Spacing="10" Visibility="Collapsed">
                                     <TextBlock Text="联机（实验性）" Style="{StaticResource GroupTitleStyle}" Margin="0,6,0,0" />
                                     <Grid ColumnSpacing="14" MinHeight="34">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
+                                            <ColumnDefinition Width="104" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="启用联机功能" Style="{StaticResource RowLabelStyle}" />
-                                        <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="OnlineEnabledSwitch" Grid.Column="2" Toggled="OnlineEnabledSwitch_Toggled" />
+                                        <ToggleSwitch x:Name="OnlineEnabledSwitch" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,-12,0"
+                                                      OnContent="" OffContent="" Toggled="OnlineEnabledSwitch_Toggled" MinWidth="0" />
                                     </Grid>
                                     <Grid ColumnSpacing="14" MinHeight="34">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
+                                            <ColumnDefinition Width="104" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="向好友显示在线" Style="{StaticResource RowLabelStyle}" />
-                                        <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="ShareOnlineSwitch" Grid.Column="2" Toggled="ShareOnlineSwitch_Toggled" />
+                                        <ToggleSwitch x:Name="ShareOnlineSwitch" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,-12,0"
+                                                      OnContent="" OffContent="" Toggled="ShareOnlineSwitch_Toggled" MinWidth="0" />
                                     </Grid>
                                     <TextBlock Text="开启联机后，启动器会向 Mojang 好友系统上报你的在线状态（带 MeowLauncher 标记），你的好友能看到你在线；游戏运行时不会覆盖游戏里的状态。关闭后不会上报任何状态。"
                                                Style="{StaticResource GroupDescStyle}" />
@@ -986,8 +1042,100 @@
                         </StackPanel>
                     </StackPanel>
 
+                    <!-- 更新（T8 第 2 步）：没有更新服务，就不写「已是最新版本」 -->
+                    <StackPanel Spacing="12" x:Name="UpdateCard" Visibility="Collapsed">
+                        <StackPanel Spacing="4">
+                                <TextBlock Text="更新偏好" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="34">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="更新渠道" Style="{StaticResource RowLabelStyle}" />
+                                    <ComboBox x:Name="UpdateChannelBox" Grid.Column="2" Width="140" Height="32" VerticalAlignment="Center"
+                                              SelectionChanged="UpdateChannelBox_SelectionChanged">
+                                        <ComboBoxItem Content="正式版" Tag="stable" />
+                                        <ComboBoxItem Content="尝鲜版" Tag="beta" />
+                                    </ComboBox>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="34">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="启动时检查更新" Style="{StaticResource RowLabelStyle}" />
+                                    <ToggleSwitch x:Name="CheckUpdatesSwitch" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,-12,0"
+                                                  OnContent="" OffContent="" Toggled="CheckUpdatesSwitch_Toggled" MinWidth="0" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="版本与更新" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="34">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="当前版本" Style="{StaticResource RowLabelStyle}" />
+                                    <TextBlock x:Name="UpdateCurrentText" Grid.Column="1" VerticalAlignment="Center"
+                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                    <Button x:Name="UpdateCheckButton" Grid.Column="2" Content="检查更新" Style="{StaticResource PillButtonStyle}"
+                                            Click="UpdateCheck_Click" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="34">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="最新版本" Style="{StaticResource RowLabelStyle}" />
+                                    <TextBlock x:Name="UpdateLatestText" Grid.Column="1" VerticalAlignment="Center"
+                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                    <Button x:Name="UpdateOpenButton" Grid.Column="2" Content="查看并下载" Style="{StaticResource PillButtonStyle}"
+                                            Visibility="Collapsed" Click="UpdateOpen_Click" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock x:Name="UpdateStatusText" Visibility="Collapsed" TextWrapping="Wrap"
+                                       Style="{StaticResource GroupDescStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=ComponentSection}">
+                                <StackPanel x:Name="ComponentSection" Spacing="12" Visibility="Collapsed">
+                                    <TextBlock Text="联机组件" Style="{StaticResource RowLabelStyle}" FontWeight="SemiBold" Margin="0,10,0,0" />
+                                    <Grid ColumnSpacing="14" MinHeight="34">
+                                        <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="版本" Style="{StaticResource RowLabelStyle}" />
+                                        <TextBlock x:Name="ComponentStatusText" Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap"
+                                                   Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="ComponentActionButton" Content="下载" Style="{StaticResource PillButtonStyle}"
+                                                    Visibility="Collapsed" Click="ComponentAction_Click" />
+                                            <Button x:Name="ComponentCheckButton" Content="检查更新" Style="{StaticResource PillButtonStyle}"
+                                                    Click="ComponentCheck_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock x:Name="ComponentNoteText" Visibility="Collapsed" TextWrapping="Wrap"
+                                               Style="{StaticResource GroupDescStyle}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+
                     <!-- 关于（T8 第 1 步）：只放真实信息，没有更新服务就不写「已是最新版本」 -->
-                    <StackPanel Spacing="12" x:Name="AboutCard" Visibility="Collapsed">
+                    <StackPanel Spacing="12" x:Name="AboutCard" Margin="0,0,0,12">
                         <StackPanel Spacing="4">
 
                             <Border Style="{StaticResource SettingsRowCardStyle}">
@@ -1000,11 +1148,9 @@
                                         <Image Source="ms-appx:///Assets/Icons/Packaged/Square44x44Logo.targetsize-256_altform-unplated.png"
                                                Stretch="Uniform" Margin="4" />
                                     </Border>
-                                    <StackPanel HorizontalAlignment="Left" Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <StackPanel HorizontalAlignment="Right" Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                         <TextBlock Text="MeowLauncher" FontSize="16" FontWeight="SemiBold"
                                                    Foreground="{ThemeResource AppTextBrush}" />
-                                        <TextBlock x:Name="AboutRuntimeText" FontSize="12"
-                                                   Foreground="{ThemeResource AppText3Brush}" />
                                         <TextBlock x:Name="AboutSummaryText" FontSize="12"
                                                    Foreground="{ThemeResource AppText3Brush}" Text="启动器" />
                                         <TextBlock x:Name="AboutBuildText" FontSize="12" Visibility="Collapsed"
@@ -1014,248 +1160,66 @@
                                     </StackPanel>
                                 </Grid>
                             </Border>
-                        </StackPanel>
-
-                        <StackPanel Spacing="12" x:Name="UpdateCard">
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="版本与更新" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="当前版本" Style="{StaticResource RowLabelStyle}" />
-                                        <TextBlock x:Name="UpdateCurrentText" Tapped="AboutVersion_Tapped" Grid.Column="1" VerticalAlignment="Center"
-                                                   Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" TextAlignment="Left" />
-                                        <Button x:Name="UpdateCheckButton" Grid.Column="2" Content="检查更新" Style="{StaticResource SettingsActionStyle}"
-                                                Click="UpdateCheck_Click" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="最新版本" Style="{StaticResource RowLabelStyle}" />
-                                        <TextBlock x:Name="UpdateLatestText" Grid.Column="1" VerticalAlignment="Center"
-                                                   Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" TextAlignment="Left" />
-                                        <Button x:Name="UpdateOpenButton" Grid.Column="2" Content="查看并下载" Style="{StaticResource SettingsActionStyle}"
-                                                Visibility="Collapsed" Click="UpdateOpen_Click" />
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="更新设置" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="更新渠道" Style="{StaticResource RowLabelStyle}" />
-                                        <ComboBox Style="{StaticResource SettingsComboStyle}" x:Name="UpdateChannelBox" Grid.Column="2"
-                                                  SelectionChanged="UpdateChannelBox_SelectionChanged">
-                                            <ComboBoxItem Content="正式版" Tag="stable" />
-                                            <ComboBoxItem Content="尝鲜版" Tag="beta" />
-                                        </ComboBox>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="启动时检查更新" Style="{StaticResource RowLabelStyle}" />
-                                        <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="CheckUpdatesSwitch" Grid.Column="2" Toggled="CheckUpdatesSwitch_Toggled" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="自动下载和安装" Style="{StaticResource RowLabelStyle}" />
-                                        <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Text="当前版本暂不支持，请通过发行页下载更新。" TextWrapping="Wrap" Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Spacing="4">
-                                <TextBlock x:Name="UpdateStatusText" Visibility="Collapsed" TextWrapping="Wrap"
-                                           Style="{StaticResource GroupDescStyle}" />
-                                <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=ComponentSection}">
-                                    <StackPanel x:Name="ComponentSection" Spacing="12" Visibility="Collapsed">
-                                        <TextBlock Text="联机组件" Style="{StaticResource RowLabelStyle}" FontWeight="SemiBold" Margin="0,10,0,0" />
-                                        <Grid ColumnSpacing="14" MinHeight="34">
-                                            <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="版本" Style="{StaticResource RowLabelStyle}" />
-                                            <TextBlock x:Name="ComponentStatusText" Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap"
-                                                       Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" TextAlignment="Left" />
-                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                                                <Button x:Name="ComponentActionButton" Content="下载" Style="{StaticResource SettingsActionStyle}"
-                                                        Visibility="Collapsed" Click="ComponentAction_Click" />
-                                                <Button x:Name="ComponentCheckButton" Content="检查更新" Style="{StaticResource SettingsActionStyle}"
-                                                        Click="ComponentCheck_Click" />
-                                            </StackPanel>
-                                        </Grid>
-                                        <TextBlock x:Name="ComponentNoteText" Visibility="Collapsed" TextWrapping="Wrap"
-                                                   Style="{StaticResource GroupDescStyle}" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </StackPanel>
-
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="项目与开源" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="34">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="版本" Style="{StaticResource RowLabelStyle}" />
+                                    <TextBlock x:Name="AboutVersionText" Text="版本 —" Grid.Column="1" VerticalAlignment="Center" Tapped="AboutVersion_Tapped"
+                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                    <TextBlock x:Name="AboutRuntimeText" Text="运行环境 —" Grid.Column="2" VerticalAlignment="Center"
+                                               Style="{StaticResource RowValueStyle}" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="项目与组件" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="34">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="开源许可" Style="{StaticResource RowLabelStyle}" />
                                     <TextBlock Text="第三方组件的许可证与声明" Grid.Column="1" VerticalAlignment="Center"
-                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" TextAlignment="Left" />
-                                    <Button Grid.Column="2" Content="查看" Style="{StaticResource SettingsActionStyle}"
+                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                    <Button Grid.Column="2" Content="查看" Style="{StaticResource PillButtonStyle}"
                                             AutomationProperties.Name="查看第三方许可证" Click="OpenLicenses_Click" />
                                 </Grid>
                             </Border>
                             <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14" MinHeight="34">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="源码仓库" Style="{StaticResource RowLabelStyle}" />
                                     <TextBlock x:Name="AboutRepoText" Grid.Column="1" VerticalAlignment="Center"
-                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" TextAlignment="Left" />
-                                    <Button x:Name="AboutRepoButton" Grid.Column="2" Content="打开" Style="{StaticResource SettingsActionStyle}"
+                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                    <Button x:Name="AboutRepoButton" Grid.Column="2" Content="打开" Style="{StaticResource PillButtonStyle}"
                                             AutomationProperties.Name="打开源码仓库" Click="OpenRepo_Click" />
                                 </Grid>
                             </Border>
                             <Border Style="{StaticResource SettingsRowCardStyle}" Visibility="{Binding Visibility, ElementName=AboutComponentRow}">
                                 <Grid x:Name="AboutComponentRow" ColumnSpacing="14" MinHeight="34" Visibility="Collapsed">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
+                                        <ColumnDefinition Width="104" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="联机组件" Style="{StaticResource RowLabelStyle}" />
                                     <TextBlock x:Name="AboutComponentText" Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap"
-                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" TextAlignment="Left" />
-                                    <Button x:Name="AboutComponentButton" Grid.Column="2" Content="源码仓库" Style="{StaticResource SettingsActionStyle}"
+                                               Style="{StaticResource RowValueStyle}" HorizontalAlignment="Left" />
+                                    <Button x:Name="AboutComponentButton" Grid.Column="2" Content="源码仓库" Style="{StaticResource PillButtonStyle}"
                                             AutomationProperties.Name="打开联机组件源码仓库" Click="OpenRepo_Click" />
                                 </Grid>
                             </Border>
                         </StackPanel>
-
-                        <StackPanel Spacing="12" x:Name="AdvancedCard">
-                            <Expander Header="诊断与日志" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-<StackPanel Spacing="4">
-                                
-
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                                <Grid ColumnSpacing="14" MinHeight="34">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="156" />
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="日志目录" Style="{StaticResource RowLabelStyle}" />
-                                                                    <Button Grid.Column="2" Content="打开" Style="{StaticResource SettingsActionStyle}"
-                                                                            Click="OpenLogsFolder_Click" AutomationProperties.Name="打开日志目录" />
-                                                                </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                                <Grid ColumnSpacing="14" MinHeight="34">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="156" />
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="配置目录" Style="{StaticResource RowLabelStyle}" />
-                                                                    <Button Grid.Column="2" Content="打开" Style="{StaticResource SettingsActionStyle}"
-                                                                            Click="OpenConfigFolder_Click" AutomationProperties.Name="打开配置目录" />
-                                                                </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                                <Grid ColumnSpacing="14" MinHeight="34">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="156" />
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="诊断包" Style="{StaticResource RowLabelStyle}" />
-                                                                    <TextBlock Grid.Column="1" Text="版本、最近崩溃与日志末尾，打成一个文本文件"
-                                                                               Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
-                                                                    <Button Grid.Column="2" Content="导出" Style="{StaticResource SettingsActionStyle}"
-                                                                            Click="ExportDiagnostics_Click" AutomationProperties.Name="导出诊断包" />
-                                                                </Grid>
-                                </Border>
-                            </StackPanel>
-                            </Expander>
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="维护" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                                <Grid ColumnSpacing="14" MinHeight="34">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="156" />
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="清理缓存" Style="{StaticResource RowLabelStyle}" />
-                                                                    <TextBlock Grid.Column="1" Text="头像与缩略图缓存，不会删除任何实例"
-                                                                               Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
-                                                                    <Button Grid.Column="2" Content="清理" Style="{StaticResource SettingsActionStyle}"
-                                                                            Click="ClearCache_Click" AutomationProperties.Name="清理缓存" />
-                                                                </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="重新开始新手引导" TextWrapping="Wrap" Style="{StaticResource RowLabelStyle}" />
-                                        <TextBlock Grid.Column="1" Text="如果你需要重新开启新手引导教程，可以在这里进入"
-                                                   Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
-                                        <Button Grid.Column="2" Content="重新打开" Style="{StaticResource SettingsActionStyle}"
-                                                Click="OpenOnboarding_Click" AutomationProperties.Name="重新打开新手引导" />
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource SettingsRowCardStyle}">
-                                                                <Grid ColumnSpacing="14" MinHeight="34">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="156" />
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                    </Grid.ColumnDefinitions>
-                                                                    <TextBlock Text="重置设置" Style="{StaticResource RowLabelStyle}" />
-                                                                    <TextBlock Grid.Column="1" Text="偏好恢复默认，需要重启启动器"
-                                                                               Style="{StaticResource GroupDescStyle}" VerticalAlignment="Center" />
-                                                                    <Button Grid.Column="2" Content="重置" Style="{StaticResource SettingsActionStyle}"
-                                                                            Click="ResetSettings_Click" AutomationProperties.Name="重置设置" />
-                                                                </Grid>
-                                </Border>
-                                
-                            </StackPanel>
-                        </StackPanel>
-
                     </StackPanel>
 
                 </StackPanel>

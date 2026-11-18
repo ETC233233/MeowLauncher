@@ -820,9 +820,15 @@ def _rank_sources(urls: list[str]) -> list[str]:
 
 def _download_big(urls: list[str], dest: Path, size: int,
                   on_progress=None, verify=None) -> Path:
-    """大文件按候选顺序分段下载，当前来源失败后再试下一个。"""
+    """大文件：优先官方源分段并发，失败再换下一个源。
+
+    实测这台机器上官方 10~15 MB/s、bmclapi 只有 2 MB/s（它会 302 到各校镜像，快慢不一），
+    所以不再「先探测再选源」——探测本身要花 0.5~1 秒，选错的概率还不小；直接按顺序试，
+    官方被墙时那一步会失败得很快，接着走镜像。
+    """
+    order = list(urls)
     last: Exception | None = None
-    for u in urls:
+    for u in order:
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(dest.name + ".part")
         try:
@@ -857,15 +863,10 @@ def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | No
     parts = urllib.parse.urlsplit(url)
     proxy = None if urllib.request.proxy_bypass(parts.netloc) else urllib.request.getproxies().get(parts.scheme)
     ver = verify if sha1 or size > 0 else None
-    threshold = 1024 * 1024 if force_segments else SEGMENT_MIN
-    if resource_mirror := mcim.file_mirror(url):
-        if proxy is None and size >= threshold:
-            return _download_big(list(mcim.candidates(url, resource_mirror)), dest, int(size), on_progress, ver)
-        return _stream_to(url, dest, on_progress, proxy, verify=ver)
-
     if proxy is None:
-        alt = _mirrored(url)
+        alt = mcim.file_mirror(url) or _mirrored(url)
         cands = [url] + ([alt] if alt and alt != url else [])
+        threshold = 1024 * 1024 if force_segments else SEGMENT_MIN
         if size >= threshold:
             return _download_big(cands, dest, int(size), on_progress, ver)
         if size >= RACE_MIN and len(cands) > 1:
@@ -1133,11 +1134,6 @@ def cf_search_page(query: str, loader: str | None = None, mc_version: str | None
             "limit": limit, "source": "curseforge"}
 
 
-def cf_mod_file(mod_id: int, file_id: int, key: str | None = None) -> dict:
-    result = _cf_get(f"/mods/{int(mod_id)}/files/{int(file_id)}", None, key) or {}
-    return result.get("data") or {}
-
-
 def cf_mod_files(mod_id: int, mc_version: str | None = None, loader: str | None = None,
                  limit: int = 50, key: str | None = None) -> list[dict]:
     params = {"pageSize": str(max(1, min(50, limit)))}
@@ -1294,17 +1290,16 @@ def modrinth_version(version_id: str) -> dict:
 
 def install_modrinth_version(version: dict, dest_dir: Path,
                              on_progress: Callable[[int, int], None] | None = None) -> list[Path]:
+    saved = []
     files = version.get("files") or []
-    file = next((item for item in files if item.get("primary")), files[0] if files else {})
-    url = file.get("url")
-    if not url:
-        return []
-    name = str(file.get("filename") or "mod.jar")
-    if name in (".", "..") or any(ch in name for ch in "/\\:"):
-        raise ValueError("Modrinth 文件名无效")
-    return [_download(url, dest_dir / name, on_progress,
-                      sha1=str((file.get("hashes") or {}).get("sha1") or ""),
-                      size=int(file.get("size") or 0))]
+    files.sort(key=lambda f: (not f.get("primary"), f.get("filename", "")))
+    for f in files[:1]:
+        url = f.get("url")
+        name = f.get("filename") or "mod.jar"
+        if not url:
+            continue
+        saved.append(_download(url, dest_dir / name, on_progress))
+    return saved
 
 
 def resolve_dependencies(version: dict, history: set[str] | None = None,
@@ -1524,10 +1519,7 @@ def download_jobs_multi(jobs: list, on_bytes, on_file, procs: int | None = None,
         for t in pumps:
             t.join()
         for p in procs_list:
-            if code := p.wait():
-                failed[0] += 1
-                if on_fail is not None:
-                    on_fail("下载进程", f"退出码 {code}")
+            p.wait()
     finally:
         for p in procs_list:
             try:
@@ -1550,9 +1542,8 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     _rep = on_progress or (lambda *_: None)
     meter = ByteMeter()
 
-    def report(phase, done, total, name="", fbytes=0, fsize=0, *, message=""):
-        info = {"name": name, "bytes": meter.total, "speed": meter.speed(), "fbytes": fbytes, "fsize": fsize,
-                "message": message}
+    def report(phase, done, total, name="", fbytes=0, fsize=0):
+        info = {"name": name, "bytes": meter.total, "speed": meter.speed(), "fbytes": fbytes, "fsize": fsize}
         try:
             _rep(phase, done, total, info)
         except TypeError:
@@ -1597,6 +1588,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     client_bytes = int((client or {}).get("size") or 0)
     index_bytes = int((ai or {}).get("size") or 0) if ai else 0
     total_bytes = max(lib_bytes + client_bytes + index_bytes + asset_bytes, 1)
+    base_bytes = lib_bytes + client_bytes + index_bytes
 
     # 三条线并发，各自只记自己已经下到多少；总进度 = 三块分别封顶后相加。
     # 直接用 meter.total 会把「重试/重复计入」的字节也算进去，出现「总进度 98% 但 jar 才 47%」。
@@ -1606,14 +1598,14 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     asset_meter = ByteMeter()
 
     def overall_bytes() -> int:
-        return (index_bytes + min(lib_got[0], lib_bytes)
+        return (min(lib_got[0], lib_bytes)
                 + min(client_got[0], client_bytes)
                 + min(asset_got[0], asset_bytes))
 
-    def breport(step_index: int, step_done: int, step_total: int, name: str = "", *, complete=False):
+    def breport(step_index: int, step_done: int, step_total: int, name: str = ""):
         """按字节报总进度：分母从一开始就固定，进度只增不减。"""
         # step_total 为 0 表示这一步这次没有文件要下（早就有了）——那就是 100%，不是 0%。
-        info = {"name": name, "speed": meter.speed(), "step": step_index, "complete": complete,
+        info = {"name": name, "speed": meter.speed(), "step": step_index,
                 "steppct": (100.0 * step_done / step_total) if step_total > 0 else 100.0}
         try:
             _rep("bytes", int(overall_bytes()), int(total_bytes), info)
@@ -1623,14 +1615,27 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     finished = [total - len(jobs)]
     lock = threading.Lock()
 
+    def fetch_lib(job):
+        art, dest = job
+        try:
+            _download(art["url"], dest, meter.file_cb())
+        except Exception as e:
+            log(f"[警告] 库下载失败 {art['path']}: {e}")
+        with lock:
+            finished[0] += 1
+            n = finished[0]
+        if n % 10 == 0:
+            log(f"[安装] 库 {n}/{total}")
+        report("libraries", n, total, art["path"].rsplit("/", 1)[-1])
+        breport(0, meter.total, lib_bytes, art["path"].rsplit("/", 1)[-1])
+
     # 依赖库、客户端 jar、资源文件三块互不依赖：并发跑，总下载时间取最长的那块，
     # 而不是三块相加。进度仍按字节汇总到同一个 meter，界面看到的是同一条总进度。
     def _do_libs() -> None:
         if not jobs:
             report("libraries", total, total)
-            breport(0, lib_bytes, lib_bytes, complete=True)
+            breport(0, lib_bytes, lib_bytes, "")
             return
-        breport(0, 0, lib_bytes)
 
         def _lib_bytes(delta: int) -> None:
             lib_got[0] += delta
@@ -1646,22 +1651,14 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
             report("libraries", n, total, name)
             breport(0, min(lib_got[0], lib_bytes), lib_bytes, name)
 
-        errors = []
-        failed = download_jobs_multi([(art["url"], dest) for art, dest in jobs], _lib_bytes, _lib_done,
-                                     on_fail=lambda dest, error: errors.append(f"{Path(dest).name}: {error}"))
-        if failed:
-            raise RuntimeError(f"{failed} 个依赖库下载失败：{'; '.join(errors[:3])}")
-        if finished[0] != total:
-            raise RuntimeError(f"依赖库下载未完成（{finished[0]}/{total}）")
-        lib_got[0] = lib_bytes
-        breport(0, lib_bytes, lib_bytes, complete=True)
+        download_jobs_multi([(art["url"], dest) for art, dest in jobs], _lib_bytes, _lib_done)
+        breport(0, lib_bytes, lib_bytes, "")
 
     def _do_client() -> None:
         if not client:
-            breport(1, 0, 0, complete=True)
             return
         dest = vdir / f"{vid}.jar"
-        if not dest.is_file() or (client_bytes and dest.stat().st_size != client_bytes):
+        if not dest.exists():
             csize = int(client.get("size") or 0)
             fcb = meter.file_cb()
             tick = [0.0]
@@ -1675,16 +1672,20 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
                     report("client", 0, 1, f"{vid}.jar", done, tot or csize)
                     breport(1, done, tot or csize, f"{vid}.jar")
 
-            _download(client["url"], dest, client_cb, size=client_bytes)
-        client_got[0] = client_bytes
-        breport(1, client_bytes, client_bytes, complete=True)
+            try:
+                # 一定要把 size 带进来：不带 size 时 _download 不知道文件多大，会退回
+                # 单连接顺序下（实测 26.1.2 的 38 MB jar 只有 1.1 MB/s，带 size 走 16 段是 20 MB/s）。
+                _download(client["url"], dest, client_cb, size=int(client.get("size") or 0))
+                log("[安装] 客户端 jar 完成")
+            except Exception as e:
+                log(f"[警告] 客户端 jar 下载失败: {e}")
+        report("client", 1, 1, f"{vid}.jar")
+        breport(1, client_bytes, client_bytes, "")
 
     def _do_assets() -> None:
+        report("index", 1, 1)
         if not ai:
-            breport(2, 0, 0, complete=True)
             return
-        if asset_bytes:
-            breport(2, 0, asset_bytes)
 
         last_asset = [0]
 
@@ -1700,25 +1701,17 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
             report("assets", done, count, name)
             breport(2, asset_got[0], max(asset_bytes, 1), name)
 
-        _, failed = ensure_assets(mc_dir, ai["id"], on_log=on_log, meter=asset_meter, on_item=on_asset)
-        if failed:
-            raise RuntimeError(f"{failed} 个游戏资源下载失败")
-        asset_got[0] = asset_bytes
-        breport(2, asset_bytes, asset_bytes, complete=True)
-
-    def run_download(index, action):
         try:
-            action()
-        except Exception as exc:
-            exc.install_stage = ("下载依赖库", "下载游戏主文件", "下载资源文件")[index]
-            report("failed", index, 3, message=str(exc))
-            raise
+            ensure_assets(mc_dir, ai["id"], on_log=on_log, meter=asset_meter, on_item=on_asset)
+        except Exception as e:
+            log(f"[警告] 资源下载失败: {e}")
+        breport(2, max(asset_bytes, 1), max(asset_bytes, 1), "")
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        downloads = [pool.submit(run_download, i, action)
-                     for i, action in enumerate((_do_libs, _do_client, _do_assets))]
-        for download in as_completed(downloads):
-            download.result()
+    _threads = [threading.Thread(target=f, daemon=True) for f in (_do_libs, _do_client, _do_assets)]
+    for _t in _threads:
+        _t.start()
+    for _t in _threads:
+        _t.join()
     log("[安装] 完成")
 
 

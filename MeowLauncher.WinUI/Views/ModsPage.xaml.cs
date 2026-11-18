@@ -7,8 +7,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
 using Windows.UI;
 
 namespace MeowLauncher.WinUI.Views;
@@ -18,7 +16,6 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
     private readonly ObservableCollection<ModInfo> _items = new();
     private List<ModInfo> _all = new();
     private string _versionId = "";
-    private string _versionRoot = "";
     private string _query = "";
     private string _dir = "";
     private bool _loading;
@@ -61,7 +58,6 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         {
             var snapshot = await App.Backend.GetSnapshotAsync();
             _versionId = snapshot?.Current?.Id ?? snapshot?.Selected ?? "";
-            _versionRoot = snapshot?.Current?.Root ?? snapshot?.GameDir ?? "";
             if (string.IsNullOrWhiteSpace(_versionId))
             {
                 ShowError("没有选择实例，请先在版本管理中选一个。");
@@ -407,7 +403,6 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
 
     private async void Import_Click(object sender, RoutedEventArgs e)
     {
-        if (_busy || _loading) return;
         if (string.IsNullOrWhiteSpace(_versionId))
         {
             ShowToast("没有选择实例，先在版本管理里选一个。", InfoBarSeverity.Warning);
@@ -419,79 +414,28 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         picker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.Downloads;
         foreach (var ext in new[] { ".jar", ".zip" }) picker.FileTypeFilter.Add(ext);
         var files = await picker.PickMultipleFilesAsync();
-        if (files.Count > 0) await ImportModsAsync(files);
-    }
+        if (files is null || files.Count == 0) return;
 
-    private void Mods_DragOver(object sender, DragEventArgs e)
-    {
-        if (_busy || _loading || _versionId.Length == 0 || !e.DataView.Contains(StandardDataFormats.StorageItems)) return;
-        e.AcceptedOperation = DataPackageOperation.Copy;
-        e.DragUIOverride.Caption = $"导入 Mod 到 {_versionId}";
-        e.Handled = true;
-    }
+        var imported = 0;
+        var lastError = "";
+        foreach (var file in files)
+        {
+            var result = await App.Backend.ImportAssetAsync("mod", _versionId, file.Path);
+            if (result.Ok) imported++;
+            else lastError = result.Message;
+        }
 
-    private async void Mods_Drop(object sender, DragEventArgs e)
-    {
-        if (_busy || _loading || !e.DataView.Contains(StandardDataFormats.StorageItems)) return;
-        e.Handled = true;
-        var deferral = e.GetDeferral();
-        List<StorageFile> files;
-        try
+        if (imported == 0)
         {
-            files = (await e.DataView.GetStorageItemsAsync()).OfType<StorageFile>()
-                .Where(file => file.FileType.Equals(".jar", StringComparison.OrdinalIgnoreCase)
-                            || file.FileType.Equals(".zip", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            ShowToast($"无法读取拖入的文件：{ex.Message}", InfoBarSeverity.Error);
-            return;
-        }
-        finally { deferral.Complete(); }
-        if (files.Count == 0)
-        {
-            ShowToast("请拖入 .jar 或 .zip Mod 文件。整合包请拖到「获取」页。", InfoBarSeverity.Warning);
-            return;
-        }
-        await ImportModsAsync(files);
-    }
-
-    private async Task ImportModsAsync(IReadOnlyList<StorageFile> files)
-    {
-        if (_busy || _loading) return;
-        var version = _versionId;
-        var root = _versionRoot;
-        if (version.Length == 0)
-        {
-            ShowToast("没有选择实例，先在版本管理里选一个。", InfoBarSeverity.Warning);
+            ShowToast(string.IsNullOrWhiteSpace(lastError) ? "没有可导入的文件。" : lastError, InfoBarSeverity.Error);
             return;
         }
 
-        _busy = true;
-        try
-        {
-            var imported = 0;
-            var lastError = "";
-            foreach (var file in files)
-            {
-                var result = await App.Backend.ImportAssetAsync("mod", version, file.Path, root);
-                if (result.Ok) imported++;
-                else lastError = result.Message;
-            }
-
-            if (imported == 0)
-            {
-                ShowToast(string.IsNullOrWhiteSpace(lastError) ? "没有可导入的 Mod。" : lastError, InfoBarSeverity.Error);
-                return;
-            }
-            ShowToast(imported == files.Count ? $"已导入 {imported} 个 Mod 到 {version}。"
-                : $"已导入 {imported} / {files.Count} 个 Mod。{lastError}",
-                imported == files.Count ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
-            await LoadAsync();
-        }
-        catch (Exception ex) { ShowToast($"导入 Mod 失败：{ex.Message}", InfoBarSeverity.Error); }
-        finally { _busy = false; }
+        ShowToast(imported == files.Count
+            ? $"{imported} 个 Mod 已导入。"
+            : $"{imported} / {files.Count} 个 Mod 已导入。{lastError}",
+            imported == files.Count ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        await LoadAsync();
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadAsync();

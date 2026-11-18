@@ -1,10 +1,8 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
 
 namespace MeowLauncher.WinUI.Models;
 
@@ -18,31 +16,12 @@ public class TaskEntry : INotifyPropertyChanged
     private string _remainText = "";
     private double _target;
     private DispatcherQueueTimer? _tick;
-    private FailureInfo? _failure;
-    private ImageSource? _targetIcon;
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = "";
     public string Glyph { get; set; } = "\uE7C3";
     public string PageTag { get; set; } = "home";
     public string TimeText { get; set; } = DateTime.Now.ToString("HH:mm");
-
-    public ImageSource? TargetIcon
-    {
-        get => _targetIcon;
-        set { _targetIcon = value; OnPropertyChanged(); OnPropertyChanged(nameof(TaskGlyphVisibility)); }
-    }
-
-    public Visibility TaskGlyphVisibility => TargetIcon is null ? Visibility.Visible : Visibility.Collapsed;
-    internal string LastStage { get; set; } = "";
-
-    public FailureInfo? Failure
-    {
-        get => _failure;
-        internal set { _failure = value; OnPropertyChanged(nameof(ErrorCodeText)); }
-    }
-
-    public string ErrorCodeText => Failure is null ? "" : $"错误码 {Failure.Code}";
 
     public override string ToString() => Title;
 
@@ -82,10 +61,66 @@ public class TaskEntry : INotifyPropertyChanged
         set
         {
             if (_status == value) return;
+            var wasActive = _status == "进行中";
             _status = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsActive));
+            if (!wasActive || value == "进行中")
+            {
+                // 新任务/重试：进度区立刻回来。
+                _progressShown = true;
+                ProgressOpacity = 1;
+                return;
+            }
+            // 跑完了别「啪」地消失：先渐隐 260ms，再收起。
+            StartProgressFade();
         }
+    }
+
+    private double _progressOpacity = 1;
+    private bool _progressShown = true;
+    private DispatcherQueueTimer? _fadeTick;
+
+    /// <summary>进度区的不透明度（跑完那一刻做渐隐）。</summary>
+    public double ProgressOpacity
+    {
+        get => _progressOpacity;
+        private set { _progressOpacity = value; OnPropertyChanged(); }
+    }
+
+    public Microsoft.UI.Xaml.Visibility ProgressVisibility =>
+        _progressShown ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+
+    private void StartProgressFade()
+    {
+        var queue = DispatcherQueue.GetForCurrentThread();
+        if (queue is null)
+        {
+            _progressShown = false;
+            OnPropertyChanged(nameof(ProgressVisibility));
+            return;
+        }
+        _fadeTick?.Stop();
+        _fadeTick = queue.CreateTimer();
+        _fadeTick.Interval = TimeSpan.FromMilliseconds(16);
+        var start = DateTime.UtcNow;
+        const double total = 260;
+        _fadeTick.Tick += (_, _) =>
+        {
+            var t = (DateTime.UtcNow - start).TotalMilliseconds / total;
+            if (t >= 1)
+            {
+                _fadeTick?.Stop();
+                _fadeTick = null;
+                ProgressOpacity = 0;
+                _progressShown = false;
+                OnPropertyChanged(nameof(ProgressVisibility));
+                return;
+            }
+            // ease-out：开头掉得快，尾巴慢，看着像「化掉」而不是匀速淡出。
+            ProgressOpacity = 1 - (1 - Math.Pow(1 - t, 2));
+        };
+        _fadeTick.Start();
     }
 
     public string Detail
@@ -112,8 +147,6 @@ public class TaskEntry : INotifyPropertyChanged
             EnsureTick();
         }
     }
-
-    internal void AdvanceProgress(double value) => Progress = Math.Max(_target, value);
 
     private void EnsureTick()
     {

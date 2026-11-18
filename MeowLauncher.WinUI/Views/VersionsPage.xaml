@@ -11,13 +11,14 @@
     Background="Transparent">
 
     <Page.Resources>
+        <Thickness x:Key="ToolbarCardPadding">16,10,16,10</Thickness>
         <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
 
         <Style TargetType="ListViewItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Margin" Value="0,0" />
+            <Setter Property="Margin" Value="0,0,0,6" />
             <Setter Property="CornerRadius" Value="{StaticResource RowCornerRadius}" />
             <Setter Property="Background" Value="Transparent" />
         </Style>
@@ -56,20 +57,52 @@
             <Setter Property="BorderThickness" Value="0" />
         </Style>
 
+        <!-- 目录组头：目录名 + 实例数（多目录同屏分组的唯一分隔） -->
+        <DataTemplate x:Key="VersionGroupHeader" x:DataType="views:VersionGroup">
+            <!-- 用 Button 而不是 Tapped：ListView 会先把点击吃掉，Tapped 收不到，表现就是「点了收不起来」。 -->
+            <Button Click="VersionGroupHeader_Click" Tag="{x:Bind Root}"
+                    Background="Transparent" BorderThickness="0" Padding="2,10,2,4"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                    AutomationProperties.Name="{x:Bind Title}">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="20" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8B7;" FontSize="12" VerticalAlignment="Center"
+                              Foreground="{ThemeResource AppText3Brush}" />
+                    <TextBlock Grid.Column="1" Text="{x:Bind Title}" VerticalAlignment="Center"
+                               FontSize="{StaticResource FontSizeCaption}" FontWeight="SemiBold"
+                               Foreground="{ThemeResource AppText2Brush}"
+                               TextTrimming="CharacterEllipsis" />
+                    <Border Grid.Column="2" Background="{ThemeResource TintRecentSoftBrush}"
+                            CornerRadius="{StaticResource ChipCornerRadius}" Padding="7,0"
+                            VerticalAlignment="Center"
+                            Visibility="{x:Bind DefaultVisibility, Mode=OneWay}">
+                        <TextBlock Text="默认" FontSize="10.5" Foreground="{ThemeResource TintRecentBrush}" />
+                    </Border>
+                    <TextBlock Grid.Column="3" Text="{x:Bind CountText}" VerticalAlignment="Center"
+                               FontSize="{StaticResource FontSizeCaption}"
+                               Foreground="{ThemeResource AppText3Brush}" />
+                    <FontIcon Grid.Column="4" Glyph="{x:Bind ChevronGlyph, Mode=OneWay}" FontSize="11.5"
+                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                              Foreground="{ThemeResource AppText3Brush}" />
+                </Grid>
+            </Button>
+        </DataTemplate>
     </Page.Resources>
 
     <Grid Padding="{StaticResource PagePadding}" RowSpacing="12">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" MinHeight="52" />
+            <RowDefinition Height="52" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- 顶栏：面包屑 + 计数 + 扫描 / 打开目录 / 返回 -->
-        <Grid Grid.Row="0" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <Grid Grid.Row="0">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <TextBlock x:Name="CrumbRoot" Text="实例" FontSize="28" FontWeight="SemiBold"
                            VerticalAlignment="Center"
@@ -83,7 +116,7 @@
                            TextTrimming="CharacterEllipsis" MaxWidth="420"
                            Visibility="Collapsed" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="8">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="8">
                 <!-- 全部实例是实例工作区里的一个视图：列表模式下给一个页内的返回入口（详情模式用面包屑回列表） -->
                 <Button x:Name="BackToInstanceButton" Style="{StaticResource QuietButtonStyle}"
                         AutomationProperties.Name="返回实例" ToolTipService.ToolTip="返回实例（Alt+Left）"
@@ -98,30 +131,32 @@
                         ToolTipService.ToolTip="重新扫描本地实例" Click="Rescan_Click">
                     <FontIcon Glyph="&#xE72C;" FontSize="14" />
                 </Button>
-                <ComboBox x:Name="DirBox" Width="240" VerticalAlignment="Center"
-                          Header="所选目录将作为默认目录" PlaceholderText="选择游戏目录"
-                          AutomationProperties.Name="默认游戏目录" SelectionChanged="DirBox_SelectionChanged">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding}" />
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
+                <Button x:Name="OpenDirButton" Style="{StaticResource QuietButtonStyle}"
+                        AutomationProperties.Name="打开游戏目录" Click="OpenGameDir_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE8B7;" FontSize="12" Foreground="{ThemeResource AppText2Brush}" />
+                        <TextBlock Text="打开游戏目录" FontSize="{StaticResource FontSizeCaption}" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1">
 
-            <!-- 列表视图：工具栏和可折叠的目录分组 -->
+            <!-- 列表视图：整宽卡片 + 两行行卡（品牌绿语义底） -->
             <Grid x:Name="ListPanel">
-                <Border Padding="0,4,0,0">
+                <Border Background="{ThemeResource AppCardBrush}"
+                        BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
+                        CornerRadius="{StaticResource CardCornerRadius}" />
+                <Border Padding="{StaticResource ToolbarCardPadding}">
                     <Grid RowSpacing="8">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <!-- 工具栏：左侧搜索，右侧目录管理 -->
+                        <!-- 工具栏：56 高，左侧搜索入口 / 右侧目录筛选，左右两端对齐 -->
                         <Grid Height="40" ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -136,176 +171,149 @@
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8"
                                         VerticalAlignment="Center">
-                                <Button Height="32" Click="OpenGameDir_Click"
-                                        AutomationProperties.Name="打开默认游戏目录">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon Glyph="&#xE8A7;" FontSize="14" />
-                                        <TextBlock Text="打开目录" />
-                                    </StackPanel>
-                                </Button>
-                                <Button x:Name="AddDirButton" Height="32"
+                                <ComboBox x:Name="DirBox" Width="226" Height="32"
+                                          CornerRadius="{StaticResource ChipCornerRadius}"
+                                          FontSize="{StaticResource FontSizeCaption}"
+                                          PlaceholderText="选择主目录"
+                                          ToolTipService.ToolTip="主目录：打开目录、添加实例都落在这里；列表仍按目录分组显示全部"
+                                          AutomationProperties.Name="切换主游戏目录"
+                                          SelectionChanged="DirBox_SelectionChanged" />
+                                <Button x:Name="AddDirButton" Style="{StaticResource QuietButtonStyle}"
+                                        Height="32" Padding="12,0"
                                         AutomationProperties.Name="添加游戏目录" Click="AddDir_Click"
                                         ToolTipService.ToolTip="把另一个 .minecraft 目录加进列表（最多 6 个）">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <FontIcon Glyph="&#xE710;" FontSize="12" />
-                                        <TextBlock Text="添加目录" />
+                                        <TextBlock Text="添加目录" FontSize="{StaticResource FontSizeCaption}" />
                                     </StackPanel>
                                 </Button>
-                                <Button x:Name="RemoveDirButton" Height="32"
-                                        AutomationProperties.Name="移除默认游戏目录" Click="RemoveDir_Click"
+                                <Button x:Name="RemoveDirButton" Style="{StaticResource QuietButtonStyle}"
+                                        Height="32" Padding="12,0"
+                                        AutomationProperties.Name="移除当前主目录" Click="RemoveDir_Click"
                                         ToolTipService.ToolTip="只从列表里移除，不删除磁盘上的文件">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <FontIcon Glyph="&#xE74D;" FontSize="12" />
-                                        <TextBlock Text="移除目录" />
+                                        <TextBlock Text="移除" FontSize="{StaticResource FontSizeCaption}" />
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
                         </Grid>
 
                         <Grid Grid.Row="1">
-                            <ScrollViewer x:Name="VersionListScroll" HorizontalScrollBarVisibility="Disabled"
-                                          ViewChanged="VersionListScroll_ViewChanged">
-                                <ItemsControl x:Name="VersionList">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <StackPanel Spacing="8">
-                                                <StackPanel.ChildrenTransitions>
-                                                    <RepositionThemeTransition />
-                                                </StackPanel.ChildrenTransitions>
-                                            </StackPanel>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="views:VersionGroup">
-                                            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                                      IsExpanded="{x:Bind IsExpanded}" Tag="{x:Bind Folder}"
-                                                      AutomationProperties.Name="{x:Bind Folder}"
-                                                      Expanding="VersionGroup_Expanding" Collapsed="VersionGroup_Collapsed">
-                                                <Expander.Header>
-                                                    <Grid ColumnSpacing="12">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="24" />
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <FontIcon Glyph="&#xE8B7;" FontSize="18"
-                                                                  Foreground="{ThemeResource AppText2Brush}" />
-                                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                                            <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold"
-                                                                       FontSize="{StaticResource FontSizeBody}"
-                                                                       Foreground="{ThemeResource AppTextBrush}"
-                                                                       TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{x:Bind Folder}" FontSize="{StaticResource FontSizeCaption}"
-                                                                       Foreground="{ThemeResource AppText3Brush}"
-                                                                       TextTrimming="CharacterEllipsis"
-                                                                       ToolTipService.ToolTip="{x:Bind Folder}" />
-                                                        </StackPanel>
-                                                        <TextBlock Grid.Column="2" Text="{x:Bind CountText}"
-                                                                   Foreground="{ThemeResource AppText3Brush}"
-                                                                   FontSize="{StaticResource FontSizeCaption}"
-                                                                   VerticalAlignment="Center" />
-                                                    </Grid>
-                                                </Expander.Header>
-                                                <ListView SelectionMode="None" IsItemClickEnabled="True" ItemClick="VersionList_ItemClick"
-                                                          ItemsSource="{x:Bind Items}"
-                                                          ScrollViewer.HorizontalScrollMode="Disabled"
-                                                          ScrollViewer.VerticalScrollMode="Disabled"
-                                                          ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                                                    <ListView.ItemTemplate>
-                                                        <DataTemplate x:DataType="views:VersionRow">
-                                                            <Grid Background="Transparent" PointerEntered="Row_PointerEntered"
-                                                                  PointerMoved="Row_PointerMoved"
-                                                                  PointerExited="Row_PointerExited">
-                                                                <Border Height="1" VerticalAlignment="Bottom" Margin="12,0"
-                                                                        Background="{ThemeResource CardStrokeBrush}" IsHitTestVisible="False" />
-                                                                <Border Width="3" Height="22" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                                        CornerRadius="2" Background="{ThemeResource AppAccentBrush}" IsHitTestVisible="False"
-                                                                        Visibility="{x:Bind CurrentVisibility}" />
-                                                                <Grid Padding="{x:Bind RowPadding}" ColumnSpacing="12" MinHeight="{x:Bind RowMinHeight}">
-                                                                    <Grid.ColumnDefinitions>
-                                                                        <ColumnDefinition Width="28" />
-                                                                        <ColumnDefinition Width="*" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                        <ColumnDefinition Width="Auto" />
-                                                                        <ColumnDefinition Width="14" />
-                                                                    </Grid.ColumnDefinitions>
+                            <ListView x:Name="VersionList" SelectionMode="None"
+                                      IsItemClickEnabled="True" ItemClick="VersionList_ItemClick"
+                                      ItemsSource="{x:Bind GroupsView.View, Mode=OneWay}"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView.GroupStyle>
+                                    <GroupStyle HeaderTemplate="{StaticResource VersionGroupHeader}" />
+                                </ListView.GroupStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="views:VersionRow">
+                                        <Grid Visibility="{x:Bind RowVisibility}"
+                                              PointerEntered="Row_PointerEntered"
+                                              PointerMoved="Row_PointerMoved"
+                                              PointerExited="Row_PointerExited">
+                                            <!-- 卡片底：半透明纯色 + 1px 描边（禁 Acrylic / 投影） -->
+                                            <Border Background="{ThemeResource AppCardBrush}"
+                                                    BorderBrush="{ThemeResource CardStrokeBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="{StaticResource RowCornerRadius}" />
+                                            <!-- 普通行只抬一层中性底，绿色留给「当前」行；否则整页九行一起发绿，当前行反而不突出。 -->
+                                            <Border Background="{ThemeResource AppChipBrush}"
+                                                    CornerRadius="{StaticResource RowCornerRadius}" />
+                                            <!-- 当前实例：绿色底 + 1px 绿描边 -->
+                                            <Border Background="{ThemeResource AppAccentSoftBrush}"
+                                                    CornerRadius="{StaticResource RowCornerRadius}"
+                                                    Visibility="{Binding CurrentVisibility}" />
+                                            <Border BorderBrush="{ThemeResource TintRecentBrush}" BorderThickness="1"
+                                                    CornerRadius="{StaticResource RowCornerRadius}"
+                                                    Visibility="{Binding CurrentVisibility}" />
+                                            <Grid Padding="{x:Bind RowPadding}" ColumnSpacing="12" MinHeight="{x:Bind RowMinHeight}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="28" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="14" />
+                                                </Grid.ColumnDefinitions>
 
-                                                                    <Border Width="28" Height="28" CornerRadius="6" VerticalAlignment="Center">
-                                                                        <Border.Background>
-                                                                            <ImageBrush ImageSource="{x:Bind IconSource}" Stretch="UniformToFill" />
-                                                                        </Border.Background>
-                                                                    </Border>
+                                                <Border Width="28" Height="28" CornerRadius="6" VerticalAlignment="Center">
+                                                    <Border.Background>
+                                                        <ImageBrush ImageSource="{x:Bind IconSource}" Stretch="UniformToFill" />
+                                                    </Border.Background>
+                                                </Border>
 
-                                                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                                                        <TextBlock Text="{x:Bind Id}"
-                                                                                   FontSize="{StaticResource FontSizeCardTitle}"
-                                                                                   FontWeight="SemiBold"
-                                                                                   Foreground="{ThemeResource AppTextBrush}"
-                                                                                   TextTrimming="CharacterEllipsis" />
-                                                                        <TextBlock Text="{x:Bind Subtitle}"
-                                                                                   FontSize="{StaticResource FontSizeCaption}"
-                                                                                   Foreground="{ThemeResource AppText3Brush}"
-                                                                                   Visibility="{x:Bind SubtitleVisibility}"
-                                                                                   TextTrimming="CharacterEllipsis" />
-                                                                    </StackPanel>
+                                                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind Id}"
+                                                               FontSize="{StaticResource FontSizeCardTitle}"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{ThemeResource AppTextBrush}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{x:Bind Subtitle}"
+                                                               FontSize="{StaticResource FontSizeCaption}"
+                                                               Foreground="{ThemeResource AppText3Brush}"
+                                                               Visibility="{x:Bind SubtitleVisibility}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
 
-                                                                    <TextBlock Grid.Column="2" Text="当前" VerticalAlignment="Center"
-                                                                               Visibility="{x:Bind CurrentVisibility}"
-                                                                               FontSize="{StaticResource FontSizeCaption}"
-                                                                               Foreground="{ThemeResource AppAccentTextBrush}" />
+                                                <Border Grid.Column="2" VerticalAlignment="Center"
+                                                        Background="{ThemeResource TintRecentBrush}"
+                                                        CornerRadius="{StaticResource ChipCornerRadius}"
+                                                        Padding="9,3"
+                                                        Visibility="{x:Bind CurrentVisibility}">
+                                                    <TextBlock Text="当前"
+                                                               FontSize="{StaticResource FontSizeCaption}"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{ThemeResource AppAccentTextBrush}" />
+                                                </Border>
 
-                                                                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2"
-                                                                                Tag="move" Opacity="0" IsHitTestVisible="False"
-                                                                                VerticalAlignment="Center"
-                                                                                GotFocus="MovePanel_FocusChanged"
-                                                                                LostFocus="MovePanel_FocusChanged">
-                                                                        <Button Width="32" Height="32" Padding="0" BorderThickness="0"
-                                                                                CornerRadius="7" Background="Transparent"
-                                                                                AutomationProperties.Name="重命名实例"
-                                                                                ToolTipService.ToolTip="重命名（名字和文件夹一起改）"
-                                                                                Tag="{x:Bind}" Click="RenameRow_Click">
-                                                                            <FontIcon Glyph="&#xE8AC;" FontSize="{StaticResource FontSizeCaption}"
-                                                                                      Foreground="{ThemeResource AppText3Brush}" />
-                                                                        </Button>
-                                                                        <Button Width="32" Height="32" Padding="0" BorderThickness="0"
-                                                                                CornerRadius="7" Background="Transparent"
-                                                                                AutomationProperties.Name="固定到首页"
-                                                                                ToolTipService.ToolTip="固定到首页 / 取消固定"
-                                                                                Tag="{x:Bind Source}" Click="Pin_Click">
-                                                                            <FontIcon Glyph="&#xE718;" FontSize="{StaticResource FontSizeCaption}"
-                                                                                      Foreground="{ThemeResource AppText3Brush}" />
-                                                                        </Button>
-                                                                        <Button Width="32" Height="32" Padding="0" BorderThickness="0"
-                                                                                CornerRadius="7" Background="Transparent"
-                                                                                AutomationProperties.Name="上移一位"
-                                                                                ToolTipService.ToolTip="上移一位（顺序会记住）"
-                                                                                Tag="{x:Bind}" Click="MoveUp_Click">
-                                                                            <FontIcon Glyph="&#xE70E;" FontSize="{StaticResource FontSizeCaption}"
-                                                                                      Foreground="{ThemeResource AppText3Brush}" />
-                                                                        </Button>
-                                                                        <Button Width="32" Height="32" Padding="0" BorderThickness="0"
-                                                                                CornerRadius="7" Background="Transparent"
-                                                                                AutomationProperties.Name="下移一位"
-                                                                                ToolTipService.ToolTip="下移一位（顺序会记住）"
-                                                                                Tag="{x:Bind}" Click="MoveDown_Click">
-                                                                            <FontIcon Glyph="&#xE70D;" FontSize="{StaticResource FontSizeCaption}"
-                                                                                      Foreground="{ThemeResource AppText3Brush}" />
-                                                                        </Button>
-                                                                    </StackPanel>
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2"
+                                                            Tag="move" Opacity="0" IsHitTestVisible="False"
+                                                            VerticalAlignment="Center"
+                                                            GotFocus="MovePanel_GotFocus"
+                                                            LostFocus="MovePanel_LostFocus">
+                                                    <Button Width="32" Height="32" Padding="0" BorderThickness="0"
+                                                            CornerRadius="7" Background="Transparent"
+                                                            AutomationProperties.Name="重命名实例"
+                                                            ToolTipService.ToolTip="重命名（名字和文件夹一起改）"
+                                                            Tag="{x:Bind}" Click="RenameRow_Click">
+                                                        <FontIcon Glyph="&#xE8AC;" FontSize="{StaticResource FontSizeCaption}"
+                                                                  Foreground="{ThemeResource AppText3Brush}" />
+                                                    </Button>
+                                                    <Button Width="32" Height="32" Padding="0" BorderThickness="0"
+                                                            CornerRadius="7" Background="Transparent"
+                                                            AutomationProperties.Name="固定到首页"
+                                                            ToolTipService.ToolTip="固定到首页 / 取消固定"
+                                                            Tag="{x:Bind}" Click="Pin_Click">
+                                                        <FontIcon Glyph="&#xE718;" FontSize="{StaticResource FontSizeCaption}"
+                                                                  Foreground="{ThemeResource AppText3Brush}" />
+                                                    </Button>
+                                                    <Button Width="32" Height="32" Padding="0" BorderThickness="0"
+                                                            CornerRadius="7" Background="Transparent"
+                                                            AutomationProperties.Name="上移一位"
+                                                            ToolTipService.ToolTip="上移一位（顺序会记住）"
+                                                            Tag="{x:Bind}" Click="MoveUp_Click">
+                                                        <FontIcon Glyph="&#xE70E;" FontSize="{StaticResource FontSizeCaption}"
+                                                                  Foreground="{ThemeResource AppText3Brush}" />
+                                                    </Button>
+                                                    <Button Width="32" Height="32" Padding="0" BorderThickness="0"
+                                                            CornerRadius="7" Background="Transparent"
+                                                            AutomationProperties.Name="下移一位"
+                                                            ToolTipService.ToolTip="下移一位（顺序会记住）"
+                                                            Tag="{x:Bind}" Click="MoveDown_Click">
+                                                        <FontIcon Glyph="&#xE70D;" FontSize="{StaticResource FontSizeCaption}"
+                                                                  Foreground="{ThemeResource AppText3Brush}" />
+                                                    </Button>
+                                                </StackPanel>
 
-                                                                    <FontIcon Grid.Column="4" Glyph="&#xE76C;" FontSize="12"
-                                                                              Foreground="{ThemeResource AppText3Brush}"
-                                                                              VerticalAlignment="Center" />
-                                                                </Grid>
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ListView.ItemTemplate>
-                                                </ListView>
-                                            </Expander>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </ScrollViewer>
+                                                <FontIcon Grid.Column="4" Glyph="&#xE76C;" FontSize="12"
+                                                          Foreground="{ThemeResource AppText3Brush}"
+                                                          VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
 
                             <!-- 三态之一：加载 -->
                             <controls:LoadingBlock x:Name="LoadingPanel" Text="正在扫描本地实例…" Tint="{ThemeResource TintRecentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
@@ -354,6 +362,15 @@
                             </StackPanel>
                         </Grid>
 
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="7" Margin="2,2,2,0">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="12"
+                                      Foreground="{ThemeResource AppText3Brush}"
+                                      VerticalAlignment="Center" />
+                            <TextBlock x:Name="GameDirText" Text="—"
+                                       FontSize="{StaticResource FontSizeCaption}"
+                                       Foreground="{ThemeResource AppText3Brush}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>
@@ -629,9 +646,9 @@
                                                   VerticalAlignment="Center" />
                                     </Grid>
                                 </Button>
-                                <Button AutomationProperties.Name="归档实例"
+                                <Button AutomationProperties.Name="删除实例"
                                         Style="{StaticResource QuickRowButtonStyle}"
-                                        Click="ArchiveVersion_Click">
+                                        Click="DeleteVersion_Click">
                                     <Grid ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -641,7 +658,7 @@
                                         <FontIcon Glyph="&#xE74D;" FontSize="14"
                                                   Foreground="{ThemeResource AppWarnBrush}"
                                                   VerticalAlignment="Center" />
-                                        <TextBlock Grid.Column="1" Text="归档实例"
+                                        <TextBlock Grid.Column="1" Text="删除实例"
                                                    FontSize="{StaticResource FontSizeBody}"
                                                    Foreground="{ThemeResource AppWarnBrush}"
                                                    VerticalAlignment="Center" />
@@ -650,6 +667,11 @@
                                                   VerticalAlignment="Center" />
                                     </Grid>
                                 </Button>
+                                <TextBlock x:Name="DeleteHintText"
+                                           Text="无法删除正在使用的实例，请切换后再进行删除。"
+                                           FontSize="{StaticResource FontSizeCaption}"
+                                           Foreground="{ThemeResource AppText3Brush}"
+                                           Visibility="Collapsed" Margin="10,2,0,10" />
                                 <Button x:Name="HideVersionButton" Style="{StaticResource QuickRowButtonStyle}"
                                         AutomationProperties.Name="隐藏实例"
                                         Click="HideVersion_Click">
@@ -671,6 +693,10 @@
                                                   VerticalAlignment="Center" />
                                     </Grid>
                                 </Button>
+                                <TextBlock x:Name="HideHintText" Text="当前实例不能隐藏。"
+                                           FontSize="{StaticResource FontSizeCaption}"
+                                           Foreground="{ThemeResource AppText3Brush}"
+                                           Visibility="Collapsed" Margin="10,2,0,0" />
                             </StackPanel>
                         </Expander>
                     </Grid>
@@ -720,7 +746,6 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
@@ -815,21 +840,11 @@
                                           DropDownOpened="InstanceJavaBox_DropDownOpened"
                                           SelectionChanged="InstanceJavaBox_SelectionChanged" />
 
-                                <TextBlock x:Name="InstanceJvmAutoLabel" Grid.Row="2" Text="自动优化 JVM 参数" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
-                                <StackPanel Grid.Row="2" Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="10">
-                                    <TextBlock x:Name="InstanceJvmAutoHint" VerticalAlignment="Center"
-                                               FontSize="{StaticResource FontSizeCaption}"
-                                               Foreground="{ThemeResource AppText3Brush}" Text="" />
-                                    <ToggleSwitch x:Name="InstanceJvmAutoSwitch" OnContent="" OffContent=""
-                                                  AutomationProperties.Name="自动优化 JVM 参数"
-                                                  Toggled="InstanceJvmAutoSwitch_Toggled" />
-                                </StackPanel>
-
-                                <TextBlock Grid.Row="3" Text="额外 JVM 参数" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
-                                <TextBlock x:Name="InstanceGlobalJvm" Grid.Row="3" Grid.Column="1"
+                                <TextBlock Grid.Row="2" Text="额外 JVM 参数" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
+                                <TextBlock x:Name="InstanceGlobalJvm" Grid.Row="2" Grid.Column="1"
                                            TextWrapping="Wrap" TextAlignment="Right"
                                            Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" Visibility="Collapsed" />
-                                <TextBox x:Name="InstanceJvmBox" HorizontalAlignment="Right" Width="360" Grid.Row="3" VerticalAlignment="Center" Grid.Column="1"
+                                <TextBox x:Name="InstanceJvmBox" HorizontalAlignment="Right" Width="360" Grid.Row="2" VerticalAlignment="Center" Grid.Column="1"
                                          PlaceholderText="-XX:+UseG1GC"
                                          FontSize="{StaticResource FontSizeBody}"
                                          TextChanged="InstanceJvmBox_TextChanged" />

@@ -153,7 +153,7 @@
                                             </Grid.ColumnDefinitions>
                                             <Border Width="28" Height="28" CornerRadius="4" VerticalAlignment="Center">
                                                 <Border.Background>
-                                                    <ImageBrush ImageSource="{Binding Icon}" Stretch="Uniform" />
+                                                    <ImageBrush ImageSource="{Binding Icon}" Stretch="{Binding IconStretch}" />
                                                 </Border.Background>
                                             </Border>
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
@@ -218,7 +218,7 @@
                                         </Grid.ColumnDefinitions>
                                         <Border Width="32" Height="32" CornerRadius="4" VerticalAlignment="Center">
                                             <Border.Background>
-                                                <ImageBrush ImageSource="{Binding Icon}" Stretch="Uniform" />
+                                                <ImageBrush ImageSource="{Binding Icon}" Stretch="{Binding IconStretch}" />
                                             </Border.Background>
                                         </Border>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">

@@ -84,13 +84,3 @@ docs/
 
 # 本地协作说明，不进仓库
 AGENTS.md
-
-# ===== 推送前补充（2026-11-18）=====
-_export/
-_setuptmp*/
-MeowLauncher/
-_screenshots/
-_preview/
-_rtver.ps1
-_ui10.ps1
-_ui*.ps1

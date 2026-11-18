@@ -183,7 +183,26 @@ public sealed partial class BackendClient
         var result = progress is null
             ? await RunAsync(arguments, TimeSpan.FromSeconds(90), null, root)
             : await RunAsync(arguments, TimeSpan.FromSeconds(90), stage => progress.Report(stage), root);
-        return ParseActionResult(result);
+        if (!result.Success)
+        {
+            return new BackendResult(false, result.Error);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(result.Output.Trim());
+            var docRoot = doc.RootElement;
+            var ok = docRoot.TryGetProperty("ok", out var okElement) && okElement.GetBoolean();
+            var message = docRoot.TryGetProperty("message", out var msgElement)
+                ? msgElement.GetString() ?? ""
+                : ok ? "已经启动游戏。" : "启动失败。";
+            var need = docRoot.TryGetProperty("needJava", out var nj) && nj.ValueKind == JsonValueKind.Number ? nj.GetInt32() : 0;
+            return new BackendResult(ok, message) { NeedJava = need };
+        }
+        catch (Exception ex)
+        {
+            return new BackendResult(false, $"启动器返回了无法解析的结果：{ex.Message}");
+        }
     }
 
     public async Task<ModsResult?> GetModsAsync(string versionId)
@@ -207,7 +226,7 @@ public sealed partial class BackendClient
     public async Task<BackendResult> ToggleModAsync(string file)
     {
         var result = await RunAsync($"--toggle-mod \"{file}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>检查某个实例里已启用 Mod 的更新；Ok=false 时 Message 是失败原因。</summary>
@@ -242,26 +261,26 @@ public sealed partial class BackendClient
         var result = await RunAsync(
             $"--update-mod \"{update.File}\" \"{update.Download}\" \"{update.Filename}\" \"{versionId}\"",
             TimeSpan.FromMinutes(5));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>把误放在 mods 里的资源包 / 光影包移到实例对应文件夹（kind = resourcepack / shaderpack）。</summary>
     public async Task<BackendResult> MoveMisplacedAsync(string file, string versionId, string kind)
     {
         var result = await RunAsync($"--move-misplaced \"{file}\" \"{versionId}\" {kind}", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>把本地 .zip/.jar 数据包装进某个存档的 datapacks（重名拒绝，不覆盖）。</summary>
     public async Task<BackendResult> InstallDatapackAsync(string versionId, string save, string source)
     {
         var result = await RunAsync($"--datapack-install \"{versionId}\" \"{save}\" \"{source}\"", TimeSpan.FromSeconds(60));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>下载在线项目里选中的文件，直接装进指定存档的 datapacks。</summary>
     public async Task<BackendResult> InstallOnlineDatapackAsync(
-        string source, string projectId, string fileId, string versionId, string save, string? taskId = null)
+        string source, string projectId, string fileId, string versionId, string save)
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId) ||
             string.IsNullOrWhiteSpace(fileId) || string.IsNullOrWhiteSpace(save))
@@ -269,14 +288,14 @@ public sealed partial class BackendClient
 
         var result = await RunAsync(
             $"--install-online-datapack {source} {projectId} {fileId} \"{versionId}\" \"{save}\"",
-            TimeSpan.FromMinutes(10), taskId: taskId);
-        return ParseActionResult(result);
+            TimeSpan.FromMinutes(10));
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> DeleteModAsync(string file)
     {
         var result = await RunAsync($"--delete-mod \"{file}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>导入本地资源：kind = mod / resourcepack / shaderpack / world，后端负责建目录和重名处理。</summary>
@@ -286,15 +305,14 @@ public sealed partial class BackendClient
         var result = await RunAsync(
             $"--import-asset \"{kind}\" \"{versionId}\" \"{source}\"",
             TimeSpan.FromMinutes(10), gameDir: gameDir);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> AddOfflineAccountAsync(string name, bool slim = false)
     {
         var variant = slim ? "slim" : "classic";
-        var data = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new { name, variant }));
-        var result = await RunAsync($"--add-offline-json {data}", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        var result = await RunAsync($"--add-offline \"{name}\" {variant}", TimeSpan.FromSeconds(20));
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<MinecraftProfile> GetMinecraftProfileAsync()
@@ -415,7 +433,7 @@ public sealed partial class BackendClient
         var result = await RunAsync(
             $"--friend-action {action} \"{name}\" \"{profileId}\"",
             TimeSpan.FromSeconds(60));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<AccountPermsResult> GetAccountPermsAsync()
@@ -451,69 +469,69 @@ public sealed partial class BackendClient
     public async Task<BackendResult> RenameMinecraftAsync(string name)
     {
         var result = await RunAsync($"--mc-rename \"{name}\"", TimeSpan.FromSeconds(60));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> SetCapeAsync(string capeId)
     {
         var result = await RunAsync($"--mc-cape \"{capeId}\"", TimeSpan.FromSeconds(40));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> SetSkinVariantAsync(string variant)
     {
         var result = await RunAsync($"--mc-skin-variant {variant}", TimeSpan.FromSeconds(60));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> ResetSkinAsync()
     {
         var result = await RunAsync("--mc-reset-skin", TimeSpan.FromSeconds(60));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> UploadSkinAsync(string path, string variant)
     {
         var result = await RunAsync($"--mc-upload-skin \"{path}\" {variant}", TimeSpan.FromSeconds(90));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>离线账户选一张本地 PNG：复制进启动器目录并写回 settings，不动原文件。</summary>
     public async Task<BackendResult> SetLocalSkinAsync(string key, string path)
     {
         var result = await RunAsync($"--set-local-skin \"{key}\" \"{path}\"", TimeSpan.FromSeconds(60));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> ClearLocalSkinAsync(string key)
     {
         var result = await RunAsync($"--clear-local-skin \"{key}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> SetLocalSkinVariantAsync(string key, string variant)
     {
         var result = await RunAsync($"--set-local-skin-variant \"{key}\" {variant}", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> DeleteAccountAsync(string key)
     {
         var result = await RunAsync($"--delete-account \"{key}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> ReorderAccountsAsync(IEnumerable<string> keys)
     {
         var order = string.Join(";", keys);
         var result = await RunAsync($"--reorder-accounts \"{order}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<BackendResult> UseAccountAsync(string key)
     {
         var result = await RunAsync($"--use-account \"{key}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public Task<LaunchDefaultsResult> GetLaunchDefaultsAsync() => Shared("GetLaunchDefaultsAsync", GetLaunchDefaultsCoreAsync);
@@ -548,7 +566,7 @@ public sealed partial class BackendClient
         var payload = JsonSerializer.Serialize(new { mem, memAuto, jvm });
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(payload));
         var result = await RunAsync($"--set-launch-defaults {encoded}", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public Task<GeneralSettings> GetGeneralSettingsAsync() => Shared("GetGeneralSettingsAsync", GetGeneralSettingsCoreAsync);
@@ -585,7 +603,7 @@ public sealed partial class BackendClient
         var payload = JsonSerializer.Serialize(new { downloadSource, mirror, dlThreads, cfApiKey, javaPath });
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(payload));
         var result = await RunAsync($"--set-general-settings {encoded}", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<InstanceLaunchSettings> GetInstanceLaunchSettingsAsync(string versionId, string gameRoot = "")
@@ -618,8 +636,6 @@ public sealed partial class BackendClient
                 GlobalMem = root.TryGetProperty("globalMem", out var globalMem) ? globalMem.GetInt32() : mem,
                 GlobalMemAuto = root.TryGetProperty("globalMemAuto", out var globalAuto) ? globalAuto.GetBoolean() : useGlobal && memAuto,
                 GlobalJvm = root.TryGetProperty("globalJvm", out var globalJvm) ? globalJvm.GetString() ?? "" : "",
-                JvmAuto = !root.TryGetProperty("jvmAuto", out var jvmAutoEl) || jvmAutoEl.ValueKind != JsonValueKind.False,
-                GlobalJvmAuto = !root.TryGetProperty("globalJvmAuto", out var gjvmAutoEl) || gjvmAutoEl.ValueKind != JsonValueKind.False,
             };
         }
         catch (JsonException)
@@ -630,14 +646,14 @@ public sealed partial class BackendClient
 
     public Task<BackendResult> SetInstanceLaunchSettingsAsync(
         string versionId, int mem, bool useGlobal, bool memAuto, string javaPath, string jvm,
-        string isolation = "follow", string root = "", bool jvmAuto = true) =>
-        SaveInstanceSettingsPayloadAsync(versionId, new { mem, useGlobal, memAuto, javaPath, jvm, jvmAuto, isolation }, root);
+        string isolation = "follow", string root = "") =>
+        SaveInstanceSettingsPayloadAsync(versionId, new { mem, useGlobal, memAuto, javaPath, jvm, isolation }, root);
 
     private async Task<BackendResult> SaveInstanceSettingsPayloadAsync(string versionId, object values, string root)
     {
         var encoded = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(values));
         var result = await RunAsync($"--set-instance-settings \"{versionId}\" {encoded}", TimeSpan.FromSeconds(20), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<MicrosoftStartResult> StartMicrosoftAsync()
@@ -667,10 +683,9 @@ public sealed partial class BackendClient
         }
     }
 
-    public async Task<MicrosoftPollResult> PollMicrosoftAsync(string deviceCode, IProgress<string>? progress = null)
+    public async Task<MicrosoftPollResult> PollMicrosoftAsync(string deviceCode)
     {
-        var result = await RunAsync($"--ms-poll \"{deviceCode}\"" + (progress is null ? "" : " --progress"),
-            TimeSpan.FromSeconds(40), progress is null ? null : progress.Report);
+        var result = await RunAsync($"--ms-poll \"{deviceCode}\"", TimeSpan.FromSeconds(40));
         if (!result.Success)
         {
             return new MicrosoftPollResult(false, false, result.Error, "");
@@ -750,26 +765,17 @@ public sealed partial class BackendClient
         }
     }
 
-    public async Task<BackendResult> ImportModpackAsync(string path, string gameDir, IProgress<string> progress, string? taskId = null)
-    {
-        var result = await RunAsync($"--import-modpack \"{path}\" --progress", TimeSpan.FromMinutes(45),
-            progress.Report, gameDir, taskId);
-        return ParseActionResult(result);
-    }
-
-    public async Task<BackendResult> InstallOnlineAsync(string source, string projectId, string versionId, string kind = "mod",
-        IProgress<string>? progress = null, string? taskId = null)
+    public async Task<BackendResult> InstallOnlineAsync(string source, string projectId, string versionId, string kind = "mod")
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId))
         {
             return new BackendResult(false, "没有指定在线资源。");
         }
 
-        var pack = kind == "modpack";
         var result = await RunAsync(
-            $"--install-online {source} {projectId} \"{versionId}\" {kind}" + (progress is null ? "" : " --progress"),
-            TimeSpan.FromMinutes(pack ? 45 : 10), progress is null ? null : progress.Report, pack ? DefaultPackRoot() : "", taskId);
-        return ParseActionResult(result);
+            $"--install-online {source} {projectId} \"{versionId}\" {kind}",
+            TimeSpan.FromMinutes(10));
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     public async Task<OnlineFilesResult?> GetOnlineFilesAsync(string source, string projectId, string versionId, string kind = "mod")
@@ -793,7 +799,7 @@ public sealed partial class BackendClient
 
     public async Task<BackendResult> InstallOnlineFileAsync(
         string source, string projectId, string fileId, string versionId, string kind = "mod",
-        string confirmation = "", IProgress<string>? progress = null, string? taskId = null)
+        string confirmation = "")
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId) ||
             string.IsNullOrWhiteSpace(fileId))
@@ -801,15 +807,9 @@ public sealed partial class BackendClient
 
         var args = $"--install-online-file {source} {projectId} {fileId} \"{versionId}\" {kind}";
         if (confirmation.Length > 0) args += $" --confirmed-dependencies={confirmation}";
-        if (progress is not null) args += " --progress";
-        var pack = kind == "modpack";
-        var result = await RunAsync(args, TimeSpan.FromMinutes(pack ? 45 : 10),
-            progress is null ? null : progress.Report, pack ? DefaultPackRoot() : "", taskId);
-        return ParseActionResult(result);
+        var result = await RunAsync(args, TimeSpan.FromMinutes(10));
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
-
-    private static string DefaultPackRoot() =>
-        GameDirectoryResolver.Resolve(App.MainWindow?.Preferences).FirstOrDefault() ?? "";
 
     public async Task<OnlineModInstallPlan?> ConfirmOnlineModInstallAsync(
         string source, string projectId, string fileId, string versionId, Microsoft.UI.Xaml.XamlRoot xamlRoot)
@@ -843,7 +843,7 @@ public sealed partial class BackendClient
 
     public async Task<BackendResult> InstallVersionAsync(string versionId, string loader,
         string loaderVersion = "", IProgress<string>? progress = null, bool withPrereq = false,
-        string instanceName = "", string prereqVersion = "", string gameDir = "", string prereqProject = "", string? taskId = null)
+        string instanceName = "", string prereqVersion = "")
     {
         if (string.IsNullOrWhiteSpace(versionId))
         {
@@ -853,31 +853,38 @@ public sealed partial class BackendClient
         var args = $"--install-version \"{versionId}\" {loader}";
         if (!string.IsNullOrWhiteSpace(loaderVersion)) args += $" {loaderVersion}";
         if (withPrereq) args += " --prereq";
-        if (!string.IsNullOrWhiteSpace(prereqProject)) args += $" --prereq-project {prereqProject}";
         if (!string.IsNullOrWhiteSpace(prereqVersion)) args += $" --prereq-version \"{prereqVersion}\"";
         if (!string.IsNullOrWhiteSpace(instanceName)) args += $" --name \"{instanceName}\"";
         if (progress is not null) args += " --progress";
         var result = progress is null
-            ? await RunAsync(args, TimeSpan.FromMinutes(30), gameDir: gameDir, taskId: taskId)
-            : await RunAsync(args, TimeSpan.FromMinutes(30), stage => progress.Report(stage), gameDir, taskId);
-        return ParseActionResult(result);
+            ? await RunAsync(args, TimeSpan.FromMinutes(30))
+            : await RunAsync(args, TimeSpan.FromMinutes(30), stage => progress.Report(stage));
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
-    public async Task<IReadOnlyList<ApiRelease>?> GetApiVersionsAsync(string mcVersion, string projectId)
+    /// <summary>列某个游戏版本可用的 Fabric API 版本（新→旧）；失败时返回空列表。</summary>
+    public async Task<IReadOnlyList<string>> GetFabricApiVersionsAsync(string mcVersion)
     {
-        if (string.IsNullOrWhiteSpace(mcVersion) || string.IsNullOrWhiteSpace(projectId)) return null;
-        var result = await RunAsync($"--fabric-api-versions \"{mcVersion}\" {projectId}", TimeSpan.FromSeconds(40));
-        if (!result.Success) return null;
+        if (string.IsNullOrWhiteSpace(mcVersion)) return Array.Empty<string>();
+        var result = await RunAsync($"--fabric-api-versions \"{mcVersion}\"", TimeSpan.FromSeconds(40));
+        if (!result.Success) return Array.Empty<string>();
         try
         {
             using var doc = JsonDocument.Parse(result.Output);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True
-                && root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
-                return items.Deserialize<List<ApiRelease>>(JsonOptions);
+            if (doc.RootElement.TryGetProperty("versions", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                return arr.EnumerateArray()
+                    .Select(v => v.GetString())
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v!)
+                    .ToList();
+            }
         }
-        catch (JsonException) { }
-        return null;
+        catch (JsonException)
+        {
+            // 后端偶尔会先打一行日志，解析失败就当没有版本可选。
+        }
+        return Array.Empty<string>();
     }
 
     /// <summary>列某个游戏版本可用的加载器版本（新→旧）；失败时返回空列表。</summary>
@@ -1015,7 +1022,7 @@ public sealed partial class BackendClient
     public async Task<BackendResult> HideVersionAsync(string versionId, string root = "")
     {
         var result = await RunAsync($"--hide-version \"{versionId}\"", TimeSpan.FromSeconds(20), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>切换主游戏目录：sidecar 会把它记进 settings4.json（mcDir 与 mcDirs 列表）。</summary>
@@ -1032,10 +1039,10 @@ public sealed partial class BackendClient
         return true;
     }
 
-    public async Task<BackendResult> UnhideVersionAsync(string versionId, string root = "")
+    public async Task<BackendResult> UnhideVersionAsync(string versionId)
     {
-        var result = await RunAsync($"--unhide-version \"{versionId}\" \"{root}\"", TimeSpan.FromSeconds(20));
-        return ParseActionResult(result);
+        var result = await RunAsync($"--unhide-version \"{versionId}\"", TimeSpan.FromSeconds(20));
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>切换当前实例：写 settings4.json 的 selected，并让游戏目录跟随该实例。</summary>
@@ -1043,7 +1050,7 @@ public sealed partial class BackendClient
     {
         if (string.IsNullOrWhiteSpace(versionId)) return new BackendResult(false, "没有指定实例。");
         var result = await RunAsync($"--select-version \"{versionId}\"", TimeSpan.FromSeconds(20), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>改实例名：文件夹、同名 json 与 settings4 里的引用一起改，返回新 id。</summary>
@@ -1052,7 +1059,7 @@ public sealed partial class BackendClient
         if (string.IsNullOrWhiteSpace(oldId) || string.IsNullOrWhiteSpace(newId))
             return new BackendResult(false, "实例名不能为空。");
         var result = await RunAsync($"--rename-version \"{oldId}\" \"{newId}\"", TimeSpan.FromSeconds(30), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>修改实例的 Minecraft 版本（加载器种类不变，只支持原版 / Fabric / Quilt）；需要联网下载，旧文件先备份。</summary>
@@ -1066,7 +1073,7 @@ public sealed partial class BackendClient
         var result = progress is null
             ? await RunAsync(args, TimeSpan.FromMinutes(30), gameDir: root)
             : await RunAsync(args, TimeSpan.FromMinutes(30), stage => progress.Report(stage), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>删实例：后端把它移到 %APPDATA%\MeowLauncher\trash，不直接抹盘。</summary>
@@ -1074,7 +1081,7 @@ public sealed partial class BackendClient
     {
         if (string.IsNullOrWhiteSpace(versionId)) return new BackendResult(false, "没有指定实例。");
         var result = await RunAsync($"--delete-version \"{versionId}\"", TimeSpan.FromSeconds(60), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>当前正在跑的游戏进程（pid + 实例 + 启动时间 + 日志路径）。</summary>
@@ -1100,7 +1107,7 @@ public sealed partial class BackendClient
             return new BackendResult(false, "没有指定要结束的游戏。");
         var arg = pid > 0 ? pid.ToString() : $"\"{versionId}\"";
         var result = await RunAsync($"--stop {arg}", TimeSpan.FromSeconds(30));
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>启动前检查：客户端 jar、库、资源是否齐。</summary>
@@ -1132,7 +1139,7 @@ public sealed partial class BackendClient
         var result = progress is null
             ? await RunAsync(args, TimeSpan.FromMinutes(30), gameDir: root)
             : await RunAsync(args, TimeSpan.FromMinutes(30), stage => progress.Report(stage), gameDir: root);
-        return ParseActionResult(result);
+        return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 
     /// <summary>某个实例自己的截图统计（隔离实例读实例目录）；失败返回 null，调用方保留原来的数据。</summary>
@@ -1238,17 +1245,6 @@ public sealed partial class BackendClient
         }
     }
 
-    private static BackendResult ParseActionResult(RunResult result)
-    {
-        if (result.Success) return ParseActionResult(result.Output);
-        if (!string.IsNullOrWhiteSpace(result.Output))
-        {
-            var parsed = ParseActionResult(result.Output);
-            if (parsed.Failure is not null) return parsed;
-        }
-        return new BackendResult(false, result.Error);
-    }
-
     private static BackendResult ParseActionResult(string output)
     {
         try
@@ -1261,19 +1257,7 @@ public sealed partial class BackendClient
                 : ok ? "已处理。" : "操作失败。";
             var version = root.TryGetProperty("installedVersion", out var iv) && iv.ValueKind == JsonValueKind.String ? iv.GetString() ?? ""
                 : root.TryGetProperty("version", out var vv) && vv.ValueKind == JsonValueKind.String ? vv.GetString() ?? "" : "";
-            var needJava = root.TryGetProperty("needJava", out var j) && j.ValueKind == JsonValueKind.Number ? j.GetInt32() : 0;
-            FailureInfo? failure = null;
-            if (!ok && root.TryGetProperty("errorAt", out var at) && at.ValueKind == JsonValueKind.String
-                && at.TryGetDateTimeOffset(out var occurred))
-            {
-                var code = root.TryGetProperty("errorCode", out var c) ? c.GetString() ?? "" : "";
-                var stage = root.TryGetProperty("errorStage", out var s) ? s.GetString() ?? "" : "";
-                failure = new FailureInfo(code, occurred, stage);
-            }
-            var path = root.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "";
-            var loader = root.TryGetProperty("loader", out var l) && l.ValueKind == JsonValueKind.String ? l.GetString() ?? "" : "";
-            return new BackendResult(ok, message) { Version = version, NeedJava = needJava, Failure = failure,
-                InstancePath = path, Loader = loader };
+            return new BackendResult(ok, message) { Version = version };
         }
         catch (Exception ex)
         {
@@ -1287,10 +1271,10 @@ public sealed partial class BackendClient
     /// OnLoaded / OnNavigatedTo 里，XAML 正处在不可重入的状态，被泵进来的消息会让 WinUI 以 0x8000FFFF（灾难性故障）
     /// 直接崩掉（两份崩溃转储的界面线程都停在这里）。onStage 现在会在后台线程回调，调用方用 Progress&lt;T&gt; 回到界面线程。
     /// </summary>
-    private Task<RunResult> RunAsync(string arguments, TimeSpan timeout, Action<string>? onStage = null, string gameDir = "",
-        string? taskId = null) => Task.Run(() => RunCoreAsync(arguments, timeout, onStage, gameDir, taskId));
+    private Task<RunResult> RunAsync(string arguments, TimeSpan timeout, Action<string>? onStage = null, string gameDir = "") =>
+        Task.Run(() => RunCoreAsync(arguments, timeout, onStage, gameDir));
 
-    private async Task<RunResult> RunCoreAsync(string arguments, TimeSpan timeout, Action<string>? onStage, string gameDir, string? taskId)
+    private async Task<RunResult> RunCoreAsync(string arguments, TimeSpan timeout, Action<string>? onStage = null, string gameDir = "")
     {
 #if DEBUG
         // 仅调试版：MEOW_TEST_SLOW_MS=4000 让每个后端调用先等 4 秒，用来在「加载中」的瞬间截图，检查每个页面有没有加载提示
@@ -1348,7 +1332,7 @@ public sealed partial class BackendClient
             return new RunResult(false, "", $"无法启动 sidecar：{ex.Message}");
         }
 
-        var operationId = taskId ?? Guid.NewGuid().ToString("N");
+        var operationId = Guid.NewGuid().ToString("N");
         RegisterOperation(operationId, process, arguments);
 
         var stderr = process.StandardError.ReadToEndAsync();
@@ -1449,19 +1433,12 @@ public sealed partial class BackendClient
     /// 取消后端操作：按任务类型挑出对应的 sidecar 进程，实体名能匹配上时优先匹配，
     /// 进程树整棵杀掉（sidecar 自己再派生的 python 子进程一并结束）。返回被杀掉的进程数。
     /// </summary>
-    public int CancelOperations(TaskKind kind, string? entity = null, string? taskId = null)
+    public int CancelOperations(TaskKind kind, string? entity = null)
     {
-        if (kind == TaskKind.Install)
-        {
-            RunningOperation? operation;
-            lock (RunningGate) operation = taskId is null ? null : Running.GetValueOrDefault(taskId);
-            if (operation is null) return 0;
-            operation.Process.Kill(entireProcessTree: true);
-            return 1;
-        }
         string[] flags = kind switch
         {
             TaskKind.Launch => new[] { "--launch" },
+            TaskKind.Install => new[] { "--install-version", "--install-online", "--install-online-file" },
             _ => Array.Empty<string>(),
         };
         if (flags.Length == 0) return 0;
@@ -1540,32 +1517,28 @@ public sealed partial class BackendClient
     {
         var current = new StringBuilder();
         var quoted = false;
-        var hasArgument = false;
         foreach (var ch in raw)
         {
             if (ch == '"')
             {
                 quoted = !quoted;
-                hasArgument = true;
                 continue;
             }
 
             if (char.IsWhiteSpace(ch) && !quoted)
             {
-                if (hasArgument)
+                if (current.Length > 0)
                 {
                     yield return current.ToString();
                     current.Clear();
-                    hasArgument = false;
                 }
                 continue;
             }
 
             current.Append(ch);
-            hasArgument = true;
         }
 
-        if (hasArgument) yield return current.ToString();
+        if (current.Length > 0) yield return current.ToString();
     }
 
     private static string FindProjectRoot()
@@ -1780,9 +1753,6 @@ public sealed record OnlineModInstallPlan(bool Ok, string? Message, string FileI
 
 public sealed record BackendResult(bool Ok, string Message)
 {
-    public string InstancePath { get; init; } = "";
-    public string Loader { get; init; } = "";
-    public FailureInfo? Failure { get; init; }
     /// <summary>后台结果里的 version / installedVersion（安装版本、整合包时是新实例 id）；没有就是空串。</summary>
     public string Version { get; init; } = "";
     /// <summary>&gt;0：启动失败的原因是缺这个大版本的 Java，界面可引导下载。</summary>
@@ -1791,11 +1761,6 @@ public sealed record BackendResult(bool Ok, string Message)
 public sealed record ModUpdate(string File, string Name, string Current, string Latest,
     string Download, string Filename, string Source);
 public sealed record MemEstimate(bool Ok, int Mem, int Mods, string Loader, bool Capped, string Reason);
-public sealed record ApiRelease(string Id, string Version)
-{
-    public override string ToString() => Version;
-}
-
 public sealed record ModProjectLookup(bool Ok, string Message, string ProjectId, string Slug, string Title, string IconUrl);
 public sealed record ProjectInfo(bool Ok, string Description, long Downloads, long Followers, string ProjectType,
     List<string> GameVersions, List<string> Loaders);
@@ -1825,8 +1790,6 @@ public sealed record InstanceLaunchSettings(bool Ok, int Mem, bool UseGlobal, bo
     public int GlobalMem { get; init; } = 4096;
     public bool GlobalMemAuto { get; init; }
     public string GlobalJvm { get; init; } = "";
-    public bool JvmAuto { get; init; } = true;
-    public bool GlobalJvmAuto { get; init; } = true;
 }
 
 public sealed record MicrosoftStartResult(

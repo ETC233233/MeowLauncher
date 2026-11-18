@@ -7,7 +7,7 @@ namespace MeowLauncher.WinUI.Services;
 
 /// <summary>
 /// 实例图标：实例目录里有自己的 icon.png 就用它；否则按加载器给一枚徽标（Fabric / Quilt / Forge / NeoForge，
-/// 原版和认不出的使用草方块）。加载器图标来自各自的官方项目。
+/// 原版和认不出的用默认图标）。徽标是我们自己画的简化图形（tools/make_loader_icons.py）。
 /// 主页、实例管理、切换列表共用这一处，保证同一个实例在各处长得一样。
 /// </summary>
 public static class InstanceIcon
@@ -48,7 +48,4 @@ public static class InstanceIcon
 
     public static ImageSource ForLoader(string? loader) =>
         new BitmapImage(new Uri(LoaderAsset(loader))) { DecodePixelWidth = 64 };
-
-    public static ImageSource ForInstalledPack(BackendResult result) =>
-        For(new VersionInfo { Path = result.InstancePath, Loader = result.Loader });
 }

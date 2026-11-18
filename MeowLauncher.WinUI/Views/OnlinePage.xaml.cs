@@ -747,11 +747,11 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 }
             }
             task = TaskCenter.Add($"安装 {project.Title}",
-                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.For(current));
+                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8");
             ResultCount.Text = $"正在安装 {project.Title}…";
             var result = plan is not null
-                ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind, plan.Confirmation, taskId: task.Id)
-                : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind, taskId: task.Id);
+                ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind, plan.Confirmation)
+                : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind);
             if (result.Ok)
             {
                 TaskCenter.Complete(task, result.Message);
@@ -760,7 +760,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             }
             else
             {
-                TaskCenter.Fail(task, result.Message, result.Failure);
+                TaskCenter.Fail(task, result.Message);
                 ResultCount.Text = $"安装失败：{result.Message}";
             }
         }
@@ -779,22 +779,19 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     private async Task InstallModpackAsync(ModrinthProject project, string source, string sourceName, Button button)
     {
         button.IsEnabled = false;
-        var task = TaskCenter.Add($"安装整合包 {project.Title}", $"{sourceName} · 新实例", PageTagFor(project),
-            "\uE8F1", InstanceIcon.ForLoader(null));
+        var task = TaskCenter.Add($"安装整合包 {project.Title}", $"{sourceName} · 新实例", PageTagFor(project), "\uE8F1");
         ResultCount.Text = $"正在安装整合包 {project.Title}…";
         try
         {
-            var progress = new Progress<string>(stage => TaskCenter.Report(task, stage));
-            var result = await App.Backend.InstallOnlineAsync(source, project.Id, "", "modpack", progress, task.Id);
+            var result = await App.Backend.InstallOnlineAsync(source, project.Id, "", "modpack");
             if (result.Ok)
             {
-                task.TargetIcon = InstanceIcon.ForInstalledPack(result);
                 TaskCenter.Complete(task, result.Message);
                 ResultCount.Text = $"{sourceName} · {result.Message}";
             }
             else
             {
-                TaskCenter.Fail(task, result.Message, result.Failure);
+                TaskCenter.Fail(task, result.Message);
                 ResultCount.Text = $"安装失败：{result.Message}";
             }
         }

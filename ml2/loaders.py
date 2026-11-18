@@ -14,7 +14,6 @@ import subprocess
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
 from pathlib import Path
 
 import ml2.core as core
@@ -449,11 +448,9 @@ def install_neoforge(mc_dir: Path, mc_version: str, loader_version: str | None =
 # ---------------- 加载器元信息 / API 顺带安装 ----------------
 
 # 各加载器在 Modrinth 上的「必需品 API」，安装加载器后可顺带装进实例
-FABRIC_API = ("P7dR8mSH", "Fabric API")
-QUILTED_API = ("qvIfYCYJ", "Quilted Fabric API (QFAPI) / Quilt Standard Libraries (QSL)")
 API_MODS = {
-    "fabric":   [FABRIC_API],
-    "quilt":    [QUILTED_API, FABRIC_API],
+    "fabric":   [("P7dR8mSH", "Fabric API")],
+    "quilt":    [("qvIfYCYJ", "QFAPI (Quilted Fabric API)"), ("P7dR8mSH", "Fabric API")],
     "neoforge": [],
     "forge":    [],
 }
@@ -505,28 +502,6 @@ def install_loader(mc_dir: Path, base_version: str, kind: str, loader_version: s
     raise RuntimeError(f"暂不支持安装 {kind} 加载器")
 
 
-def api_mod_versions(project_id: str, mc_version: str) -> list[dict]:
-    """按 API 自己的项目与加载器查询，独立于镜像返回的顺序。"""
-    platforms = {FABRIC_API[0]: "fabric", QUILTED_API[0]: "quilt"}
-    platform = platforms.get(project_id)
-    if platform is None:
-        raise ValueError("未知的加载器 API 项目")
-    rows = net.modrinth_versions(project_id, loaders=[platform],
-                                 game_versions=[mc_version] if mc_version else None) or []
-
-    def published(row: dict) -> datetime:
-        try:
-            date = datetime.fromisoformat(str(row.get("date_published") or ""))
-            return date if date.tzinfo else date.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return datetime.min.replace(tzinfo=timezone.utc)
-
-    compatible = (row for row in rows if row.get("project_id") == project_id
-                  and platform in (row.get("loaders") or [])
-                  and (not mc_version or mc_version in (row.get("game_versions") or [])))
-    return sorted(compatible, key=published, reverse=True)
-
-
 def _exclusive_api_items(kind: str, sel: dict, log) -> list[tuple[str, str]]:
     """Quilt 的 QFAPI / Fabric API 只能二选一：默认 QFAPI，只勾了 Fabric API 时才用 Fabric API。"""
     items = list(API_MODS.get((kind or "").lower(), []))
@@ -537,7 +512,7 @@ def _exclusive_api_items(kind: str, sel: dict, log) -> list[tuple[str, str]]:
     keep = pids[0]
     if picked:
         # 两个都勾了也优先 QFAPI（它是 Quilt 官方前置，Fabric API 由它兼容）
-        keep = QUILTED_API[0] if QUILTED_API[0] in picked else picked[0]
+        keep = "qvIfYCYJ" if "qvIfYCYJ" in picked else picked[0]
     for pid, name in items:
         if pid != keep:
             log(f"[API] Quilt 前置二选一，只装 {keep}，跳过 {name}")
@@ -570,7 +545,10 @@ def install_api_mods(mc_dir: Path, vid: str, kind: str, on_log=print, selection=
             log(f"[API] 未勾选 {name}，跳过")
             continue
         try:
-            rows = api_mod_versions(pid, game_version)
+            ldrs = [kind] if kind else None
+            if kind == "quilt" and pid == "P7dR8mSH":
+                ldrs = ["fabric"]
+            rows = net.modrinth_versions(pid, ldrs, [game_version] if game_version else None)
             if not rows:
                 log(f"[API] {name} 没有匹配 {game_version} 的版本，跳过")
                 continue
@@ -578,8 +556,11 @@ def install_api_mods(mc_dir: Path, vid: str, kind: str, on_log=print, selection=
             ver = next((r for r in rows if str(r.get("id")) == want), None) if want else None
             if ver is None:
                 ver = rows[0]
-            if not net.install_modrinth_version(ver, dest):
+            f = next((x for x in ver.get("files", []) if x.get("primary")), (ver.get("files") or [{}])[0])
+            if not f.get("url"):
                 continue
+            out = dest / f["filename"]
+            net._download(f["url"], out)
             installed.append(name)
             log(f"[API] 已安装 {name} {ver.get('version_number', '')}")
         except Exception as e:

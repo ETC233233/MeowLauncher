@@ -11,8 +11,6 @@ public enum TaskStepState
     Active,
     Done,
     Failed,
-    Stopped,
-    Skipped,
 }
 
 public sealed class TaskStep : INotifyPropertyChanged
@@ -86,11 +84,9 @@ public sealed class TaskStep : INotifyPropertyChanged
 
     public string PctText => State switch
     {
-        TaskStepState.Done => "完成",
-        TaskStepState.Active => _pct < 0 ? "进行中" : $"{Math.Min(99, Math.Floor(_pct)):0}%",
+        TaskStepState.Done => "100%",
+        TaskStepState.Active => _pct < 0 ? "" : $"{Math.Round(_pct):0}%",
         TaskStepState.Failed => "失败",
-        TaskStepState.Stopped => "已中止",
-        TaskStepState.Skipped => "未执行",
         _ => "等待",
     };
 

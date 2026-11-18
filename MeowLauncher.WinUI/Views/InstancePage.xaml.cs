@@ -35,7 +35,8 @@ public sealed partial class InstancePage : Page, IPageSearchFilter
             var content = InnerFrame.Content?.GetType();
             if (content is not null)
             {
-                InnerFrame.Navigate(content, new TabNav(), MeowLauncher.WinUI.Controls.Motion.PageRefresh());
+                InnerFrame.Navigate(content, new TabNav(), new SuppressNavigationTransitionInfo());
+                MeowLauncher.WinUI.Controls.Motion.Enter(InnerFrame, 0, 8, 200);
             }
             _ = RefreshAssetCountsAsync();   // 不阻塞切页，显式丢弃返回值
         };
@@ -79,7 +80,8 @@ public sealed partial class InstancePage : Page, IPageSearchFilter
             if (InnerFrame.Content is not ModsPage)
             {
                 var switching = InnerFrame.Content is not null;
-                InnerFrame.Navigate(typeof(ModsPage), new TabNav(), MeowLauncher.WinUI.Controls.Motion.Sibling(false));
+                InnerFrame.Navigate(typeof(ModsPage), new TabNav(), new SuppressNavigationTransitionInfo());
+                if (switching) MeowLauncher.WinUI.Controls.Motion.Enter(InnerFrame, 0, 8, 200);
             }
             return;
         }
@@ -88,7 +90,8 @@ public sealed partial class InstancePage : Page, IPageSearchFilter
         if (InnerFrame.Content is not AssetsPage)
         {
             var switching = InnerFrame.Content is not null;
-            InnerFrame.Navigate(typeof(AssetsPage), new TabNav(), MeowLauncher.WinUI.Controls.Motion.Sibling(true));
+            InnerFrame.Navigate(typeof(AssetsPage), new TabNav(), new SuppressNavigationTransitionInfo());
+            if (switching) MeowLauncher.WinUI.Controls.Motion.Enter(InnerFrame, 0, 8, 200);
         }
         else if (InnerFrame.Content is AssetsPage assets)
         {

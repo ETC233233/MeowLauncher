@@ -177,17 +177,12 @@ public sealed partial class MainWindow : Window
     /// <summary>只在材质种类真的变化时才换 SystemBackdrop——每换一次 DWM 会黑一帧。</summary>
     private void ApplyBackdrop(string kind)
     {
-        if (_backdropKind == kind)
-        {
-            if (SystemBackdrop is ThemeSynchronizedAcrylicBackdrop acrylic) acrylic.Dark = _dark;
-            return;
-        }
+        if (_backdropKind == kind) return;
         _backdropKind = kind;
         SystemBackdrop = kind switch
         {
             "mica" => new MicaBackdrop(),
-            "acrylic" => new ThemeSynchronizedAcrylicBackdrop { Dark = _dark },
-            "acrylic-thin" => new ThemeSynchronizedAcrylicBackdrop { Dark = _dark, Thin = true },
+            "acrylic" => new DesktopAcrylicBackdrop(),
             _ => null,
         };
     }
@@ -195,40 +190,28 @@ public sealed partial class MainWindow : Window
     /// <summary>按偏好重画窗口背景、遮罩、内容不透明度与字体缩放。</summary>
     public void RefreshAppearance(bool persist)
     {
-        if (_preferences.NormalizeAppearanceSelection()) AppPreferencesStore.Save(_preferences);
-        var material = _preferences.EffectiveWindowMaterial;
-        var background = _preferences.EffectiveBackgroundTheme;
-        var mode = background == "None" ? material : background;
+        var mode = string.IsNullOrWhiteSpace(_preferences.BackgroundMode)
+            ? "Acrylic"
+            : _preferences.BackgroundMode;
 
+        // 契约 1：对比遮罩 ≤ 0.12，禁止再叠 30% 黑纱
+        var veil = Math.Clamp(_preferences.VeilOpacity, 0.0, 0.12);
         string? imagePath = null;
         if (string.Equals(mode, "Image", StringComparison.OrdinalIgnoreCase))
             imagePath = _preferences.BackgroundImage;
         else if (string.Equals(mode, "Wallpaper", StringComparison.OrdinalIgnoreCase))
             imagePath = SystemWallpaperPath();
 
-        var imageTheme = mode is "Wallpaper" or "Image";
-        // A bitmap can fail asynchronously even when the file exists. Keep an
-        // opaque plane beneath it so loading/invalid/transparent images never
-        // turn a background theme into a transparent window.
-        BackgroundImageBase.Visibility = imageTheme ? Visibility.Visible : Visibility.Collapsed;
-        BackgroundImageBase.Background = new SolidColorBrush(_dark
-            ? Color.FromArgb(255, 11, 13, 16) : Color.FromArgb(255, 245, 246, 248));
         var hasImage = !string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath);
-        var imageKey = imageTheme ? (imagePath ?? "") : "";
-        if (imageKey.Length > 0 && hasImage) imageKey += "|" + File.GetLastWriteTimeUtc(imagePath!).Ticks;
-        var blur = imageTheme ? (int)Math.Clamp(_preferences.WallpaperBlur, 0, 40) : 0;
-        imageKey += "|blur=" + blur;
-        if (!imageTheme || !hasImage)
+        BackgroundImageHost.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
+        if (hasImage)
         {
-            _backgroundImageGeneration++;
-            _backgroundImageKey = "";
-            BackgroundImageHost.Source = null;
-            BackgroundImageHost.Visibility = Visibility.Collapsed;
+            try { BackgroundImageHost.Source = new BitmapImage(new Uri(imagePath!)); }
+            catch { BackgroundImageHost.Source = null; }
         }
-        else if (_backgroundImageKey != imageKey)
+        else
         {
-            _backgroundImageKey = imageKey;
-            _ = LoadBackgroundImageAsync(imagePath!, ++_backgroundImageGeneration, blur);
+            BackgroundImageHost.Source = null;
         }
 
         // 像素壁纸是一个独立主题：只有选它时才画，和亚克力/云母互斥。不要再加环境变量旁路，否则会和设置打架。
@@ -273,12 +256,12 @@ public sealed partial class MainWindow : Window
         {
             // 自定义背景铺底：去掉系统材质，只留一层可调的暗色遮罩保证正文对比度。
             ApplyBackdrop("none");
-            var alpha = (byte)Math.Round(Math.Clamp(_preferences.WallpaperShade, 0, 0.8) * 255);
+            var alpha = (byte)Math.Round(Math.Max(veil, 0.10) * 255);
             RootVeil.Background = new SolidColorBrush(_dark
-                ? Color.FromArgb(alpha, 0, 0, 0)
-                : Color.FromArgb(alpha, 255, 255, 255));
+                ? Color.FromArgb(alpha, 4, 6, 8)
+                : Color.FromArgb(alpha, 250, 250, 252));
         }
-        else if (string.Equals(material, "Solid", StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(mode, "Solid", StringComparison.OrdinalIgnoreCase))
         {
             ApplyBackdrop("none");
             RootVeil.Background = new SolidColorBrush(
@@ -286,10 +269,12 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            ApplyBackdrop(string.Equals(material, "Mica", StringComparison.OrdinalIgnoreCase) ? "mica"
-                : string.Equals(material, "AcrylicThin", StringComparison.OrdinalIgnoreCase) ? "acrylic-thin" : "acrylic");
+            ApplyBackdrop(string.Equals(mode, "Mica", StringComparison.OrdinalIgnoreCase) ? "mica" : "acrylic");
 
-            RootVeil.Background = new SolidColorBrush(Colors.Transparent);
+            var alpha = (byte)Math.Round(veil * 255);
+            RootVeil.Background = new SolidColorBrush(_dark
+                ? Color.FromArgb(alpha, 11, 13, 16)
+                : Color.FromArgb(alpha, 245, 246, 248));
         }
 
         var opacity = Math.Clamp(_preferences.UiOpacity, 0.5, 1.0);
@@ -310,73 +295,7 @@ public sealed partial class MainWindow : Window
 
     public void SetBackgroundMode(string mode, string? imagePath, bool persist)
     {
-        SetAppearanceSelection(mode is "Wallpaper" or "PixelWallpaper" or "Image" ? null : mode,
-            mode is "Wallpaper" or "PixelWallpaper" or "Image" ? mode : null, imagePath, persist);
-    }
-
-    private string _backgroundImageKey = "";
-    private int _backgroundImageGeneration;
-
-    private async Task LoadBackgroundImageAsync(string path, int generation, int blur)
-    {
-        try
-        {
-            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
-            using var stream = await file.OpenReadAsync();
-            Microsoft.UI.Xaml.Media.ImageSource bitmap;
-            if (blur > 0)
-            {
-                var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
-                var scale = Math.Min(1.0, 1280.0 / Math.Max(decoder.PixelWidth, decoder.PixelHeight));
-                var width = Math.Max(1, (uint)Math.Round(decoder.PixelWidth * scale));
-                var height = Math.Max(1, (uint)Math.Round(decoder.PixelHeight * scale));
-                var transform = new Windows.Graphics.Imaging.BitmapTransform { ScaledWidth = width, ScaledHeight = height };
-                var data = await decoder.GetPixelDataAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
-                    Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied, transform,
-                    Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation,
-                    Windows.Graphics.Imaging.ColorManagementMode.ColorManageToSRgb);
-                if (generation != _backgroundImageGeneration) return;
-                // Width/height below are the transformed pixel array dimensions.
-                // Desktop wallpapers have no EXIF rotation; ignoring it keeps custom
-                // wallpaper files consistent with the transform dimensions as well.
-                var pixels = data.DetachPixelData();
-                var result = await Task.Run(() => Services.WallpaperBlur.Apply(pixels, (int)width, (int)height, blur));
-                if (generation != _backgroundImageGeneration) return;
-                var writable = new Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap((int)width, (int)height);
-                using var output = System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.AsStream(writable.PixelBuffer);
-                await output.WriteAsync(result);
-                writable.Invalidate();
-                bitmap = writable;
-            }
-            else
-            {
-                var image = new BitmapImage();
-                await image.SetSourceAsync(stream);
-                bitmap = image;
-            }
-            if (generation != _backgroundImageGeneration) return;
-            BackgroundImageHost.Source = bitmap;
-            BackgroundImageHost.Visibility = Visibility.Visible;
-            App.Trace($"Background image loaded: blur={blur}");
-        }
-        catch (Exception ex)
-        {
-            if (generation != _backgroundImageGeneration) return;
-            BackgroundImageHost.Source = null;
-            BackgroundImageHost.Visibility = Visibility.Collapsed;
-            App.Trace("Background image failed: " + ex.GetType().Name);
-            TaskCenter.PostMessage("背景图片加载失败", "暂时使用纯色背景，请重新选择背景主题或图片。", "提示");
-        }
-    }
-
-    public void SetAppearanceSelection(string? material, string? background, string? imagePath, bool persist)
-    {
-        var currentMaterial = _preferences.EffectiveWindowMaterial;
-        var currentBackground = _preferences.EffectiveBackgroundTheme;
-        _preferences.WindowMaterial = material ?? currentMaterial;
-        _preferences.BackgroundTheme = background ?? currentBackground;
-        _preferences.BackgroundMode = _preferences.BackgroundTheme == "None"
-            ? _preferences.WindowMaterial : _preferences.BackgroundTheme;
+        _preferences.BackgroundMode = string.IsNullOrWhiteSpace(mode) ? "Acrylic" : mode;
         if (imagePath is not null) _preferences.BackgroundImage = imagePath;
         RefreshAppearance(persist);
     }
@@ -612,11 +531,8 @@ public sealed partial class MainWindow : Window
         /// <summary>窄/宽档切换时触发，页面据此重排。</summary>
         public event EventHandler? CompactChanged;
 
-    private readonly string[] _startupPackPaths;
-
-    public MainWindow(string[] startupPackPaths)
+    public MainWindow()
     {
-        _startupPackPaths = startupPackPaths;
         // 启动就把 GitHub 加速状态交给 UrlAccel，组件包/更新下载才能立刻用上。
         UrlAccel.Enabled = _preferences.GithubAccel;
         Views.SettingsPage.ApplyDownloadParallel(_preferences.DownloadParallel);
@@ -743,7 +659,6 @@ public sealed partial class MainWindow : Window
 
         Closed += (_, _) =>
         {
-            _onboardingLogin?.Cancel();
             RememberWindowSize();
             StopPresence();
         };
@@ -810,519 +725,6 @@ public sealed partial class MainWindow : Window
         StartupMask.Opacity = 0;
         await Task.Delay(400);
         StartupMask.Visibility = Visibility.Collapsed;
-        ShowOnboardingIfNeeded();
-        if (_startupPackPaths.Length > 0 && App.Backend.Python.Found)
-        {
-            Navigate("download");
-            if (ContentFrame.Content is GetPage getPage)
-                await getPage.ImportPacksAsync(_startupPackPaths);
-        }
-    }
-
-    /// <summary>全新安装才走一遍新手引导；走完（或本来就有标记）不再出现。
-    /// 引导单独开一个窗口，不盖住主界面；网页仍是设计稿 Assets/Onboarding/oobe.html，一个字都不改。</summary>
-    private bool _onboardingOpening;
-
-    public void OpenOnboarding() => ShowOnboardingIfNeeded(force: true);
-
-    private async void ShowOnboardingIfNeeded(bool force = false)
-    {
-        if (_onboardingOpening || _onboardingFinishing) return;
-        if (_onboardingWindow is { } existing)
-        {
-            existing.Activate();
-            return;
-        }
-        if (_preferences.Onboarded && !force) return;
-        _onboardingOpening = true;
-        try
-        {
-            var folder = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Onboarding");
-            if (!System.IO.File.Exists(System.IO.Path.Combine(folder, "oobe.html")))
-            {
-                App.Trace("Onboarding: oobe.html missing");
-                return;
-            }
-
-            var window = new Views.OnboardingWindow(SystemScale());
-            _onboardingWindow = window;
-            _onboardingWeb = window.Web;
-            window.Closed += OnboardingWindow_Closed;
-            window.Activate();
-
-            var web = window.Web;
-            await web.EnsureCoreWebView2Async();
-            var core = web.CoreWebView2;
-            core.SetVirtualHostNameToFolderMapping("onboarding.meow", folder,
-                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            core.SetVirtualHostNameToFolderMapping("skinviewer.meow",
-                System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "skinviewer"),
-                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            core.WebMessageReceived -= Onboarding_WebMessage;
-            core.WebMessageReceived += Onboarding_WebMessage;
-            // 网页只负责画，数据全部由宿主给：主题 / 主题色 / 目录 / 账户 / 更新开关
-            await core.AddScriptToExecuteOnDocumentCreatedAsync(
-                BuildOnboardingBootstrap() + "\n" + OnboardingBridgeScript);
-            web.DefaultBackgroundColor = Microsoft.UI.Colors.Transparent;
-            core.Navigate("https://onboarding.meow/oobe.html");
-            App.Trace("Onboarding: shown");
-        }
-        catch (Exception ex)
-        {
-            CloseOnboardingWindow();
-            App.Trace("ShowOnboarding: " + ex);
-        }
-        finally { _onboardingOpening = false; }
-    }
-
-    /// <summary>引导窗口被用户直接关掉：当成「稍后再说」，不写已引导标记，下次启动还会提示。</summary>
-    private void OnboardingWindow_Closed(object sender, WindowEventArgs args)
-    {
-        _onboardingLogin?.Cancel();
-        _onboardingWindow = null;
-        _onboardingWeb = null;
-        App.Trace("Onboarding: closed by user");
-    }
-
-    private void CloseOnboardingWindow()
-    {
-        var window = _onboardingWindow;
-        _onboardingWindow = null;
-        _onboardingWeb = null;
-        if (window is null) return;
-        try
-        {
-            window.Closed -= OnboardingWindow_Closed;
-            window.Close();
-        }
-        catch (Exception ex) { App.Trace("Onboarding close: " + ex.GetType().Name); }
-    }
-
-    /// <summary>宿主桥：只认底栏按钮的点击，网页本身保持原样，一个像素都不动。</summary>
-    private const string OnboardingBridgeScript = """
-(function () {
-  document.addEventListener('click', function (e) {
-    var t = e.target;
-    var next = t && t.closest ? t.closest('#next') : null;
-    if (!next) return;
-    var label = (next.textContent || '').trim();
-    if (label === '进入启动器') {
-      e.preventDefault();
-      e.stopPropagation();
-      try { window.chrome.webview.postMessage({ type: 'finish' }); } catch (err) { }
-    }
-  }, true);
-})();
-""";
-
-    /// <summary>把启动器的真实状态喂给引导网页（window.__OOBE__）：网页照设计稿画，不改一个像素。</summary>
-    private string BuildOnboardingBootstrap()
-    {
-        var own = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeowLauncher", ".minecraft");
-        var found = new List<(string Path, int Versions, DateTime Stamp)>();
-        try
-        {
-            foreach (var dir in GameDirectoryResolver.Resolve(_preferences))
-            {
-                var norm = GameDirectoryResolver.Normalize(dir);
-                if (norm.Length == 0) continue;
-                if (string.Equals(norm, own, StringComparison.OrdinalIgnoreCase)) continue;
-                var versions = System.IO.Path.Combine(norm, "versions");
-                var has = System.IO.Directory.Exists(versions);
-                found.Add((norm, has ? CountVersionFolders(versions) : 0, has ? SafeWriteTime(versions) : DateTime.MinValue));
-            }
-        }
-        catch (Exception ex) { App.Trace("Onboarding dirs: " + ex.GetType().Name); }
-
-        // 只给最近动过版本的那个目录挂「最近使用」，扫到多个目录时标签不重复
-        var recentPath = "";
-        var newest = DateTime.MinValue;
-        foreach (var d in found)
-        {
-            if (d.Versions <= 0) continue;
-            if (d.Stamp <= newest) continue;
-            newest = d.Stamp;
-            recentPath = d.Path;
-        }
-
-        var dirs = new List<object>();
-        foreach (var d in found)
-        {
-            dirs.Add(new
-            {
-                path = d.Path,
-                versions = d.Versions,
-                recent = d.Versions > 0 && string.Equals(d.Path, recentPath, StringComparison.OrdinalIgnoreCase),
-            });
-        }
-
-        var theme = NormalizeThemeMode(_preferences.ThemeMode).ToLowerInvariant();   // system / dark / light
-        var accountName = AccountName?.Text ?? "";
-        if (accountName is "未登录" || accountName.StartsWith("正在读取", StringComparison.Ordinal)) accountName = "";
-        var payload = new
-        {
-            theme,
-            accentHex = ThemeColorService.CurrentHex,
-            defaultDir = own,
-            selectedDir = _preferences.McDir,
-            dirs,
-            account = new { name = Snapshot?.Account?.Name ?? accountName,
-                kind = Snapshot?.Account?.Type ?? _preferences.OnboardAccountKind },
-            updates = new
-            {
-                check = _preferences.CheckUpdatesOnStartup,
-                download = _preferences.AutoDownloadUpdate,
-                install = _preferences.AutoInstallUpdate,
-            },
-        };
-        return "window.__OOBE__ = " + System.Text.Json.JsonSerializer.Serialize(payload) + ";";
-    }
-
-    private static int CountVersionFolders(string versionsDir)
-    {
-        try { return System.IO.Directory.GetDirectories(versionsDir).Length; }
-        catch { return 0; }
-    }
-
-    private static DateTime SafeWriteTime(string dir)
-    {
-        try { return System.IO.Directory.GetLastWriteTime(dir); }
-        catch { return DateTime.MinValue; }
-    }
-
-    /// <summary>网页里的选择直接落到真实偏好：主题 / 主题色 / 默认目录 / 更新开关 / 完成。</summary>
-    private readonly System.Threading.SemaphoreSlim _onboardingMessages = new(1, 1);
-    private System.Threading.CancellationTokenSource? _onboardingLogin;
-    private Task? _onboardingLoginTask;
-    private Uri? _onboardingVerificationUri;
-    private Views.OnboardingWindow? _onboardingWindow;
-    private Microsoft.UI.Xaml.Controls.WebView2? _onboardingWeb;
-
-    private async Task PushOnboardingAsync(object message)
-    {
-        var json = System.Text.Json.JsonSerializer.Serialize(message);
-        var literal = System.Text.Json.JsonSerializer.Serialize(json);
-        var core = _onboardingWeb?.CoreWebView2;
-        if (core is null) return;
-        await core.ExecuteScriptAsync(
-            "window.__OOBE_PUSH__ && window.__OOBE_PUSH__(JSON.parse(" + literal + ")); ");
-    }
-
-    private static async Task<string> OnboardingImageAsync(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return "";
-        try
-        {
-            var bytes = await System.IO.File.ReadAllBytesAsync(path);
-            if (bytes.Length < 8 || !bytes.AsSpan(0, 8).SequenceEqual(new byte[] {137,80,78,71,13,10,26,10})) return "";
-            return "data:image/png;base64," + Convert.ToBase64String(bytes);
-        }
-        catch (System.IO.IOException) { return ""; }
-        catch (UnauthorizedAccessException) { return ""; }
-    }
-
-    private async Task LoginOnboardingAsync(string kind, string name, bool slim)
-    {
-        using var cancellation = new System.Threading.CancellationTokenSource();
-        _onboardingLogin = cancellation;
-        var token = cancellation.Token;
-        try
-        {
-            await PushOnboardingAsync(new { type = "account", state = "working" });
-            if (kind == "offline")
-            {
-                if (string.IsNullOrWhiteSpace(name))
-                    throw new InvalidOperationException("请输入玩家名");
-                var result = await App.Backend.AddOfflineAccountAsync(name, slim);
-                if (!result.Ok) throw new InvalidOperationException(result.Message);
-            }
-            else
-            {
-                var start = await App.Backend.StartMicrosoftAsync();
-                token.ThrowIfCancellationRequested();
-                if (!start.Ok) throw new InvalidOperationException(start.Message);
-                if (!Uri.TryCreate(start.VerificationUri, UriKind.Absolute, out var url) || url.Scheme != "https")
-                    throw new InvalidOperationException("Microsoft 授权地址无效。");
-                _onboardingVerificationUri = url;
-                var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, start.ExpiresInSeconds));
-                await PushOnboardingAsync(new { type = "account", state = "code", code = start.UserCode,
-                    url = url.AbsoluteUri, expiresInSeconds = start.ExpiresInSeconds, expiresAt = deadline });
-                await Windows.System.Launcher.LaunchUriAsync(url);
-                var exchangeFinished = false;
-                var exchangeProgress = new Progress<string>(async phase =>
-                {
-                    if (phase != "authorized" || token.IsCancellationRequested || exchangeFinished) return;
-                    try { await PushOnboardingAsync(new { type = "account", state = "working" }); }
-                    catch (Exception ex) { App.Trace("Onboarding exchange push: " + ex.GetType().Name); }
-                });
-                while (true)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(3, start.IntervalSeconds)), token);
-                    if (DateTimeOffset.UtcNow >= deadline) throw new InvalidOperationException("验证码已过期，请重新获取。");
-                    var poll = await App.Backend.PollMicrosoftAsync(start.DeviceCode, exchangeProgress);
-                    token.ThrowIfCancellationRequested();
-                    if (poll.Pending) continue;
-                    exchangeFinished = true;
-                    if (!poll.Ok) throw new InvalidOperationException(poll.Message);
-                    name = poll.Name;
-                    break;
-                }
-            }
-            token.ThrowIfCancellationRequested();
-            var snapshot = await App.Backend.GetSnapshotAsync(force: true);
-            var account = snapshot?.Account;
-            if (account is null || account.Type != kind || account.Name != name)
-                throw new InvalidOperationException("账户信息读取失败，请重新登录。");
-            _preferences.OnboardAccountKind = account.Type;
-            AppPreferencesStore.Save(_preferences);
-            var profile = new
-            {
-                name = account.Name, kind = account.Type, typeDisplay = account.TypeDisplay,
-                uuid = Guid.TryParse(account.Uuid, out var uuid) ? uuid.ToString("D") : account.Uuid,
-                variant = account.Variant,
-                head = await OnboardingHeadAsync(account),
-                skin = await OnboardingImageAsync(account.SkinPath),
-                cape = await OnboardingImageAsync(account.CapePath),
-            };
-            token.ThrowIfCancellationRequested();
-            await PushOnboardingAsync(new { type = "account", state = "ok", name = account.Name, profile });
-            await RefreshShellAsync(force: true);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (!token.IsCancellationRequested)
-            {
-                try { await PushOnboardingAsync(new { type = "account", state = "error", message = ex.Message }); }
-                catch (Exception pushError) { App.Trace("Onboarding account push: " + pushError.GetType().Name); }
-            }
-        }
-        finally
-        {
-            _onboardingVerificationUri = null;
-            _onboardingLogin = null;
-        }
-    }
-
-    private void Onboarding_WebMessage(Microsoft.Web.WebView2.Core.CoreWebView2 sender,
-        Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
-    {
-        if (!Uri.TryCreate(e.Source, UriKind.Absolute, out var origin) || origin.Host != "onboarding.meow") return;
-        var raw = e.WebMessageAsJson;
-        DispatcherQueue.TryEnqueue(async () =>
-        {
-            await _onboardingMessages.WaitAsync();
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(raw);
-                var root = doc.RootElement;
-                var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
-                switch (type)
-                {
-                    case "account-login":
-                    {
-                        if (_onboardingLoginTask is { IsCompleted: false } || _onboardingFinishing) break;
-                        var kind = root.TryGetProperty("kind", out var kindValue) ? kindValue.GetString() : "";
-                        if (kind is not ("microsoft" or "offline")) break;
-                        var name = root.TryGetProperty("name", out var nameValue) ? nameValue.GetString() ?? "" : "";
-                        var slim = root.TryGetProperty("slim", out var slimValue) && slimValue.ValueKind == System.Text.Json.JsonValueKind.True;
-                        _onboardingLoginTask = LoginOnboardingAsync(kind, name.Trim(), slim);
-                        break;
-                    }
-                    case "account-open":
-                        if (_onboardingVerificationUri is { } verification) await Windows.System.Launcher.LaunchUriAsync(verification);
-                        break;
-                    case "account-copy":
-                    {
-                        var code = root.TryGetProperty("code", out var codeValue) ? codeValue.GetString() ?? "" : "";
-                        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                        package.SetText(code);
-                        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
-                        await PushOnboardingAsync(new { type = "account-copy", ok = true });
-                        break;
-                    }
-                    case "account-cancel":
-                        _onboardingLogin?.Cancel();
-                        if (_onboardingLoginTask is { } login) await login;
-                        break;
-                    case "theme":
-                    {
-                        var mode = (root.TryGetProperty("value", out var v) ? v.GetString() : "") switch
-                        {
-                            "dark" => "Dark",
-                            "light" => "Light",
-                            "system" => "System",
-                            _ => null,
-                        };
-                        if (mode is null) return;
-                        SetThemeMode(mode, persist: true);      // 里面会 Save
-                        App.Trace("Onboarding: theme " + mode);
-                        break;
-                    }
-                    case "accent":
-                    {
-                        var hex = (root.TryGetProperty("hex", out var h) ? h.GetString() : "") ?? "";
-                        if (hex.Length < 7 || hex[0] != '#') return;
-                        _preferences.ThemeColorMode = ThemeColorService.ModeCustom;
-                        _preferences.ThemeColorHex = hex.ToUpperInvariant();
-                        await ThemeColorService.ApplyAsync(_preferences, IsDarkTheme);
-                        AppPreferencesStore.Save(_preferences);
-                        App.Trace("Onboarding: accent " + hex);
-                        break;
-                    }
-                    case "dir":
-                    {
-                        var path = (root.TryGetProperty("path", out var p) ? p.GetString() : "") ?? "";
-                        await SetOnboardingDirectoryAsync(path);
-                        break;
-                    }
-                    case "dir-browse":
-                    {
-                        var picker = new Windows.Storage.Pickers.FolderPicker();
-                        picker.FileTypeFilter.Add("*");
-                        WinRT.Interop.InitializeWithWindow.Initialize(picker,
-                            WinRT.Interop.WindowNative.GetWindowHandle(_onboardingWindow ?? (Window)this));
-                        var folder = await picker.PickSingleFolderAsync();
-                        if (folder is not null) await SetOnboardingDirectoryAsync(folder.Path);
-                        break;
-                    }
-                    case "update":
-                    {
-                        var key = root.TryGetProperty("key", out var k) ? k.GetString() : null;
-                        var on = root.TryGetProperty("value", out var val)
-                                 && val.ValueKind == System.Text.Json.JsonValueKind.True;
-                        switch (key)
-                        {
-                            case "check": _preferences.CheckUpdatesOnStartup = on; break;
-                            case "download": _preferences.AutoDownloadUpdate = on; break;
-                            case "install": _preferences.AutoInstallUpdate = on; break;
-                            default: return;
-                        }
-                        AppPreferencesStore.Save(_preferences);
-                        break;
-                    }
-                    case "finish":
-                        await FinishOnboardingAsync();
-                        break;
-                }
-            }
-            catch (Exception ex) { App.Trace("Onboarding_WebMessage: " + ex.GetType().Name + " " + ex.Message); }
-            finally { _onboardingMessages.Release(); }
-        });
-    }
-
-    private bool _onboardingFinishing;
-
-    private async Task SetOnboardingDirectoryAsync(string path)
-    {
-        try
-        {
-            var norm = GameDirectoryResolver.Normalize(path);
-            if (norm.Length == 0) throw new System.IO.IOException("请选择有效的游戏目录。");
-            System.IO.Directory.CreateDirectory(norm);
-            if (!await App.Backend.SetGameDirAsync(norm))
-                throw new System.IO.IOException("游戏目录未能保存，请检查目录权限后重试。");
-            _preferences.McDirs = new[] { norm }.Concat(_preferences.McDirs)
-                .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(GameDirectoryResolver.MaxDirs).ToList();
-            _preferences.McDir = norm;
-            AppPreferencesStore.Save(_preferences);
-            await PushOnboardingAsync(new { type = "dir", path = norm, versions = CountVersionFolders(System.IO.Path.Combine(norm, "versions")) });
-        }
-        catch (Exception ex)
-        {
-            await PushOnboardingAsync(new { type = "dir", error = ex.Message });
-        }
-    }
-
-    private static async Task<string> OnboardingHeadAsync(AccountInfo account)
-    {
-        var head = await OnboardingImageAsync(account.HeadPath);
-        if (head.Length > 0) return head;
-        // Embedded Python may not contain Pillow. Use Windows' PNG decoder as a
-        // fallback so an offline account always has a head from its default skin.
-        try
-        {
-            if (!System.IO.File.Exists(account.SkinPath)) return "";
-            using var input = System.IO.File.OpenRead(account.SkinPath);
-            using var source = System.IO.WindowsRuntimeStreamExtensions.AsRandomAccessStream(input);
-            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(source);
-            var unit = decoder.PixelWidth / 64;
-            if (unit == 0 || decoder.PixelHeight < 16 * unit) return "";
-            var transform = new Windows.Graphics.Imaging.BitmapTransform
-            {
-                Bounds = new Windows.Graphics.Imaging.BitmapBounds { X = 8 * unit, Y = 8 * unit, Width = 8 * unit, Height = 8 * unit }
-            };
-            var pixels = await decoder.GetPixelDataAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
-                Windows.Graphics.Imaging.BitmapAlphaMode.Straight, transform,
-                Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation,
-                Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
-            using var output = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-            var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId, output);
-            encoder.SetPixelData(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Straight,
-                8 * unit, 8 * unit, 96, 96, pixels.DetachPixelData());
-            await encoder.FlushAsync();
-            output.Seek(0);
-            using var reader = new Windows.Storage.Streams.DataReader(output.GetInputStreamAt(0));
-            await reader.LoadAsync((uint)output.Size);
-            var bytes = new byte[(int)output.Size]; reader.ReadBytes(bytes);
-            return "data:image/png;base64," + Convert.ToBase64String(bytes);
-        }
-        catch (Exception ex) { App.Trace("Onboarding head: " + ex.GetType().Name); return ""; }
-    }
-
-    /// <summary>点「进入启动器」：关掉引导窗口 → 主界面手绘线稿一笔一笔画出顶栏/侧栏/卡片框 → 整层淡出，露出真实界面。</summary>
-    private async Task FinishOnboardingAsync()
-    {
-        if (_onboardingFinishing) return;
-        _onboardingFinishing = true;
-        try
-        {
-            if (string.IsNullOrWhiteSpace(_preferences.McDir))
-                await SetOnboardingDirectoryAsync(System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeowLauncher", ".minecraft"));
-            if (string.IsNullOrWhiteSpace(_preferences.McDir))
-                throw new System.IO.IOException("请先选择有效的游戏目录。");
-            _preferences.Onboarded = true;
-            AppPreferencesStore.Save(_preferences);
-            var saved = System.Text.Json.JsonSerializer.Deserialize<AppPreferences>(
-                await System.IO.File.ReadAllTextAsync(AppPreferencesStore.FilePath));
-            if (System.Text.Json.JsonSerializer.Serialize(saved) != System.Text.Json.JsonSerializer.Serialize(_preferences))
-                throw new System.IO.IOException("引导设置尚未保存，请重试。");
-            _onboardingLogin?.Cancel();
-
-            // 线稿层先在主界面里铺好，再关引导窗口，中间不留一帧空白
-            OnboardingSketch.Visibility = Visibility.Visible;
-            OnboardingSketch.Opacity = 1;
-            Activate();                             // 主界面先顶到前面
-            await Task.Delay(80);
-            CloseOnboardingWindow();                // 引导窗口退场
-            if (ContentFrame.Content is SettingsPage settings) settings.RefreshPreferences();
-            await Task.Delay(60);
-
-            if (OnboardingSketch.Resources["SketchStoryboard"] is Microsoft.UI.Xaml.Media.Animation.Storyboard sketch)
-            {
-                sketch.Stop();                      // 复位所有线条，重复跑也能从头画
-                sketch.Begin();
-            }
-
-            _ = RefreshShellAsync(force: true);     // 引导里改过主题/目录/账户，外壳在画线期间后台重拉
-            await Task.Delay(1900);                 // 最后一条线收在 1.94s
-
-            OnboardingSketch.Opacity = 0;           // 整层淡出，露出真实界面
-            await Task.Delay(520);
-            OnboardingSketch.Visibility = Visibility.Collapsed;
-            OnboardingSketch.Opacity = 1;
-            App.Trace("Onboarding: finished");
-        }
-        catch (Exception ex)
-        {
-            _preferences.Onboarded = false;
-            App.Trace("FinishOnboarding: " + ex.GetType().Name + " " + ex.Message);
-            ShowCrashToast();
-        }
-        finally { _onboardingFinishing = false; }
     }
 
     // ---- 界面缩放：DPI 只管清晰度，界面大小是我们自己的（偏好「忽略系统缩放」）----
@@ -2707,14 +2109,6 @@ public sealed partial class MainWindow : Window
 					L("dsearch applied: " + (p.Length > 1 ? p[1] : ""));
 				}
 				break;
-			case "dtasks":
-				// dtasks：把任务胶囊显示出来并展开浮层（截图/调试动画用）
-				TaskDock.Visibility = Visibility.Visible;
-				UpdateTaskDock();
-				await Task.Delay(120);
-				TaskFlyout.ShowAt(TaskDock);
-				L("dtasks opened");
-				break;
 			case "ddetail":
 				// ddetail|版本号：进下载页并直接打开该版本的安装设置页（截图用）
 				Navigate("download");
@@ -2894,7 +2288,10 @@ public sealed partial class MainWindow : Window
 		string pendingOnlineQuery = _pendingOnlineQuery;
 		_pendingOnlineQuery = "";
 		string text2 = _pendingLogsFile ?? "";
-		NavigationTransitionInfo infoOverride = MeowLauncher.WinUI.Controls.Motion.PageRefresh();
+		SlideNavigationTransitionInfo infoOverride = new SlideNavigationTransitionInfo
+		{
+			Effect = ((SectionOrder(text) < SectionOrder(currentSection)) ? SlideNavigationTransitionEffect.FromLeft : SlideNavigationTransitionEffect.FromRight)
+		};
 		switch (text)
 		{
 		case "home":
@@ -2904,8 +2301,7 @@ public sealed partial class MainWindow : Window
 			ContentFrame.Navigate(typeof(VersionsPage), null, infoOverride);
 			break;
 		case "settings":
-			// Settings starts its entrance after its first rendered layout.
-			ContentFrame.Navigate(typeof(SettingsPage), pendingSettingsFocus, new SuppressNavigationTransitionInfo());
+			ContentFrame.Navigate(typeof(SettingsPage), pendingSettingsFocus, infoOverride);
 			break;
 		case "get":
 			ContentFrame.Navigate(typeof(GetPage), null, infoOverride);
@@ -3133,8 +2529,7 @@ public sealed partial class MainWindow : Window
 	}
 
 	/// <summary>
-	/// 展开动画：先淡入标题与摘要，再逐行淡入正文里的每一条文字。
-	/// 只动文字本身（TextBlock）与底部按钮——若同时动外层容器会叠成两层淡入，文字会显得慢半拍。
+	/// 展开动画：标题留在左上角不动，正文与底部按钮按 26ms 间隔从左上往右下淡入。
 	/// </summary>
 	private void TaskFlyout_Opened(object? sender, object e)
 	{
@@ -3142,78 +2537,36 @@ public sealed partial class MainWindow : Window
 		{
 			return;
 		}
-		TaskFlyoutRoot.UpdateLayout();
 
-		// 本体先动：从胶囊方向轻微上浮 + 由 0.97 放大到 1，只动几何不动透明度，
-		// 这样下面的逐条文字仍然是自己淡入，不会叠成两层。
-		var rootVisual = ElementCompositionPreview.GetElementVisual(TaskFlyoutRoot);
-		var rootCompositor = rootVisual.Compositor;
-		rootVisual.CenterPoint = new System.Numerics.Vector3(
-			(float)TaskFlyoutRoot.ActualWidth / 2f, (float)TaskFlyoutRoot.ActualHeight, 0f);
-
-		var rise = rootCompositor.CreateVector3KeyFrameAnimation();
-		rise.InsertKeyFrame(0f, new System.Numerics.Vector3(0f, 10f, 0f));
-		rise.InsertKeyFrame(1f, System.Numerics.Vector3.Zero);
-		rise.Duration = TimeSpan.FromMilliseconds(240);
-		rise.DelayBehavior = Microsoft.UI.Composition.AnimationDelayBehavior.SetInitialValueBeforeDelay;
-
-		var zoom = rootCompositor.CreateVector3KeyFrameAnimation();
-		zoom.InsertKeyFrame(0f, new System.Numerics.Vector3(0.97f, 0.97f, 1f));
-		zoom.InsertKeyFrame(1f, System.Numerics.Vector3.One);
-		zoom.Duration = TimeSpan.FromMilliseconds(240);
-		zoom.DelayBehavior = Microsoft.UI.Composition.AnimationDelayBehavior.SetInitialValueBeforeDelay;
-
-		rootVisual.StartAnimation("Offset", rise);
-		rootVisual.StartAnimation("Scale", zoom);
-
-		var texts = new List<UIElement>();
-		CollectFlyoutTexts(TaskFlyoutRoot, texts);
+		var items = new List<UIElement> { TaskFlyoutHeader };
+		items.AddRange(TaskFlyoutBody.Children.OfType<UIElement>());
 		if (ViewAllTaskButton != null)
 		{
-			texts.Add(ViewAllTaskButton);
+			items.Add(ViewAllTaskButton);
 		}
 
 		var compositor = ElementCompositionPreview.GetElementVisual(TaskFlyoutRoot).Compositor;
-		for (var i = 0; i < texts.Count; i++)
+		for (var i = 0; i < items.Count; i++)
 		{
-			var visual = ElementCompositionPreview.GetElementVisual(texts[i]);
-			var delay = TimeSpan.FromMilliseconds(i * 22);
+			var visual = ElementCompositionPreview.GetElementVisual(items[i]);
+			var delay = TimeSpan.FromMilliseconds(i == 0 ? 0 : 60 + (i - 1) * 26);
 
 			var fade = compositor.CreateScalarKeyFrameAnimation();
 			fade.InsertKeyFrame(0f, 0f);
 			fade.InsertKeyFrame(1f, 1f);
-			fade.Duration = TimeSpan.FromMilliseconds(190);
+			fade.Duration = TimeSpan.FromMilliseconds(180);
 			fade.DelayTime = delay;
 			fade.DelayBehavior = Microsoft.UI.Composition.AnimationDelayBehavior.SetInitialValueBeforeDelay;
 
 			var slide = compositor.CreateVector3KeyFrameAnimation();
-			slide.InsertKeyFrame(0f, new System.Numerics.Vector3(-7f, -3f, 0f));
+			slide.InsertKeyFrame(0f, new System.Numerics.Vector3(-6f, -4f, 0f));
 			slide.InsertKeyFrame(1f, System.Numerics.Vector3.Zero);
-			slide.Duration = TimeSpan.FromMilliseconds(230);
+			slide.Duration = TimeSpan.FromMilliseconds(220);
 			slide.DelayTime = delay;
 			slide.DelayBehavior = Microsoft.UI.Composition.AnimationDelayBehavior.SetInitialValueBeforeDelay;
 
 			visual.StartAnimation("Opacity", fade);
 			visual.StartAnimation("Offset", slide);
-		}
-	}
-
-	/// <summary>按视觉树顺序收集浮层里的文字块（标题、摘要、分组名、每行的主副文案）。</summary>
-	private static void CollectFlyoutTexts(DependencyObject node, List<UIElement> into)
-	{
-		var count = VisualTreeHelper.GetChildrenCount(node);
-		for (var i = 0; i < count; i++)
-		{
-			var child = VisualTreeHelper.GetChild(node, i);
-			if (child is TextBlock block)
-			{
-				if (!string.IsNullOrEmpty(block.Text))
-				{
-					into.Add(block);
-				}
-				continue;
-			}
-			CollectFlyoutTexts(child, into);
 		}
 	}
 

@@ -893,12 +893,8 @@ public sealed partial class HomePage : Page
     private void ApplyContinueLaunchState(string versionId)
     {
         var running = GameSessions.IsRunning(versionId);
-        ContinueLaunchText.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
-        ContinueStopText.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
-        ContinueLaunchIcon.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
-        ContinueStopIcon.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
-        ContinueLaunchButton.Style = (Style)Resources[running ? "StopGameButtonStyle" : "ContinueLaunchButtonStyle"];
-        ContinueSwitchButton.Style = ContinueLaunchButton.Style;
+        ContinueLaunchText.Text = running ? "结束游戏" : "启动";
+        ContinueLaunchIcon.Glyph = running ? "\uE71A" : "\uE768";
         AutomationProperties.SetName(ContinueLaunchButton, running ? "结束当前实例的游戏" : "启动当前实例");
     }
 
@@ -2078,7 +2074,7 @@ public sealed partial class HomePage : Page
         _busy = true;
         RefreshButton.IsEnabled = false;
         var firstLoad = _snapshot is null;              // 已有数据时（手动刷新）不盖遮罩，只有首次读取才盖
-        if (firstLoad) { HomeLoading.Visibility = Visibility.Visible; HomeLoadingRing.IsActive = true; }
+        if (firstLoad) HomeLoading.Visibility = Visibility.Visible;
         try
         {
             var snapshot = await App.Backend.GetSnapshotAsync(force);
@@ -2105,7 +2101,6 @@ public sealed partial class HomePage : Page
         finally
         {
             HomeLoading.Visibility = Visibility.Collapsed;
-            HomeLoadingRing.IsActive = false;
             RefreshButton.IsEnabled = true;
             _busy = false;
         }
@@ -2666,10 +2661,8 @@ public sealed partial class HomePage : Page
         PinnedList.Children.Clear();
         if (PinnedCardList is not null) PinnedCardList.Children.Clear();
 
+        var pinned = ReadPinned();
         var all = _snapshot?.Versions ?? new List<VersionInfo>();
-        var hidden = (_snapshot?.HiddenVersionIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var pinned = ReadPinned().Where(id => !hidden.Contains(id) || all.Any(v => !v.Hidden
-            && string.Equals(v.Id, id, StringComparison.OrdinalIgnoreCase))).ToList();
         var shown = 0;
 
         foreach (var id in pinned)
@@ -2969,11 +2962,11 @@ public sealed partial class HomePage : Page
             }
             else
             {
-                TaskCenter.Fail(task, result.Message, result.Failure);
+                TaskCenter.Fail(task, result.Message);
                 TaskPercentText.Text = "启动失败";
                 TaskProgress.IsIndeterminate = false;
                 TaskProgress.Visibility = Visibility.Collapsed;
-                ShowLaunchFailure(result.Message, current.Id, task.Failure!);
+                ShowLaunchFailure(result.Message, current.Id);
             }
         }
         catch (Exception ex)
@@ -2982,7 +2975,7 @@ public sealed partial class HomePage : Page
             TaskPercentText.Text = "启动失败";
             TaskProgress.IsIndeterminate = false;
             TaskProgress.Visibility = Visibility.Collapsed;
-            if (task.Failure is { } failure) ShowLaunchFailure(ex.Message, current.Id, failure);
+            ShowLaunchFailure(ex.Message, current.Id);
         }
         finally
         {
@@ -2991,10 +2984,12 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private void ShowLaunchFailure(string message, string versionId, FailureInfo failure)
+    private void ShowLaunchFailure(string message, string versionId)
     {
-        ShowToast(InfoBarSeverity.Error, $"启动失败 · {failure.Code}", message, "复制诊断",
-            () => Diagnostics.Copy(Diagnostics.BuildReport(failure, "启动游戏", message, versionId)), 20);
+        var code = Diagnostics.ErrorCodeFor(message);
+        var stage = TaskSub.Text;
+        ShowToast(InfoBarSeverity.Error, $"启动失败 · {code}", message, "复制诊断",
+            () => Diagnostics.Copy(Diagnostics.BuildReport(code, "启动游戏", message, versionId, stage)), 20);
     }
 
     // ---------- 系统媒体 ----------
