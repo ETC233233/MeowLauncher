@@ -32,7 +32,7 @@ dotnet build MeowLauncher.WinUI/MeowLauncher.WinUI.csproj -c Debug -p:Platform=x
 ## 生成测试包
 
 ```powershell
-powershell -File tools/build_debug_preview.ps1 -PythonDir <内嵌Python目录>
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_debug_preview.ps1 -PythonDir <内嵌Python目录>
 ```
 
 生成 `_export/debug-preview/MeowLauncher-Review-<构建号>-Debug-win-x64.zip` 和 SHA-256 文件；不覆盖已有包。包中有内嵌 Python、引导资源、许可证、调试符号和 `BUILD-INFO.json`。

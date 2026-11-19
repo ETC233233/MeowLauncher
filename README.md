@@ -68,7 +68,7 @@ python tools/selfcheck_backend.py 26.3
 准备包含内嵌 Python 的 Debug 便携测试包：
 
 ```powershell
-powershell -File tools/build_debug_preview.ps1 -PythonDir <内嵌Python目录>
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_debug_preview.ps1 -PythonDir <内嵌Python目录>
 ```
 
 输出位于 `_export/debug-preview/`，包含 ZIP、SHA-256 校验值和依赖说明。此包需要 .NET 8 Desktop Runtime、Windows App Runtime 1.8 与 WebView2 Runtime；打包不会修改既有发布目录。
