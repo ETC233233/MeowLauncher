@@ -1,16 +1,16 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace MeowLauncher.WinUI.Services;
 
 /// <summary>
-/// 启动前的文件体检：缺 jar / 库 / 资源时先拦住，问一句再补全。
+/// 启动前的文件体检：缺 jar / 库 / 资源时先拦住，自动补全。
 /// 补全过程中弹一个带进度条的对话框，不让界面看起来卡死。
 /// </summary>
 public static class VersionHealth
 {
-    public static async Task<bool> EnsureReadyAsync(string versionId, XamlRoot? root = null)
+    public static async Task<bool> EnsureReadyAsync(string versionId, XamlRoot? root = null, string gameRoot = "", IProgress<string>? stageProgress = null, string? taskId = null)
     {
         if (string.IsNullOrWhiteSpace(versionId)) return false;
         root ??= App.MainWindow?.Content?.XamlRoot;
@@ -19,39 +19,37 @@ public static class VersionHealth
         VerifyResult check;
         try
         {
-            check = await App.Backend.VerifyVersionAsync(versionId);
+            check = await App.Backend.VerifyVersionAsync(versionId, gameRoot, taskId);
         }
         catch (Exception ex)
         {
+            if (TaskCenter.IsCancelled(taskId)) return false;
             Debug.WriteLine($"verify failed: {ex}");
-            return true; // 检查本身出错就别挡着启动
+            await new ContentDialog { Title = "无法验证实例文件", Content = "文件检查未完成，已停止启动。请检查目录权限后重试。", CloseButtonText = "返回", XamlRoot = root }.ShowAsync();
+            return false;
         }
-
-        if (!check.Ok || check.Clean || check.Missing <= 0) return true;
-
-        var detail = new StackPanel { Spacing = 6 };
-        detail.Children.Add(new TextBlock
+        if (TaskCenter.IsCancelled(taskId)) return false;
+        if (!check.Ok)
         {
-            Text = check.Message,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        detail.Children.Add(new TextBlock
-        {
-            Text = "可以先补全，补完会自动继续启动。",
-            Opacity = 0.68,
-            TextWrapping = TextWrapping.Wrap,
-        });
+            await new ContentDialog { Title = "无法验证实例文件", Content = check.Message, CloseButtonText = "返回", XamlRoot = root }.ShowAsync();
+            return false;
+        }
+        if (check.Clean && check.Missing <= 0) return true;
 
-        var ask = new ContentDialog
+        if (stageProgress is not null)
         {
-            Title = "这个实例的文件不完整",
-            Content = detail,
-            PrimaryButtonText = "补全并启动",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = root,
-        };
-        if (await ask.ShowAsync() != ContentDialogResult.Primary) return false;
+            stageProgress.Report("正在自动补全缺失文件…");
+            BackendResult outcome;
+            try { outcome = await App.Backend.RepairVersionAsync(versionId, stageProgress, gameRoot, taskId); }
+            catch (Exception ex) { outcome = new BackendResult(false, Diagnostics.FriendlyMessage(ex)); }
+            if (TaskCenter.IsCancelled(taskId)) return false;
+            if (outcome.Ok) return true;
+            await new ContentDialog
+            {
+                Title = "补全没有完成", Content = outcome.Message, CloseButtonText = "返回", XamlRoot = root,
+            }.ShowAsync();
+            return false;
+        }
 
         var bar = new ProgressBar { Minimum = 0, Maximum = 100, Value = 0, Height = 4 };
         var label = new TextBlock { Text = "正在检查缺哪些文件…", TextWrapping = TextWrapping.Wrap };
@@ -86,7 +84,7 @@ public static class VersionHealth
         BackendResult repair;
         try
         {
-            repair = await App.Backend.RepairVersionAsync(versionId, progress);
+            repair = await App.Backend.RepairVersionAsync(versionId, progress, gameRoot, taskId);
         }
         catch (Exception ex)
         {
@@ -98,6 +96,7 @@ public static class VersionHealth
             try { await showTask; } catch { }
         }
 
+        if (TaskCenter.IsCancelled(taskId)) return false;
         if (repair.Ok) return true;
 
         await new ContentDialog

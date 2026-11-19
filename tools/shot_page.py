@@ -114,7 +114,7 @@ NAV_LABELS = {
 # 子页是否真的切过去由 navigate_tabbed() 用 TAB_MARKERS 再验一次。
 PAGE_HEADERS = {
     "home": "主页",
-    "versions": "全部实例",
+    "versions": "实例",
     "get": "获取",
     "instance": "实例",
     "download": "获取",
@@ -1174,6 +1174,9 @@ def navigate_tasks(hwnd) -> bool:
         time.sleep(0.3)
 
         dock = app_button_points(hwnd, "任务与通知")
+        if not dock:
+            island = control_center(hwnd, "任务与通知") or control_center(hwnd, "任务进度")
+            if island: dock = [island]
         if dock:
             click_screen(*dock[0])
             where = f"dock ({dock[0][0]:.0f},{dock[0][1]:.0f})"
@@ -1182,7 +1185,7 @@ def navigate_tasks(hwnd) -> bool:
             where = "dock (109,800)"
         time.sleep(1.0)
 
-        more = app_button_points(hwnd, "查看全部任务与通知")
+        more = app_button_points(hwnd, "查看全部任务与通知") or app_button_points(hwnd, "查看全部")
         if more:
             click_screen(*more[0])
             where += " → 查看全部任务与通知"
@@ -1252,6 +1255,17 @@ def navigate(hwnd, page: str, nav_y: int | None = None) -> bool:
     直接返回 False，绝不把别的页当目标页截下去。
     任务页不在侧栏，走 navigate_tasks() 的首页任务卡路径。
     """
+    if page == "versions" and nav_y is None:
+        if not navigate(hwnd, "instance"):
+            return False
+        points = app_button_points(hwnd, "打开全部实例")
+        if not points:
+            return False
+        click_screen(*points[0])
+        time.sleep(1.0)
+        ok, actual = title_matches(hwnd, page)
+        print(f"[shot] 实例工作区 → 全部实例：{actual!r}, matched={ok}")
+        return ok
     if page == "tasks" and nav_y is None:
         return navigate_tasks(hwnd)
     if page in TAB_HOST and nav_y is None:

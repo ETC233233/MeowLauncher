@@ -13,13 +13,16 @@ public static class InstanceSelection
     /// <summary>当前实例变化（含回滚）。在调用方所在线程触发，调用方应在 UI 线程。</summary>
     public static event Action<VersionInfo>? Changed;
 
+    public static string Key(string root, string id) =>
+        Path.Combine(GameDirectoryResolver.Normalize(root), "versions", id).ToLowerInvariant();
+
     public static bool Same(VersionInfo? a, VersionInfo? b)
     {
         if (a is null || b is null) return false;
         if (!string.Equals(a.Id, b.Id, StringComparison.OrdinalIgnoreCase)) return false;
         var ra = GameDirectoryResolver.Normalize(a.Root);
         var rb = GameDirectoryResolver.Normalize(b.Root);
-        return ra.Length == 0 || rb.Length == 0 || string.Equals(ra, rb, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(ra, rb, StringComparison.OrdinalIgnoreCase);
     }
 
     public static async Task<(bool Ok, string Message)> SelectAsync(VersionInfo target)

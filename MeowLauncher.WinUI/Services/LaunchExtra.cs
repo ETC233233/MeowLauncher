@@ -11,9 +11,9 @@ public sealed record LaunchExtra(
 public sealed partial class BackendClient
 {
     // 放进 BackendClient 的 partial 里；如果 BackendClient 不是 partial，就把两个方法粘进现有类即可。
-    public async Task<(bool Ok, LaunchExtra Extra, string Message)> GetLaunchExtraAsync(string scope)
+    public async Task<(bool Ok, LaunchExtra Extra, string Message)> GetLaunchExtraAsync(string scope, string root = "")
     {
-        var result = await RunAsync($"--launch-extra \"{scope}\"", TimeSpan.FromSeconds(20));
+        var result = await RunAsync($"--launch-extra \"{scope}\"", TimeSpan.FromSeconds(20), gameDir: root);
         if (!result.Success) return (false, new LaunchExtra(), result.Error);
         try
         {
@@ -29,7 +29,7 @@ public sealed partial class BackendClient
         catch (JsonException) { return (false, new LaunchExtra(), "启动附加设置数据格式异常"); }
     }
 
-    public async Task<BackendResult> SetLaunchExtraAsync(string scope, LaunchExtra x)
+    public async Task<BackendResult> SetLaunchExtraAsync(string scope, LaunchExtra x, string root = "")
     {
         var payload = JsonSerializer.Serialize(new
         {
@@ -37,7 +37,7 @@ public sealed partial class BackendClient
             gameArgs = x.GameArgs, env = x.Env, wrapper = x.Wrapper, priority = x.Priority,
         });
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(payload));
-        var result = await RunAsync($"--set-launch-extra \"{scope}\" {encoded}", TimeSpan.FromSeconds(20));
+        var result = await RunAsync($"--set-launch-extra \"{scope}\" {encoded}", TimeSpan.FromSeconds(20), gameDir: root);
         return result.Success ? ParseActionResult(result.Output) : new BackendResult(false, result.Error);
     }
 }

@@ -58,7 +58,9 @@ def set_client_id(cid: str) -> None:
 
 
 class AuthError(RuntimeError):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def _request(url: str, data: bytes | None = None, headers: dict | None = None, timeout: int = 25) -> dict:
@@ -72,13 +74,13 @@ def _request(url: str, data: bytes | None = None, headers: dict | None = None, t
             payload = json.loads(body)
         except Exception:
             payload = {"error": f"HTTP {exc.code}", "raw": body[:400]}
-        raise AuthError(payload.get("error_description") or payload.get("error") or body[:200]) from exc
+        raise AuthError(payload.get("error_description") or payload.get("error") or f"HTTP {exc.code}", status=exc.code) from exc
     except Exception as exc:
         raise AuthError(f"网络请求失败：{exc}") from exc
     try:
         return json.loads(body)
     except Exception as exc:
-        raise AuthError(f"返回不是 JSON：{body[:200]}") from exc
+        raise AuthError("授权服务返回了无法解析的响应。") from exc
 
 
 def _post_json(url: str, payload: dict) -> dict:
@@ -187,7 +189,8 @@ def xbox_live(msa_access_token: str) -> dict:
         "TokenType": "JWT",
     }
     out = _post_json(XBL_URL, payload)
-    return {"token": out["Token"], "uhs": out["DisplayClaims"]["xui"][0]["uhs"]}
+    claims = out["DisplayClaims"]["xui"][0]
+    return {"token": out["Token"], "uhs": claims["uhs"], "xuid": str(claims.get("xid") or claims.get("xuid") or "")}
 
 
 def xsts(xbl_token: str, relying_party: str = "rp://api.minecraftservices.com/") -> dict:
@@ -203,10 +206,10 @@ def xsts(xbl_token: str, relying_party: str = "rp://api.minecraftservices.com/")
         msg = str(exc)
         for code, hint in XSTS_ERRORS.items():
             if code in msg:
-                raise AuthError(hint) from exc
+                raise AuthError(hint, status=exc.status) from exc
         raise
     claims = out["DisplayClaims"]["xui"][0]
-    return {"token": out["Token"], "uhs": claims["uhs"]}
+    return {"token": out["Token"], "uhs": claims["uhs"], "xuid": str(claims.get("xid") or claims.get("xuid") or "")}
 
 
 def minecraft_login(xsts_token: str, uhs: str) -> dict:
@@ -251,7 +254,7 @@ def full_login(device_code: str, on_wait=None) -> dict:
         "msa": {"access_token": msa.get("access_token", ""), "refresh_token": msa.get("refresh_token", "")},
         "mc": mc,
         "profile": profile,
-        "owns_game": any("game_minecraft" in e or "product_minecraft" in e for e in owned) or bool(profile.get("id")),
+        "owns_game": any(e in ("game_minecraft", "product_minecraft") for e in owned),
         "entitlements": owned,
     }
 
@@ -316,11 +319,7 @@ def full_login_with_code(code_or_url: str, client_id: str = PUBLIC_CLIENT) -> di
     xu = xsts(xbl["token"])
     mc = minecraft_login(xu["token"], xu["uhs"])
     prof = minecraft_profile(mc["access_token"])
-    owns = True
-    try:
-        owns = bool(entitlements(mc["access_token"]))
-    except Exception:
-        owns = True
+    owns = any(e in ("game_minecraft", "product_minecraft") for e in entitlements(mc["access_token"]))
     return {"msa": {"access_token": msa, "refresh_token": refresh},
             "mc": mc, "profile": prof, "owns_game": owns}
 
@@ -399,15 +398,12 @@ def login_with_pkce_code(code: str, verifier: str, client_id: str,
     tok = exchange_code_pkce(code, verifier, client_id, redirect_uri)
     msa = tok.get("access_token", "")
     if not msa:
-        raise AuthError(f"没有拿到 access_token：{str(tok)[:180]}")
+        raise AuthError("授权服务没有返回访问令牌。")
     xbl = xbox_live(msa)
     xsts_t = xsts(xbl["token"])
-    mc = minecraft_login(xsts_t["token"], xbl["uhs"])
+    mc = minecraft_login(xsts_t["token"], xsts_t["uhs"])
     prof = minecraft_profile(mc["access_token"])
-    try:
-        owns = bool(entitlements(mc["access_token"]).get("items"))
-    except Exception:
-        owns = False
+    owns = any(e in ("game_minecraft", "product_minecraft") for e in entitlements(mc["access_token"]))
     return {
         "msa": tok,
         "mc": mc,

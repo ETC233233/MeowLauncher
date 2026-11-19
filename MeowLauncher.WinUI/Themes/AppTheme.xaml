@@ -1,4 +1,4 @@
-<ResourceDictionary
+﻿<ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
@@ -382,7 +382,6 @@
                     <!-- 参照 WinUI 3 SegmentedControl：4px 圆角、选中只用一层极淡填充，不做彩色实心胶囊 -->
                     <Grid x:Name="Root"
                           Height="{TemplateBinding Height}"
-                          Padding="{TemplateBinding Padding}"
                           Background="Transparent"
                           CornerRadius="4"
                           BorderThickness="{TemplateBinding BorderThickness}"
@@ -391,7 +390,7 @@
                                 CornerRadius="4"
                                 Background="{ThemeResource AppChipBrush}"
                                 Opacity="0" />
-                        <ContentPresenter x:Name="Label"
+                        <ContentPresenter x:Name="Label" Margin="{TemplateBinding Padding}"
                                           Content="{TemplateBinding Content}"
                                           ContentTemplate="{TemplateBinding ContentTemplate}"
                                           HorizontalAlignment="Center"

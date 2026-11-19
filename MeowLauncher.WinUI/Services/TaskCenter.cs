@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using MeowLauncher.WinUI.Models;
@@ -271,16 +271,21 @@ public static class TaskCenter
     private static readonly Dictionary<string, TaskKind> Kinds = new();
     private static readonly Dictionary<string, LaunchTrace> Traces = new();
     private static readonly HashSet<string> Finished = new();
+    private static readonly TaskCancellationRegistry Cancellations = new();
+    public static CancellationToken CancellationFor(string? id) => Cancellations.TokenFor(id);
+    public static bool IsCancelled(string? id) => CancellationFor(id).IsCancellationRequested;
 
     public static ObservableCollection<TaskEntry> Entries { get; } = new();
 
-    /// <summary>通知通道：完成 / 失败 / 取消各留一条，可单条已读、可整体清空。</summary>
+    /// <summary>独立通知通道；任务结果保留在任务列表，不重复存入通知。</summary>
     public static ObservableCollection<TaskNotification> Notifications { get; } = new();
 
     public static event EventHandler? Changed;
     public static event EventHandler? NotificationsChanged;
+    public static event Action<TaskEntry>? TaskFinished;
 
-    public static TaskEntry Add(string title, string detail, string pageTag = "home", string glyph = "\\uE7C3")
+    public static TaskEntry Add(string title, string detail, string pageTag = "home", string glyph = "\\uE7C3",
+        Microsoft.UI.Xaml.Media.ImageSource? targetIcon = null)
     {
         var entry = new TaskEntry
         {
@@ -288,8 +293,10 @@ public static class TaskCenter
             Detail = detail,
             PageTag = pageTag,
             Glyph = glyph,
+            TargetIcon = targetIcon,
         };
         Kinds[entry.Id] = KindOf(title);
+        Cancellations.Create(entry.Id);
         Entries.Insert(0, entry);
         while (Entries.Count > MaxEntries) Entries.RemoveAt(Entries.Count - 1);
         Notify();
@@ -302,6 +309,7 @@ public static class TaskCenter
         if (text.StartsWith("启动", StringComparison.Ordinal)) return TaskKind.Launch;
         if (text.StartsWith("安装", StringComparison.Ordinal)) return TaskKind.Install;
         if (text.StartsWith("下载", StringComparison.Ordinal)) return TaskKind.Install;
+        if (text.StartsWith("导入整合包", StringComparison.Ordinal)) return TaskKind.Install;
         return TaskKind.Other;
     }
 
@@ -309,26 +317,41 @@ public static class TaskCenter
     {
         if (Finished.Contains(entry.Id)) return;
         Finished.Add(entry.Id);
+        ResetDownloadStats(entry);
         entry.Status = "已完成";
         entry.Detail = detail;
         entry.IsIndeterminate = false;
         entry.Progress = 100;
         TraceFor(entry.Id)?.Finish(true);
+        foreach (var step in entry.Steps) { step.State = TaskStepState.Done; step.Pct = 100; }
         Notify();
-        PushNotification("已完成", entry, detail);
+        TaskFinished?.Invoke(entry);
+
     }
 
-    public static void Fail(TaskEntry entry, string detail)
+    public static void Fail(TaskEntry entry, string detail, FailureInfo? failure = null)
     {
         if (Finished.Contains(entry.Id)) return;
         Finished.Add(entry.Id);
+        var stage = failure?.Stage;
+        if (string.IsNullOrWhiteSpace(stage))
+            stage = entry.Steps.LastOrDefault(step => step.State == TaskStepState.Failed)?.Title ?? entry.LastStage;
+        var failedStep = entry.Steps.FirstOrDefault(step => step.State == TaskStepState.Active &&
+            (stage.Contains(step.Title, StringComparison.OrdinalIgnoreCase) ||
+             (step.Title == "下载资源文件" && stage.Contains("资源索引", StringComparison.Ordinal))));
+        if (failedStep is not null) failedStep.State = TaskStepState.Failed;
+        StopSteps(entry);
+        ResetDownloadStats(entry);
+        var code = string.IsNullOrWhiteSpace(failure?.Code) ? Diagnostics.ErrorCodeFor(detail, KindOf(entry.Title)) : failure.Code;
+        entry.Failure = new FailureInfo(code, failure?.At ?? DateTimeOffset.Now, stage);
         entry.Status = "失败";
         entry.Detail = detail;
         entry.IsIndeterminate = false;
         entry.Progress = 0;
         TraceFor(entry.Id)?.Finish(false);
         Notify();
-        PushNotification("失败", entry, detail);
+        TaskFinished?.Invoke(entry);
+
     }
 
     /// <summary>只更新当前阶段文案，不动进度条状态（启动这类不确定时长的任务用）。</summary>
@@ -344,6 +367,34 @@ public static class TaskCenter
         if (Finished.Contains(entry.Id)) return;
         var text = (line ?? "").Trim();
         if (text.Length == 0) return;
+        if (text.StartsWith("@phase|", StringComparison.Ordinal))
+        {
+            var title = text[7..];
+            foreach (var step in entry.Steps.Where(s => s.State == TaskStepState.Active))
+            { step.State = TaskStepState.Done; step.Pct = 100; }
+            entry.Steps.Add(new TaskStep(title) { State = TaskStepState.Active, Pct = -1 });
+            entry.OnStepsChanged();
+            entry.Detail = entry.LastStage = title;
+            entry.IsIndeterminate = true;
+            Notify();
+            return;
+        }
+        if (text.StartsWith("@progress|", StringComparison.Ordinal))
+        {
+            var parts_ = text[10..].Split('|', 2);
+            if (double.TryParse(parts_[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var percent))
+            {
+                var step = entry.Steps.LastOrDefault();
+                if (step is not null) { step.Pct = Math.Clamp(percent, 0, 100); step.Detail = parts_.Length > 1 ? parts_[1] : ""; }
+            }
+            Notify(); return;
+        }
+        if (text.StartsWith("@target|", StringComparison.Ordinal))
+        {
+            entry.TargetIcon = InstanceIcon.ForLoader(text[8..]);
+            Notify();
+            return;
+        }
 
         if (text.StartsWith("›", StringComparison.Ordinal))
         {
@@ -356,11 +407,13 @@ public static class TaskCenter
         if (parts.Length == 3 && int.TryParse(parts[0], out var index) && index is >= 0 and <= 3)
         {
             EnsureTrace(entry.Id).Advance(index, parts[2]);
+            entry.LastStage = parts[2];
             entry.Detail = parts[2];
             Notify();
             return;
         }
 
+        entry.LastStage = text;
         entry.Detail = text;
         Notify();
     }
@@ -387,14 +440,15 @@ public static class TaskCenter
     /// <summary>安装/下载的分步清单：任务开始时一次性建好，后面只改每步的状态与百分比。</summary>
     public static void BuildSteps(TaskEntry entry, IReadOnlyList<string> titles)
     {
-        entry.SetSteps(titles.Select(t => new TaskStep(t)));
+        if (entry.IsActive) entry.SetSteps(titles.Select(t => new TaskStep(t)));
     }
 
     /// <summary>更新某一步：0 等待 / 1 进行中 / 2 完成 / 3 失败。</summary>
     public static void Step(TaskEntry entry, int index, int state, double pct, string detail)
     {
-        if (index < 0 || index >= entry.Steps.Count) return;
+        if (!entry.IsActive || index < 0 || index >= entry.Steps.Count) return;
         var step = entry.Steps[index];
+        if (step.State is TaskStepState.Done or TaskStepState.Failed) return;
         step.State = state switch
         {
             1 => TaskStepState.Active,
@@ -403,8 +457,23 @@ public static class TaskCenter
             _ => TaskStepState.Pending,
         };
         // -1 是「没有百分比」的哨兵（安装器在跑），别被 clamp 成 0 显示成卡住。
-        step.Pct = state == 2 ? 100 : (pct < 0 ? -1 : Math.Clamp(pct, 0, 100));
-        if (!string.IsNullOrEmpty(detail)) step.Detail = detail;
+        step.Pct = state == 2 ? 100 : (pct < 0 ? -1 : Math.Max(step.Pct, Math.Clamp(pct, 0, 100)));
+        step.Detail = detail;
+    }
+
+    private static void StopSteps(TaskEntry entry)
+    {
+        foreach (var step in entry.Steps)
+        {
+            if (step.State == TaskStepState.Active) step.State = TaskStepState.Stopped;
+            if (step.State == TaskStepState.Pending) step.State = TaskStepState.Skipped;
+        }
+    }
+
+    public static void ResetDownloadStats(TaskEntry entry)
+    {
+        Stats(entry, 0, "");
+        entry.SetLive("");
     }
 
     /// <summary>速度 / 剩余文件：任务卡右侧那行小字。</summary>
@@ -424,8 +493,9 @@ public static class TaskCenter
     public static void Progress(TaskEntry entry, double value, string detail)
     {
         if (Finished.Contains(entry.Id)) return;
-        entry.Progress = Math.Clamp(value, 0, 100);
+        entry.AdvanceProgress(Math.Clamp(value, 0, 99));
         entry.IsIndeterminate = false;
+        if (!string.IsNullOrWhiteSpace(detail) && detail != entry.Detail) entry.LastStage = detail;
         entry.Detail = detail;
         Notify();
     }
@@ -472,32 +542,42 @@ public static class TaskCenter
         return "可取消：中止这次后台操作。";
     }
 
-    /// <summary>取消任务：标记状态 → 杀掉对应的后端进程 → 记一条通知。返回是否真的取消了。</summary>
+    /// <summary>取消排队或运行中的任务，同时取消关联后台操作。</summary>
     public static bool Cancel(TaskEntry entry)
     {
         if (!CanCancel(entry)) return false;
-        Finished.Add(entry.Id);
         var kind = Kinds.GetValueOrDefault(entry.Id, TaskKind.Other);
-        var killed = 0;
+        Cancellations.Cancel(entry.Id);
         try
         {
-            killed = App.Backend?.CancelOperations(kind, EntityOf(entry.Title)) ?? 0;
+            _ = App.Backend?.CancelOperations(kind, EntityOf(entry.Title), entry.Id);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"取消任务失败：{ex.Message}");
         }
 
+
+        Finished.Add(entry.Id);
         entry.Status = "已取消";
-        entry.Detail = killed > 0
-            ? "已取消：后台操作已中止。"
-            : "已取消：没有找到正在运行的后端进程。";
+        StopSteps(entry);
+        ResetDownloadStats(entry);
+        entry.Detail = "后台操作已中止。";
         entry.IsIndeterminate = false;
         entry.Progress = 0;
         TraceFor(entry.Id)?.Finish(false);
         Notify();
-        PushNotification("已取消", entry, entry.Detail);
+
         return true;
+    }
+
+    public static void Dismiss(TaskEntry entry)
+    {
+        if (entry.IsActive) return;
+        Entries.Remove(entry);
+        Kinds.Remove(entry.Id);
+        Traces.Remove(entry.Id);
+        Notify();
     }
 
     public static void MarkRead(TaskNotification? notification)

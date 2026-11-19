@@ -83,11 +83,14 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         StartupTimeline.Mark("OnLaunched 开始");
-        MainWindow = new MainWindow();
+        // 资源管理器的「打开方式」把文件路径作为独立的命令行参数传入。
+        var packs = Environment.GetCommandLineArgs().Skip(1)
+            .Where(path => Path.GetExtension(path).Equals(".mrpack", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        MainWindow = new MainWindow(packs);
         StartupTimeline.Mark("MainWindow 构造完成");
         MainWindow.Activate();
         StartupTimeline.Mark("窗口已激活");
-        Services.GameSessions.Initialize(MainWindow.DispatcherQueue);
         _ = SkinRenderView.PrewarmAsync();
 
 #if DEBUG

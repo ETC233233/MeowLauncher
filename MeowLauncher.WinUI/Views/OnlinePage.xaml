@@ -162,11 +162,8 @@
                         <StackPanel Spacing="3">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <FontIcon Glyph="&#xE8F1;" FontSize="15" VerticalAlignment="Center" />
-                                <TextBlock Text="整合包" VerticalAlignment="Center" />
+                                <TextBlock Text="在线整合包" VerticalAlignment="Center" />
                             </StackPanel>
-                            <TextBlock Text="装成新实例，不受当前实例的版本和加载器限制" FontSize="11"
-                                       Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap"
-                                       Margin="25,0,0,0" />
                         </StackPanel>
                     </Button>
                 </Border>

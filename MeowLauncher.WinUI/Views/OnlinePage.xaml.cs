@@ -538,6 +538,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         try
         {
             var snapshot = await App.Backend.GetSnapshotAsync(true);
+            foreach (var pack in snapshot?.Versions ?? [])
+                if (pack.PackProject.Length > 0) _installed.Add($"pack:{pack.PackSource}:{pack.PackProject}");
             var versionId = string.IsNullOrWhiteSpace(_installTo)
                 ? (snapshot?.Current?.Id ?? snapshot?.Selected ?? "")
                 : _installTo;
@@ -558,7 +560,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
     private bool IsInstalled(ModrinthProject project)
     {
-        if (project.IsModpack || _installed.Count == 0) return false;   // 整合包是新实例，当前实例的 Mod 列表说明不了它装没装
+        if (project.IsModpack) return _installed.Contains($"pack:{(SourceBox.SelectedIndex == 1 ? "curseforge" : "modrinth")}:{project.Id}");
+        if (_installed.Count == 0) return false;
         if (!string.IsNullOrWhiteSpace(project.Id) && _installed.Contains(project.Id)) return true;
         if (string.IsNullOrWhiteSpace(project.Slug)) return false;
         foreach (var installed in _installed)
@@ -568,6 +571,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
     private void MarkInstalled(ModrinthProject project)
     {
+        if (project.IsModpack) _installed.Add($"pack:{(SourceBox.SelectedIndex == 1 ? "curseforge" : "modrinth")}:{project.Id}");
         if (!project.IsModpack && !string.IsNullOrWhiteSpace(project.Id)) _installed.Add(project.Id);
         ApplyResults(SourceBox.SelectedIndex == 1 ? "CurseForge" : "Modrinth", _query);
     }
@@ -747,11 +751,11 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 }
             }
             task = TaskCenter.Add($"安装 {project.Title}",
-                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8");
+                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.For(current));
             ResultCount.Text = $"正在安装 {project.Title}…";
             var result = plan is not null
-                ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind, plan.Confirmation)
-                : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind);
+                ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind, plan.Confirmation, taskId: task.Id)
+                : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind, taskId: task.Id);
             if (result.Ok)
             {
                 TaskCenter.Complete(task, result.Message);
@@ -760,7 +764,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             }
             else
             {
-                TaskCenter.Fail(task, result.Message);
+                TaskCenter.Fail(task, result.Message, result.Failure);
                 ResultCount.Text = $"安装失败：{result.Message}";
             }
         }
@@ -779,19 +783,24 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     private async Task InstallModpackAsync(ModrinthProject project, string source, string sourceName, Button button)
     {
         button.IsEnabled = false;
-        var task = TaskCenter.Add($"安装整合包 {project.Title}", $"{sourceName} · 新实例", PageTagFor(project), "\uE8F1");
+        var task = TaskCenter.Add($"安装整合包 {project.Title}", $"{sourceName} · 新实例", PageTagFor(project),
+            "\uE8F1", InstanceIcon.ForLoader(null));
+        task.ResourceKey = $"pack:{source}:{project.Id}";
         ResultCount.Text = $"正在安装整合包 {project.Title}…";
         try
         {
-            var result = await App.Backend.InstallOnlineAsync(source, project.Id, "", "modpack");
+            var progress = new Progress<string>(stage => TaskCenter.Report(task, stage));
+            var result = await App.Backend.InstallOnlineAsync(source, project.Id, "", "modpack", progress, task.Id);
             if (result.Ok)
             {
+                task.TargetIcon = InstanceIcon.ForInstalledPack(result);
                 TaskCenter.Complete(task, result.Message);
+                MarkInstalled(project);
                 ResultCount.Text = $"{sourceName} · {result.Message}";
             }
             else
             {
-                TaskCenter.Fail(task, result.Message);
+                TaskCenter.Fail(task, result.Message, result.Failure);
                 ResultCount.Text = $"安装失败：{result.Message}";
             }
         }

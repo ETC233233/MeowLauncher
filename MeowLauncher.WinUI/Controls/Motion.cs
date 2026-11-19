@@ -16,8 +16,65 @@ public static class Motion
     /// <summary>系统「显示动画」关掉时，所有进场动画直接跳过（元素保持最终状态）。</summary>
     public static bool Enabled => Ui.AnimationsEnabled;
 
+    public static NavigationTransitionInfo PageRefresh() => Enabled
+        ? new EntranceNavigationTransitionInfo() : new SuppressNavigationTransitionInfo();
+
+    public static NavigationTransitionInfo Sibling(bool fromRight) => Enabled
+        ? new SlideNavigationTransitionInfo { Effect = fromRight ? SlideNavigationTransitionEffect.FromRight : SlideNavigationTransitionEffect.FromLeft }
+        : new SuppressNavigationTransitionInfo();
+
+    public static void AttachVisibility(FrameworkElement element, bool active = true)
+    {
+        if (!Enabled || !active)
+        {
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetImplicitShowAnimation(element, null);
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetImplicitHideAnimation(element, null);
+            var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);
+            visual.StopAnimation("Opacity");
+            visual.StopAnimation("Translation");
+            visual.Opacity = 1;
+            visual.Properties.InsertVector3("Translation", System.Numerics.Vector3.Zero);
+            return;
+        }
+        Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+        var compositor = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element).Compositor;
+        var show = compositor.CreateScalarKeyFrameAnimation();
+        show.Target = "Opacity";
+        show.InsertKeyFrame(0, 0); show.InsertKeyFrame(1, 1);
+        show.Duration = TimeSpan.FromMilliseconds(83);
+        var move = compositor.CreateVector3KeyFrameAnimation();
+        move.Target = "Translation";
+        move.InsertKeyFrame(0, new System.Numerics.Vector3(0, 8, 0));
+        move.InsertKeyFrame(1, System.Numerics.Vector3.Zero,
+            compositor.CreateCubicBezierEasingFunction(new System.Numerics.Vector2(0, 0), new System.Numerics.Vector2(0, 1)));
+        move.Duration = TimeSpan.FromMilliseconds(167);
+        var showGroup = compositor.CreateAnimationGroup(); showGroup.Add(show); showGroup.Add(move);
+        var hide = compositor.CreateScalarKeyFrameAnimation();
+        hide.Target = "Opacity";
+        hide.InsertKeyFrame(0, 1); hide.InsertKeyFrame(1, 0);
+        hide.Duration = TimeSpan.FromMilliseconds(83);
+        var hideGroup = compositor.CreateAnimationGroup(); hideGroup.Add(hide);
+        Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetImplicitShowAnimation(element, showGroup);
+        Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetImplicitHideAnimation(element, hideGroup);
+    }
+
+    public static void AttachLayout(DependencyObject root, bool active = true)
+    {
+        // Walk the declared content rather than the ScrollViewer template:
+        // collapsed settings and their neighbouring rows must be wired too.
+        if (root is Microsoft.UI.Xaml.Controls.Panel panel)
+        {
+            panel.ChildrenTransitions = Enabled && active ? new TransitionCollection { new RepositionThemeTransition { IsStaggeringEnabled = false } } : new TransitionCollection();
+            foreach (var child in panel.Children) AttachLayout(child, active);
+        }
+        else if (root is Microsoft.UI.Xaml.Controls.Border border && border.Child is { } child)
+            AttachLayout(child, active);
+        else if (root is Microsoft.UI.Xaml.Controls.ScrollViewer scroll && scroll.Content is DependencyObject content)
+            AttachLayout(content, active);
+    }
+
     /// <summary>淡入 + 上移归位。delayMs 用来做 30–40ms 的错峰，不要超过 6 个元素。</summary>
-    public static void Enter(FrameworkElement element, double delayMs = 0, double fromY = 14, int durationMs = 260)
+    public static void Enter(FrameworkElement element, double delayMs = 0, double fromY = 14, int durationMs = 260, Action<Storyboard>? onCreated = null)
     {
         if (element is null || !Enabled) return;
         var slide = element.RenderTransform as TranslateTransform;
@@ -56,6 +113,7 @@ public static class Motion
 
         storyboard.Children.Add(fade);
         storyboard.Children.Add(move);
+        onCreated?.Invoke(storyboard);
         storyboard.Begin();
     }
 
@@ -99,6 +157,7 @@ public static class Motion
             slide = new TranslateTransform();
             element.RenderTransform = slide;
         }
+        if (!Enabled) { slide.X = to; return; }
 
         var animation = new DoubleAnimation
         {
@@ -117,7 +176,7 @@ public static class Motion
     /// <summary>整圈旋转，用于刷新按钮点下去那一下。</summary>
     public static void Spin(FrameworkElement element, int durationMs = 620)
     {
-        if (element is null) return;
+        if (element is null || !Enabled) return;
         var rotate = element.RenderTransform as RotateTransform;
         if (rotate is null)
         {

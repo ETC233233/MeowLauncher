@@ -84,3 +84,19 @@ docs/
 
 # 本地协作说明，不进仓库
 AGENTS.md
+
+# ===== 推送前补充（2026-11-18）=====
+_export/
+_setuptmp*/
+MeowLauncher/
+_screenshots/
+_preview/
+_rtver.ps1
+_ui10.ps1
+_ui*.ps1
+
+# Bundled Minecraft default skins used by offline account and OOBE previews
+!MeowLauncher.WinUI/Assets/skinviewer/demo/
+!MeowLauncher.WinUI/Assets/skinviewer/demo/default_classic.png
+!MeowLauncher.WinUI/Assets/skinviewer/demo/default_slim.png
+!MeowLauncher.WinUI/Assets/skinviewer/demo/SOURCES.md

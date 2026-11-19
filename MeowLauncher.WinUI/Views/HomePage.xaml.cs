@@ -1,4 +1,4 @@
-using Microsoft.UI.Dispatching;
+﻿using Microsoft.UI.Dispatching;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -580,18 +580,22 @@ public sealed partial class HomePage : Page
     /// → 最近一张游戏截图（文件夹里有图就先用上） → 内置品牌图。
     /// sidecar 的时间窗只用来挑“本次游玩”的截图；没有命中的实例仍要有一张真截图可看。
     /// </summary>
-    private static ImageSource? ResolveContinueCover(Snapshot snapshot, VersionInfo? version)
+    private ImageSource? ResolveContinueCover(Snapshot snapshot, VersionInfo? version)
     {
         var prefs = App.MainWindow?.Preferences;
         string? custom = null;
         if (version is not null && prefs?.HomeCovers is { } covers)
         {
-            if (!covers.TryGetValue(version.Id, out custom))
+            if (!covers.TryGetValue(InstanceSelection.Key(version.Root, version.Id), out custom)
+                && !covers.TryGetValue(version.Id, out custom))
             {
                 custom = covers.FirstOrDefault(kv =>
                     string.Equals(kv.Key, version.Id, StringComparison.OrdinalIgnoreCase)).Value;
             }
         }
+        var mode = version is null ? "default" : prefs?.HomeCoverModes.GetValueOrDefault(
+            InstanceSelection.Key(version.Root, version.Id), string.IsNullOrEmpty(custom) ? "default" : "custom") ?? "default";
+        if (mode != "custom") custom = null;
         if (!string.IsNullOrWhiteSpace(custom) && File.Exists(custom))
         {
             var customImage = LoadImage(custom);
@@ -599,13 +603,10 @@ public sealed partial class HomePage : Page
         }
 
         var picked = "";
-        if (version is not null && snapshot.Shots?.Covers is { } autoCovers
-            && autoCovers.TryGetValue(version.Id, out var shotPath))
-        {
-            picked = shotPath;
-        }
-        if (string.IsNullOrWhiteSpace(picked))
-            picked = snapshot.Shots?.Latest ?? "";
+        if (mode == "latest" && version is not null && _instanceShots is { } shots
+            && string.Equals(shots.Version, version.Id, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_instanceShotsRoot, version.Root, StringComparison.OrdinalIgnoreCase))
+            picked = shots.Latest;
         if (!string.IsNullOrWhiteSpace(picked) && File.Exists(picked))
         {
             var shot = LoadImage(picked);
@@ -624,7 +625,7 @@ public sealed partial class HomePage : Page
         var resolved = InstanceSelection.Resolve(snapshot, App.MainWindow?.Preferences);
         _continueSelectedId = resolved?.Id ?? "";
 
-        var current = versions.FirstOrDefault(v => v.Id == _continueSelectedId) ?? snapshot.Current;
+        var current = resolved ?? snapshot.Current;
         var cover = ResolveContinueCover(snapshot, current);
         ContinueCover.Source = cover;
         if (current is null)
@@ -725,7 +726,7 @@ public sealed partial class HomePage : Page
 
     private Border BuildRecentInstanceCard(VersionInfo? version, int metaMode, double itemHeight)
     {
-        var isCurrent = version is not null && version.Id == _continueSelectedId;
+        var isCurrent = InstanceSelection.Same(version, InstanceSelection.Resolve(_snapshot, App.MainWindow?.Preferences));
 
         // Win11 资源管理器「最近使用」样式：无卡片、无彩色装饰，图标 + 两行文本，悬停才出浅底。
         var card = new Border
@@ -782,7 +783,6 @@ public sealed partial class HomePage : Page
         var meta = "—";
         if (version is not null)
         {
-            // 版本信息一行：类型 + 游戏版本 + 加载器版本（不再报 Mod 数量）。
             meta = metaMode switch
             {
                 2 or 1 => $"{version.VersionLine} · {version.AgoText}",
@@ -803,7 +803,7 @@ public sealed partial class HomePage : Page
             AutomationProperties.SetName(card, $"最近实例 {version.Id}");
             AutomationProperties.SetHelpText(card, "单击切换当前实例，双击切换并启动");
             ToolTipService.SetToolTip(card, "单击切换当前实例 · 双击切换并启动");
-            card.Tag = version.Id;
+            card.Tag = version;
             card.Tapped += RecentInstanceCard_Tapped;
             card.DoubleTapped += RecentInstanceCard_DoubleTapped;
         }
@@ -815,22 +815,23 @@ public sealed partial class HomePage : Page
 
     private void RecentInstanceCard_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        if (sender is not Border { Tag: string id }) return;
-        SelectContinueInstance(id);
+        if (sender is not Border { Tag: VersionInfo version }) return;
+        SelectContinueInstance(version.Id, version.Root);
     }
 
     private void RecentInstanceCard_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (sender is not Border { Tag: string id }) return;
-        SelectContinueInstance(id);
-        LaunchContinue(id);
+        if (sender is not Border { Tag: VersionInfo version }) return;
+        SelectContinueInstance(version.Id, version.Root);
+        LaunchContinue(version.Id, version.Root);
     }
 
-    private async void SelectContinueInstance(string id)
+    private async void SelectContinueInstance(string id, string root = "")
     {
-        if (_continueSelectedId == id) return;
         var version = _snapshot?.Versions.FirstOrDefault(v =>
-            string.Equals(v.Id, id, StringComparison.OrdinalIgnoreCase));
+            string.Equals(v.Id, id, StringComparison.OrdinalIgnoreCase)
+            && (root.Length == 0 || string.Equals(v.Root, root, StringComparison.OrdinalIgnoreCase)));
+        if (InstanceSelection.Same(version, _snapshot?.Current)) return;
         if (version is null) return;
         try
         {
@@ -870,7 +871,7 @@ public sealed partial class HomePage : Page
     private async void ContinueLaunch_Click(object sender, RoutedEventArgs e)
     {
         if (_launching) return;
-        if (GameSessions.IsRunning(_continueSelectedId))
+        if (GameSessions.IsRunning(_continueSelectedId, _snapshot?.Current?.Root ?? ""))
         {
             await StopGameAsync(_continueSelectedId);
             return;
@@ -884,24 +885,31 @@ public sealed partial class HomePage : Page
         DispatcherQueue.TryEnqueue(() =>
         {
             ApplyContinueLaunchState(_continueSelectedId);
-            if (_launchOverlayVersion.Length > 0 && GameSessions.IsRunning(_launchOverlayVersion))
-                HideLaunchOverlay();
         });
     }
 
     /// <summary>首页大卡按钮在「启动」和「结束游戏」之间切换。</summary>
     private void ApplyContinueLaunchState(string versionId)
     {
-        var running = GameSessions.IsRunning(versionId);
-        ContinueLaunchText.Text = running ? "结束游戏" : "启动";
-        ContinueLaunchIcon.Glyph = running ? "\uE71A" : "\uE768";
+        var running = GameSessions.IsRunning(versionId, _snapshot?.Current?.Root ?? "");
+        ContinueLaunchText.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+        ContinueStopText.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        ContinueLaunchIcon.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+        ContinueStopIcon.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        ContinueLaunchButton.Style = (Style)Resources[running ? "StopGameButtonStyle" : "ContinueLaunchButtonStyle"];
+        ContinueSwitchButton.Style = ContinueLaunchButton.Style;
         AutomationProperties.SetName(ContinueLaunchButton, running ? "结束当前实例的游戏" : "启动当前实例");
     }
 
     private void ShowLaunchOverlay(string versionId, string stage)
     {
+        _launchOverlayRevision++;
         _launchOverlayVersion = versionId;
         LaunchOverlayName.Text = versionId;
+        LaunchCinemaCover.Source = ContinueCover.Source;
+        var selected = _snapshot?.Current;
+        LaunchCinemaIcon.Source = InstanceIcon.For(selected);
+        LaunchOverlayTitle.Text = "正在准备游戏";
         LaunchOverlayStage.Text = stage;
         LaunchOverlay.Visibility = Visibility.Visible;
         LaunchOverlay.Opacity = 0;
@@ -920,18 +928,54 @@ public sealed partial class HomePage : Page
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
         story.Children.Add(fade);
         story.Begin();
+        LaunchOverlay.UpdateLayout();
+        try
+        {
+            var origin = ContinueTextStack.TransformToVisual(LaunchCinemaHeading).TransformPoint(new Windows.Foundation.Point());
+            var motion = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+            foreach (var (property, from) in new[] { ("X", origin.X), ("Y", origin.Y) })
+            {
+                var move = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+                {
+                    From = from, To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(520)),
+                    EasingFunction = new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut },
+                    EnableDependentAnimation = true,
+                };
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(move, LaunchTitleTransform);
+                Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(move, property);
+                motion.Children.Add(move);
+            }
+            if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) motion.Begin();
+            else { LaunchTitleTransform.X = 0; LaunchTitleTransform.Y = 0; }
+        }
+        catch { LaunchTitleTransform.X = 0; LaunchTitleTransform.Y = 0; }
     }
 
-    private void HideLaunchOverlay()
+    private int _launchOverlayRevision;
+    private async void HideLaunchOverlay()
     {
+        var revision = ++_launchOverlayRevision;
         _launchOverlayVersion = "";
+        var fade = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+        var animation = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(220)),
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(animation, LaunchOverlay);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(animation, "Opacity");
+        fade.Children.Add(animation);
+        fade.Begin();
+        await Task.Delay(230);
+        if (revision != _launchOverlayRevision) return;
         LaunchOverlay.Visibility = Visibility.Collapsed;
         LaunchOverlayRing.IsActive = false;
     }
 
     private void SetLaunchStage(string stage)
     {
-        if (LaunchOverlay.Visibility == Visibility.Visible) LaunchOverlayStage.Text = stage;
+        if (LaunchOverlay.Visibility != Visibility.Visible || stage.StartsWith('@')) return;
+        var split = stage.IndexOf('|');
+        LaunchOverlayStage.Text = split >= 0 ? stage[(split + 1)..] : stage;
     }
 
     /// <summary>启动后等游戏进程真正出现在运行台账里，最多等 14 秒。</summary>
@@ -940,17 +984,25 @@ public sealed partial class HomePage : Page
         SetLaunchStage("游戏进程已启动，正在进入游戏…");
         for (var i = 0; i < 20; i++)
         {
-            if (GameSessions.IsRunning(versionId)) break;
-            await Task.Delay(700);
             await GameSessions.RefreshAsync();
-            if (GameSessions.IsRunning(versionId)) break;
+            var game = GameSessions.Find(versionId, _snapshot?.Current?.Root ?? "");
+            if (game?.Pid > 0)
+            {
+                try
+                {
+                    using var process = System.Diagnostics.Process.GetProcessById(game.Pid);
+                    if (process.HasExited || process.MainWindowHandle != IntPtr.Zero) break;
+                }
+                catch (ArgumentException) { break; }
+            }
+            await Task.Delay(700);
         }
         HideLaunchOverlay();
     }
 
     private async Task StopGameAsync(string versionId)
     {
-        var row = GameSessions.Find(versionId);
+        var row = GameSessions.Find(versionId, _snapshot?.Current?.Root ?? "");
         var result = await App.Backend.StopGameAsync(row?.Pid ?? 0, versionId);
         ShowToast(result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error,
             result.Ok ? "已结束游戏" : "结束失败", result.Message);
@@ -959,21 +1011,42 @@ public sealed partial class HomePage : Page
         if (_snapshot is not null) _ = RefreshAsync(true);
     }
 
-    private async void LaunchContinue(string versionId)
+    public async Task<bool> StartInstanceAsync(VersionInfo target)
+    {
+        if (_launching) return false;
+        _snapshot ??= await App.Backend.GetSnapshotAsync();
+        if (_snapshot is not null)
+        {
+            _snapshot.Current = target;
+            ApplyContinueSnapshot(_snapshot);
+        }
+        LaunchContinue(target.Id, target.Root);
+        return true;
+    }
+
+    private async void LaunchContinue(string versionId, string targetRoot = "")
     {
         if (string.IsNullOrWhiteSpace(versionId) || _launching) return;
-        if (GameSessions.IsRunning(versionId))
+        var version = InstanceSelection.Resolve(_snapshot, App.MainWindow?.Preferences);
+        if (version?.Id != versionId || (targetRoot.Length > 0 && !string.Equals(version?.Root, targetRoot, StringComparison.OrdinalIgnoreCase)))
+            version = _snapshot?.Versions.FirstOrDefault(v =>
+                string.Equals(v.Id, versionId, StringComparison.OrdinalIgnoreCase)
+                && (targetRoot.Length == 0 || string.Equals(v.Root, targetRoot, StringComparison.OrdinalIgnoreCase)));
+        var root = version?.Root ?? "";
+        if (GameSessions.IsRunning(versionId, root))
         {
             ShowToast(InfoBarSeverity.Informational, "已经在运行", $"{versionId} 的游戏进程还开着。");
             return;
         }
-        var version = _snapshot?.Versions.FirstOrDefault(v =>
-            string.Equals(v.Id, versionId, StringComparison.OrdinalIgnoreCase));
-        var root = version?.Root ?? "";
+        var task = TaskCenter.Add($"启动 {versionId}", "正在检查实例文件", "home", targetIcon: InstanceIcon.For(version));
+        var progress = new Progress<string>(stage =>
+        {
+            SetLaunchStage(stage);
+            TaskCenter.SetStage(task, stage);
+        });
         _launching = true;
         SetLaunchEnabled(false);
         ShowLaunchOverlay(versionId, "正在切换实例…");
-        ShowToast(InfoBarSeverity.Informational, "启动", $"正在启动 {versionId}…");
         try
         {
             // 首页直接点启动时也要把 selected 落到这个实例，否则版本页的「当前」
@@ -983,37 +1056,47 @@ public sealed partial class HomePage : Page
                 var (switched, switchMessage) = await InstanceSelection.SelectAsync(version);
                 if (!switched)
                 {
+                    TaskCenter.Fail(task, switchMessage);
                     ShowToast(InfoBarSeverity.Warning, "切换失败", switchMessage);
                     return;
                 }
             }
 
-            if (!await VersionHealth.EnsureReadyAsync(versionId, XamlRoot))
+            if (!await VersionHealth.EnsureReadyAsync(versionId, XamlRoot, version?.Root ?? "", progress, task.Id))
             {
-                ShowToast(InfoBarSeverity.Informational, "已取消启动", "文件不完整，先补全再启动。");
+                if (TaskCenter.IsCancelled(task.Id)) return;
+                TaskCenter.Fail(task, "实例文件自动补全未完成。");
+                ShowToast(InfoBarSeverity.Error, "启动未完成", "实例文件自动补全未完成。");
                 return;
             }
 
-            var progress = new Progress<string>(stage =>
-                DispatcherQueue.TryEnqueue(() => SetLaunchStage(stage)));
-            var result = await App.Backend.LaunchAsync(versionId, progress, root: root);
+            if (TaskCenter.IsCancelled(task.Id)) return;
+            var result = await App.Backend.LaunchAsync(versionId, progress, root: root, taskId: task.Id);
+            if (TaskCenter.IsCancelled(task.Id)) return;
             if (result.Ok)
             {
+                TaskCenter.SetStage(task, "运行中");
+                LaunchWatcher.Track(versionId, task, 0, root);
+                RefreshRequested?.Invoke(this, EventArgs.Empty);
                 await WaitForLaunchOverlayAsync(versionId);
+                if (string.Equals(App.MainWindow?.Preferences.AfterLaunch, "minimize", StringComparison.OrdinalIgnoreCase))
+                    App.MainWindow?.MinimizeForGame();
             }
             else if (!string.IsNullOrWhiteSpace(result.Message))
             {
+                TaskCenter.Fail(task, result.Message, result.Failure);
                 ShowToast(InfoBarSeverity.Error, "启动失败", result.Message);
             }
             _ = GameSessions.RefreshAsync();
         }
         catch (Exception ex)
         {
+            TaskCenter.Fail(task, ex.Message);
             ShowToast(InfoBarSeverity.Error, "启动失败", Diagnostics.FriendlyMessage(ex));
         }
         finally
         {
-            if (!GameSessions.IsRunning(versionId)) HideLaunchOverlay();
+            HideLaunchOverlay();
             _launching = false;
             SetLaunchEnabled(true);
         }
@@ -2074,7 +2157,7 @@ public sealed partial class HomePage : Page
         _busy = true;
         RefreshButton.IsEnabled = false;
         var firstLoad = _snapshot is null;              // 已有数据时（手动刷新）不盖遮罩，只有首次读取才盖
-        if (firstLoad) HomeLoading.Visibility = Visibility.Visible;
+        if (firstLoad) { HomeLoading.Visibility = Visibility.Visible; HomeLoadingRing.IsActive = true; }
         try
         {
             var snapshot = await App.Backend.GetSnapshotAsync(force);
@@ -2101,6 +2184,7 @@ public sealed partial class HomePage : Page
         finally
         {
             HomeLoading.Visibility = Visibility.Collapsed;
+            HomeLoadingRing.IsActive = false;
             RefreshButton.IsEnabled = true;
             _busy = false;
         }
@@ -2178,7 +2262,7 @@ public sealed partial class HomePage : Page
 
         ApplyShotsVisibility();
         // 快照里的截图是全局目录的；隔离实例的截图在实例目录里，再按当前实例补一次。
-        RefreshInstanceShots(current?.Id ?? "");
+        RefreshInstanceShots(current?.Id ?? "", current?.Root ?? "");
         ApplyProfile(snapshot);
         ApplyRecent(snapshot);
         BuildPinnedSection();
@@ -2238,10 +2322,12 @@ public sealed partial class HomePage : Page
     private DateTime _instanceShotsAt;
     private int _instanceShotsRequest;
 
-    private async void RefreshInstanceShots(string versionId)
+    private string _instanceShotsRoot = "";
+    private async void RefreshInstanceShots(string versionId, string root)
     {
         if (string.IsNullOrWhiteSpace(versionId)) return;
         if (_instanceShots is not null
+            && string.Equals(_instanceShotsRoot, root, StringComparison.OrdinalIgnoreCase)
             && string.Equals(_instanceShots.Version, versionId, StringComparison.OrdinalIgnoreCase)
             && DateTime.UtcNow - _instanceShotsAt < TimeSpan.FromSeconds(30))
         {
@@ -2251,9 +2337,10 @@ public sealed partial class HomePage : Page
         var request = ++_instanceShotsRequest;
         try
         {
-            var result = await App.Backend.GetShotsAsync(versionId);
+            var result = await App.Backend.GetShotsAsync(versionId, root);
             if (request != _instanceShotsRequest || result is not { Ok: true }) return;
             _instanceShots = result;
+            _instanceShotsRoot = root;
             _instanceShotsAt = DateTime.UtcNow;
             ApplyInstanceShots(result);
         }
@@ -2268,6 +2355,14 @@ public sealed partial class HomePage : Page
         _shotsCount = result.Count;
         SetShotImages(result.Files ?? new List<string>());
         ApplyShotsVisibility();
+        if (_snapshot?.Current is { } current && result.Version.Equals(current.Id, StringComparison.OrdinalIgnoreCase)
+            && _instanceShotsRoot.Equals(current.Root, StringComparison.OrdinalIgnoreCase))
+        {
+            var cover = ResolveContinueCover(_snapshot, current);
+            ContinueCover.Source = cover;
+            if (cover is not null) { InstanceCover2.Source = cover; InstanceCover4.Source = cover; }
+        }
+
     }
     /// <summary>截图墙三档共用：1×1 首图铺满、2×1 四张缩略、2×2 3×2 六格。</summary>
     private void SetShotImages(List<string> files)
@@ -2661,8 +2756,10 @@ public sealed partial class HomePage : Page
         PinnedList.Children.Clear();
         if (PinnedCardList is not null) PinnedCardList.Children.Clear();
 
-        var pinned = ReadPinned();
         var all = _snapshot?.Versions ?? new List<VersionInfo>();
+        var hidden = (_snapshot?.HiddenVersionIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pinned = ReadPinned().Where(id => !hidden.Contains(id) || all.Any(v => !v.Hidden
+            && string.Equals(v.Id, id, StringComparison.OrdinalIgnoreCase))).ToList();
         var shown = 0;
 
         foreach (var id in pinned)
@@ -2838,47 +2935,10 @@ public sealed partial class HomePage : Page
         NavigateRequested?.Invoke(this, "versions");
     }
 
-    private async void PinnedLaunch_Click(object sender, RoutedEventArgs e)
+    private void PinnedLaunch_Click(object sender, RoutedEventArgs e)
     {
-        if (_editMode || _launching) return;
-        if (sender is not Button btn || btn.Tag is not string id) return;
-        if (GameSessions.IsRunning(id))
-        {
-            await StopGameAsync(id);
-            return;
-        }
-
-        SetInstanceSub("正在检查文件…");
-        if (!await VersionHealth.EnsureReadyAsync(id, XamlRoot))
-        {
-            SetInstanceSub("已取消启动");
-            return;
-        }
-
-        _launching = true;
-        SetLaunchEnabled(false);
-        ShowLaunchOverlay(id, "正在准备启动…");
-        try
-        {
-            var progress = new Progress<string>(stage =>
-                DispatcherQueue.TryEnqueue(() => SetLaunchStage(stage)));
-            var result = await App.Backend.LaunchAsync(id, progress);
-            if (result.Ok)
-            {
-                await WaitForLaunchOverlayAsync(id);
-            }
-            else
-            {
-                SetInstanceSub(result.Message ?? "启动失败");
-            }
-            _ = GameSessions.RefreshAsync();
-        }
-        finally
-        {
-            if (!GameSessions.IsRunning(id)) HideLaunchOverlay();
-            _launching = false;
-            SetLaunchEnabled(true);
-        }
+        if (_editMode || _launching || sender is not Button { Tag: string id }) return;
+        LaunchContinue(id);
     }
 
     // ---------- 启动 ----------
@@ -2906,90 +2966,17 @@ public sealed partial class HomePage : Page
     public void DebugLaunch() => _ = LaunchCurrentAsync();
 #endif
 
-    private async Task LaunchCurrentAsync()
+    private Task LaunchCurrentAsync()
     {
-        if (_editMode || _launching || _snapshot?.Current is null) return;
-        var current = _snapshot!.Current!;
-        if (GameSessions.IsRunning(current.Id))
-        {
-            await StopGameAsync(current.Id);
-            return;
-        }
-
-        SetInstanceSub("正在检查文件…");
-        if (!await VersionHealth.EnsureReadyAsync(current.Id, XamlRoot))
-        {
-            SetInstanceSub("已取消启动");
-            return;
-        }
-
-        _launching = true;
-        SetLaunchEnabled(false);
-
-        SetInstanceSub("正在准备资源并启动…");
-        TaskPercentText.Text = "启动中";
-        TaskProgress.Visibility = Visibility.Visible;
-        TaskProgress.IsIndeterminate = true;
-        TaskSub.Visibility = Visibility.Visible;
-        TaskSub.Text = "正在准备资源与 Java";
-
-        var task = TaskCenter.Add($"启动 {current.Id}", "正在准备资源与 Java", "home");
-        var stageProgress = new Progress<string>(stage =>
-        {
-            SetInstanceSub(stage);
-            TaskSub.Text = stage;
-            TaskCenter.SetStage(task, stage);
-        });
-
-        try
-        {
-            var result = await App.Backend.LaunchAsync(current.Id, stageProgress);
-            if (result.Ok)
-            {
-                TaskCenter.SetStage(task, "运行中");
-                Services.LaunchWatcher.Track(current.Id, task, 0, current.Root);
-                if (string.Equals(App.MainWindow?.Preferences.AfterLaunch, "minimize", StringComparison.OrdinalIgnoreCase))
-                {
-                    _ = Task.Delay(900).ContinueWith(_ => App.MainWindow?.DispatcherQueue.TryEnqueue(
-                        () => App.MainWindow?.MinimizeForGame()));
-                }
-                ShowToast(InfoBarSeverity.Success, "启动成功", result.Message);
-                _ = GameSessions.RefreshAsync();
-                TaskSub.Text = "启动请求已发送，游戏进程正在启动。";
-                await Task.Delay(500);
-                await RefreshAsync(true);
-                RefreshRequested?.Invoke(this, EventArgs.Empty);
-            }
-            else
-            {
-                TaskCenter.Fail(task, result.Message);
-                TaskPercentText.Text = "启动失败";
-                TaskProgress.IsIndeterminate = false;
-                TaskProgress.Visibility = Visibility.Collapsed;
-                ShowLaunchFailure(result.Message, current.Id);
-            }
-        }
-        catch (Exception ex)
-        {
-            TaskCenter.Fail(task, ex.Message);
-            TaskPercentText.Text = "启动失败";
-            TaskProgress.IsIndeterminate = false;
-            TaskProgress.Visibility = Visibility.Collapsed;
-            ShowLaunchFailure(ex.Message, current.Id);
-        }
-        finally
-        {
-            _launching = false;
-            SetLaunchEnabled(true);
-        }
+        if (!_editMode && !_launching && _snapshot?.Current is { } current)
+            LaunchContinue(current.Id, current.Root);
+        return Task.CompletedTask;
     }
 
-    private void ShowLaunchFailure(string message, string versionId)
+    private void ShowLaunchFailure(string message, string versionId, FailureInfo failure)
     {
-        var code = Diagnostics.ErrorCodeFor(message);
-        var stage = TaskSub.Text;
-        ShowToast(InfoBarSeverity.Error, $"启动失败 · {code}", message, "复制诊断",
-            () => Diagnostics.Copy(Diagnostics.BuildReport(code, "启动游戏", message, versionId, stage)), 20);
+        ShowToast(InfoBarSeverity.Error, $"启动失败 · {failure.Code}", message, "复制诊断",
+            () => Diagnostics.Copy(Diagnostics.BuildReport(failure, "启动游戏", message, versionId)), 20);
     }
 
     // ---------- 系统媒体 ----------
@@ -3283,7 +3270,7 @@ public sealed partial class HomePage : Page
     {
         if (_editMode) return;
         var gameDir = _snapshot?.GameDir;
-        var shotDir = string.IsNullOrEmpty(gameDir) ? "" : Path.Combine(gameDir, "screenshots");
+        var shotDir = _instanceShots?.Dir ?? (string.IsNullOrEmpty(gameDir) ? "" : Path.Combine(gameDir, "screenshots"));
         if (string.IsNullOrEmpty(shotDir) || !Directory.Exists(shotDir))
         {
             ShowToast(InfoBarSeverity.Warning, "还没有截图", "游戏里按 F2 截图后会出现在这里。");

@@ -25,17 +25,18 @@ public static class GameSessions
         }
     }
 
-    public static RunningGame? Find(string versionId)
+    public static RunningGame? Find(string versionId, string root = "")
     {
         if (string.IsNullOrWhiteSpace(versionId)) return null;
         lock (Gate)
         {
             return _running.FirstOrDefault(row =>
-                string.Equals(row.Version, versionId, StringComparison.OrdinalIgnoreCase));
+                string.Equals(row.Version, versionId, StringComparison.OrdinalIgnoreCase)
+                && (root.Length == 0 || row.Root.Length == 0 || string.Equals(GameDirectoryResolver.Normalize(row.Root), GameDirectoryResolver.Normalize(root), StringComparison.OrdinalIgnoreCase)));
         }
     }
 
-    public static bool IsRunning(string versionId) => Find(versionId) is not null;
+    public static bool IsRunning(string versionId, string root = "") => Find(versionId, root) is not null;
 
     public static void Initialize(DispatcherQueue queue)
     {

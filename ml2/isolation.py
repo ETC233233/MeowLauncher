@@ -62,3 +62,58 @@ def resourcepacks_dir_for(mc_dir: Path | str, vid: str) -> Path:
 
 def saves_dir_for(mc_dir: Path | str, vid: str) -> Path:
     return run_dir_for(mc_dir, vid) / "saves"
+
+
+def migrate_content(mc_dir: Path, vid: str, was_isolated: bool, isolated: bool) -> None:
+    """Preflight collisions, move game data, roll back moves on error. Never overwrite files.
+
+    When disabling isolation, per-instance options/config stay in the version directory.
+    """
+    import shutil
+    import hashlib
+    root = Path(mc_dir).resolve()
+    instance = (root / "versions" / vid).resolve()
+    if instance.parent != root / "versions":
+        raise ValueError("无效的实例路径")
+    source, target = (instance, root) if was_isolated else (root, instance)
+    names = ["saves", "mods", "resourcepacks", "shaderpacks", "screenshots"]
+    if isolated:
+        names += ["config", "options.txt", "optionsof.txt", "servers.dat"]
+    plan = []
+    created_entries = [target / name for name in names if not (target / name).exists()]
+    for name in names:
+        entry = source / name
+        if entry.is_symlink():
+            raise ValueError(f"请先处理链接目录：{entry}")
+        files = entry.rglob("*") if entry.is_dir() else [entry]
+        for file in files:
+            if file.is_symlink():
+                raise ValueError(f"请先处理链接文件：{file}")
+            if not file.is_file():
+                continue
+            dest = target / file.relative_to(source)
+            if dest.exists():
+                if dest.is_file() and file.stat().st_size == dest.stat().st_size:
+                    with file.open("rb") as a, dest.open("rb") as b:
+                        if hashlib.file_digest(a, "sha256").digest() == hashlib.file_digest(b, "sha256").digest():
+                            continue
+                raise FileExistsError(f"目标目录已有不同内容，未覆盖：{dest}")
+            plan.append((file, dest))
+    moved = []
+    try:
+        for file, dest in plan:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(file), str(dest))
+            moved.append((file, dest))
+    except Exception:
+        for file, dest in reversed(moved):
+            file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(dest), str(file))
+        # Empty probe directories must not make a failed operation look isolated on the next scan.
+        import uuid
+        archive = root / ".meow-archive" / "isolation-rollback" / uuid.uuid4().hex
+        for entry in created_entries:
+            if entry.is_dir() and not any(p.is_file() for p in entry.rglob("*")):
+                archive.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(entry), str(archive / entry.name))
+        raise

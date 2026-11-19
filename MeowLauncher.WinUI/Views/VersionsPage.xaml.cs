@@ -1,11 +1,11 @@
-using System.ComponentModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
+using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
@@ -39,14 +39,12 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     // 多目录：_dirs 是列表顺序（第一个是主目录），_versionsByDir 是每个目录扫到的实例。
     private readonly List<string> _dirs = [];
     private readonly Dictionary<string, List<VersionInfo>> _versionsByDir = new(StringComparer.OrdinalIgnoreCase);
-    private readonly CollectionViewSource _groupsView = new() { IsSourceGrouped = true };
     private readonly List<VersionGroup> _groups = [];
     private readonly HashSet<string> _collapsedDirs = new(StringComparer.OrdinalIgnoreCase);
     private string _primaryDir = "";
     private bool _suppressDirChange;
+    private bool _changingDefaultDir;
 
-    /// <summary>按目录分组后的列表源（组头 + 行都由 x:Bind 直接取）。</summary>
-    public CollectionViewSource GroupsView => _groupsView;
     private VersionInfo? _selected;
     private ListState _listState = ListState.Loading;
     private bool _loading;
@@ -56,6 +54,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private bool _settingsDirty;
     private double _loadedMemory = 4096;
     private bool _loadedMemAuto;
+    private bool _loadedJvmAuto = true;
     private int? _globalMemoryMb;
     private bool _globalMemAuto;
     private bool _instanceSettingsReady;
@@ -128,6 +127,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             var resolved = GameDirectoryResolver.Resolve(App.MainWindow?.Preferences);
             _dirs.Clear();
             _dirs.AddRange(resolved);
+            _primaryDir = _dirs.FirstOrDefault() ?? "";
             SyncDirBox();
 
             if (_dirs.Count == 0)
@@ -136,13 +136,9 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                 _versionsByDir.Clear();
                 _all = [];
                 _snapshot = null;
-                GameDirText.Text = "还没有配置游戏目录";
                 ApplyFilter(keepSelection: false);
                 return;
             }
-
-            if (!_dirs.Any(d => IsSameDir(d, _primaryDir))) _primaryDir = _dirs[0];
-            GameDirText.Text = _primaryDir;
 
             var snapshotTask = WithTimeout(App.Backend.GetSnapshotAsync(force: true), SnapshotBudgetMs);
             var scans = _dirs.Select(ScanDirSafeAsync).ToList();
@@ -167,6 +163,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         finally
         {
             _loading = false;
+            UpdateDirectoryActions();
         }
     }
 
@@ -187,7 +184,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                 {
                     item.IsCurrent = !string.IsNullOrWhiteSpace(currentId)
                                      && string.Equals(item.Id, currentId, StringComparison.OrdinalIgnoreCase)
-                                     && IsSameDir(item.Root, _primaryDir);
+                                     && IsSameDir(item.Root, snapshot.Current?.Root is { Length: > 0 } currentRoot
+                                         ? currentRoot : snapshot.GameDir);
                 }
                 changed = true;
             }
@@ -258,10 +256,10 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         }
     }
 
-    public async Task OpenVersionAsync(string id, string focus)
+    public async Task OpenVersionAsync(string id, string focus = "", string root = "")
     {
         if (_all.Count == 0) await RefreshAsync();
-        var version = _all.FirstOrDefault(v => v.Id == id);
+        var version = _all.FirstOrDefault(v => v.Id == id && (root.Length == 0 || string.Equals(v.Root, root, StringComparison.OrdinalIgnoreCase)));
 #if DEBUG
         try
         {
@@ -344,17 +342,17 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             }
             var visibleList = visible.ToList();
             var rows = OrderFor(dir, visibleList).ToList();
-            if (rows.Count == 0) continue;
-            var group = new VersionGroup(dir) { IsPrimary = IsSameDir(dir, _primaryDir) };
-            foreach (var version in rows) group.AddRow(new VersionRow(version, dir));
-            group.SetExpanded(_query.Length > 0 || !_collapsedDirs.Contains(dir));
+            if (rows.Count == 0 && _query.Length > 0) continue;
+            var group = new VersionGroup(dir,
+                _query.Length > 0 || !_collapsedDirs.Contains(dir), rows);
             _groups.Add(group);
             total += rows.Count;
         }
 
-        _groupsView.Source = _groups;
+        SetHoveredRow(null);
+        VersionList.ItemsSource = _groups.ToArray();
 
-        if (total == 0)
+        if (total == 0 && (_groups.Count == 0 || _query.Length > 0))
         {
             var hasVersionsFolder = _dirs.Any(GameDirectoryResolver.HasVersions);
             EmptyOpenDirButton.Visibility = _dirs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -424,25 +422,6 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b)
         && string.Equals(NormalizeDir(a), NormalizeDir(b), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>目录列表 = 磁盘上真实存在的候选目录（见 GameDirectoryResolver），最多 6 个。</summary>
-    private void ResolveDirs(string primary)
-    {
-        var resolved = GameDirectoryResolver.Resolve(App.MainWindow?.Preferences);
-        var normalized = GameDirectoryResolver.Normalize(primary);
-        _dirs.Clear();
-        if (normalized.Length > 0 && Directory.Exists(normalized) && !resolved.Any(d => IsSameDir(d, normalized)))
-        {
-            _dirs.Add(normalized);
-        }
-        foreach (var dir in resolved)
-        {
-            if (_dirs.Count >= GameDirectoryResolver.MaxDirs) break;
-            if (_dirs.Any(d => IsSameDir(d, dir))) continue;
-            _dirs.Add(dir);
-        }
-        SyncDirBox();
-    }
-
     private void SyncDirBox()
     {
         _suppressDirChange = true;
@@ -451,7 +430,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             DirBox.Items.Clear();
             foreach (var dir in _dirs) DirBox.Items.Add(dir);
             var index = _dirs.FindIndex(d => IsSameDir(d, _primaryDir));
-            DirBox.SelectedIndex = index >= 0 ? index : 0;
+            DirBox.SelectedIndex = index;
         }
         finally
         {
@@ -472,17 +451,59 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
 
     private async void DirBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressDirChange) return;
+        if (_suppressDirChange || _loading || _changingDefaultDir) return;
         var index = DirBox.SelectedIndex;
         if (index < 0 || index >= _dirs.Count) return;
         var dir = _dirs[index];
         if (IsSameDir(dir, _primaryDir)) return;
-        _primaryDir = dir;
-        _dirs.RemoveAll(d => IsSameDir(d, dir));
-        _dirs.Insert(0, dir);
-        SaveDirs();
-        await App.Backend.SetGameDirAsync(dir);
-        await RefreshAsync();
+        _changingDefaultDir = true;
+        UpdateDirectoryActions();
+        try
+        {
+            if (!await App.Backend.SetGameDirAsync(dir))
+            {
+                SyncDirBox();
+                ShowToast(InfoBarSeverity.Warning, "切换默认目录失败", dir);
+                return;
+            }
+
+            _primaryDir = dir;
+            _dirs.RemoveAll(d => IsSameDir(d, dir));
+            _dirs.Insert(0, dir);
+            SaveDirs();
+            await RefreshAsync();
+        }
+        finally
+        {
+            _changingDefaultDir = false;
+            UpdateDirectoryActions();
+        }
+    }
+
+    private void FolderOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string folder }) OpenPath(folder);
+    }
+
+    private async void FolderDefault_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _changingDefaultDir || sender is not Button { Tag: string dir }
+            || IsSameDir(dir, _primaryDir)) return;
+        _changingDefaultDir = true;
+        try
+        {
+            if (!await App.Backend.SetGameDirAsync(dir))
+            {
+                ShowToast(InfoBarSeverity.Error, "切换默认目录失败", dir);
+                return;
+            }
+            _primaryDir = dir;
+            _dirs.RemoveAll(d => IsSameDir(d, dir));
+            _dirs.Insert(0, dir);
+            SaveDirs();
+            await RefreshAsync();
+        }
+        finally { _changingDefaultDir = false; UpdateDirectoryActions(); }
     }
 
     private async void AddDir_Click(object sender, RoutedEventArgs e)
@@ -525,7 +546,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             return;
         }
 
-        var index = DirBox.SelectedIndex >= 0 && DirBox.SelectedIndex < _dirs.Count ? DirBox.SelectedIndex : 0;
+        var index = sender is Button { Tag: string folder } ? _dirs.FindIndex(d => IsSameDir(d, folder)) : -1;
+        if (index < 0) return;
         var removed = _dirs[index];
         _dirs.RemoveAt(index);
         if (IsSameDir(removed, _primaryDir))
@@ -564,44 +586,39 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         var index = list.FindIndex(r => string.Equals(r.Id, row.Id, StringComparison.Ordinal));
         var target = index + delta;
         if (index < 0 || target < 0 || target >= list.Count) return;
-        (list[index], list[target]) = (list[target], list[index]);
-        group.Items.Clear();
-        foreach (var item in list) group.Items.Add(item);
-        SaveOrder(group.Folder, list.Select(r => r.Id));
+        group.Items.Move(index, target);
+        SaveOrder(group.Folder, group.Items.Select(r => r.Id));
     }
 
-    // 上移/下移只在行悬停或聚焦时出现：始终占位（Opacity 切换），箭头与文字不会跳动。
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _hoverTimer;
-    private object? _hoverRow;
+    private FrameworkElement? _hoveredRow;
+    private Panel? _hoveredActions;
 
-    private void Row_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        _hoverTimer?.Stop();
-        SetMoveVisible(sender, true);
-    }
+    private void Row_PointerEntered(object sender, PointerRoutedEventArgs e) =>
+        SetHoveredRow(sender as FrameworkElement);
 
-    private void Row_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        _hoverTimer?.Stop();
-        SetMoveVisible(sender, true);
-    }
+    private void Row_PointerMoved(object sender, PointerRoutedEventArgs e) =>
+        SetHoveredRow(sender as FrameworkElement);
 
     private void Row_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        // PointerExited 会从子元素冒泡上来；稍等一下，若指针仍在行内会收到 PointerMoved 取消收起。
-        _hoverTimer ??= DispatcherQueue.CreateTimer();
-        _hoverTimer.Interval = TimeSpan.FromMilliseconds(120);
-        _hoverTimer.IsRepeating = false;
-        _hoverTimer.Tick -= HoverTimer_Tick;
-        _hoverTimer.Tick += HoverTimer_Tick;
-        _hoverTimer.Stop();
-        _hoverRow = sender;
-        _hoverTimer.Start();
+        if (sender is not FrameworkElement row || !ReferenceEquals(row, _hoveredRow)) return;
+        var position = e.GetCurrentPoint(row).Position;
+        if (position.X < 0 || position.Y < 0 || position.X >= row.ActualWidth || position.Y >= row.ActualHeight)
+            SetHoveredRow(null);
     }
 
-    private void HoverTimer_Tick(Microsoft.UI.Dispatching.DispatcherQueueTimer timer, object args) =>
-        SetMoveVisible(_hoverRow, false);
+    private void VersionListScroll_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e) =>
+        SetHoveredRow(null);
 
+    private void SetHoveredRow(FrameworkElement? row)
+    {
+        if (ReferenceEquals(_hoveredRow, row)) return;
+        var previous = _hoveredActions;
+        _hoveredRow = row;
+        _hoveredActions = row is null ? null : Descendants(row).OfType<Panel>().FirstOrDefault(p => p.Tag is "move");
+        if (previous is not null) UpdateActionVisibility(previous);
+        if (_hoveredActions is not null) UpdateActionVisibility(_hoveredActions);
+    }
 
     /// <summary>固定/取消固定到首页「固定版本」栏（最多 6 个）。</summary>
     private void Pin_Click(object sender, RoutedEventArgs e)
@@ -626,35 +643,18 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         ShowToast(InfoBarSeverity.Success, list.Contains(info.Id) ? "已固定到首页" : "已取消固定", info.Id);
     }
 
-    private void MovePanel_GotFocus(object sender, RoutedEventArgs e) => SetMoveVisible(sender, true);
-
-    private void MovePanel_LostFocus(object sender, RoutedEventArgs e)
+    private void MovePanel_FocusChanged(object sender, RoutedEventArgs e)
     {
-        if (sender is Panel panel && panel.Children.Any(c => c is Control { FocusState: not FocusState.Unfocused }))
-            return;
-        SetMoveVisible(sender, false);
+        if (sender is Panel panel) UpdateActionVisibility(panel);
     }
 
-    private static void SetMoveVisible(object? sender, bool visible)
+    private void UpdateActionVisibility(Panel panel)
     {
-        if (sender is FrameworkElement { Tag: "move" } self)
-        {
-            SetOne(self, visible);
-            return;
-        }
-
-        if (sender is not DependencyObject root) return;
-        foreach (var move in Descendants(root).OfType<FrameworkElement>())
-        {
-            if (move.Tag is "move") SetOne(move, visible);
-        }
-
-        static void SetOne(FrameworkElement element, bool show)
-        {
-            var opacity = show ? 1d : 0d;
-            if (Math.Abs(element.Opacity - opacity) > 0.001) element.Opacity = opacity;
-            if (element.IsHitTestVisible != show) element.IsHitTestVisible = show;
-        }
+        // 键盘焦点仍然能看到操作。鼠标点击产生的焦点不能把按钮留在旧行。
+        var visible = ReferenceEquals(panel, _hoveredActions)
+            || panel.Children.Any(child => child is Control { FocusState: FocusState.Keyboard });
+        panel.Opacity = visible ? 1 : 0;
+        panel.IsHitTestVisible = visible;
     }
 
     /// <summary>行模板里的上下移按钮在第二层 Grid 里，按可视树递归找。</summary>
@@ -682,13 +682,35 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             .ToList();
     }
 
+    private void UpdateDirectoryActions()
+    {
+        var ready = !_loading && !_changingDefaultDir;
+        DirBox.IsEnabled = ready && _dirs.Count > 1;
+        AddDirButton.IsEnabled = ready;
+        RemoveDirButton.IsEnabled = ready && _dirs.Count > 1;
+        RescanButton.IsEnabled = ready;
+    }
+
     private void SetListState(ListState state)
     {
+        var changed = _listState != state;
         _listState = state;
         LoadingPanel.Visibility = state == ListState.Loading ? Visibility.Visible : Visibility.Collapsed;
-        VersionList.Visibility = state == ListState.List ? Visibility.Visible : Visibility.Collapsed;
+        VersionListScroll.Visibility = state == ListState.List ? Visibility.Visible : Visibility.Collapsed;
+        UpdateDirectoryActions();
         EmptyPanel.Visibility = state == ListState.Empty ? Visibility.Visible : Visibility.Collapsed;
         ErrorPanel.Visibility = state == ListState.Error ? Visibility.Visible : Visibility.Collapsed;
+        if (changed && IsLoaded)
+        {
+            FrameworkElement panel = state switch
+            {
+                ListState.List => VersionListScroll,
+                ListState.Empty => EmptyPanel,
+                ListState.Error => ErrorPanel,
+                _ => LoadingPanel,
+            };
+            Motion.Enter(panel, fromY: 5, durationMs: 150);
+        }
     }
 
     private void ShowError(string title, string summary)
@@ -712,15 +734,19 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         App.MainWindow?.Navigate("download");
 
     private void EmptyChangeDir_Click(object sender, RoutedEventArgs e) => AddDir_Click(sender, e);
-    private void VersionGroupHeader_Click(object sender, RoutedEventArgs e)
+    private void VersionGroup_Expanding(Expander sender, ExpanderExpandingEventArgs args)
     {
-        if (sender is not FrameworkElement { Tag: string root }) return;
-        var group = _groups.FirstOrDefault(g => string.Equals(g.Root, root, StringComparison.OrdinalIgnoreCase));
-        if (group is null) return;
-        var expand = !group.IsExpanded;
-        group.SetExpanded(expand);
-        if (expand) _collapsedDirs.Remove(root);
-        else _collapsedDirs.Add(root);
+        if (_query.Length == 0 && sender.IsLoaded && sender.Tag is string root)
+            _collapsedDirs.Remove(root);
+        if (sender.IsLoaded && sender.Content is FrameworkElement list)
+            Motion.Enter(list, fromY: -5, durationMs: 170);
+    }
+
+    private void VersionGroup_Collapsed(Expander sender, ExpanderCollapsedEventArgs args)
+    {
+        SetHoveredRow(null);
+        if (_query.Length == 0 && sender.IsLoaded && sender.Tag is string root)
+            _collapsedDirs.Add(root);
     }
 
     private void VersionList_ItemClick(object sender, ItemClickEventArgs e)
@@ -735,14 +761,15 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
 
     private void ShowList()
     {
+        var revealing = ListPanel.Visibility != Visibility.Visible;
         _selected = null;
         _settingsDirty = false;
         _saveTimer.Stop();
-        VersionList.SelectedItem = null;
+        SetHoveredRow(null);
         ListPanel.Visibility = Visibility.Visible;
         DetailView.Visibility = Visibility.Collapsed;
-        OpenDirButton.Visibility = Visibility.Visible;
         UpdateCrumb(null);
+        if (revealing) Motion.Enter(ListPanel, fromY: 6, durationMs: 175);
     }
 
     private void ShowDetails(VersionInfo? version)
@@ -753,6 +780,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             return;
         }
 
+        var revealing = DetailView.Visibility != Visibility.Visible || !InstanceSelection.Same(_selected, version);
         _selected = version;
         _instanceSettingsReady = _extraReady = false;
         _extraDirty = false;
@@ -765,8 +793,9 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         _saveTimer.Stop();
         ListPanel.Visibility = Visibility.Collapsed;
         DetailView.Visibility = Visibility.Visible;
-        OpenDirButton.Visibility = Visibility.Collapsed;
+        SetHoveredRow(null);
         UpdateCrumb(version);
+        if (revealing) Motion.Enter(DetailView, fromY: 8, durationMs: 190);
 
         var instanceKey = version.Path.ToLowerInvariant();
         InstanceConsoleSwitch.Toggled -= InstanceConsole_Toggled;
@@ -789,9 +818,6 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         UpdateLaunchButtonState(version.Id);
         DetailSwitch.Visibility = version.IsCurrent ? Visibility.Collapsed : Visibility.Visible;
         DetailSwitch.IsEnabled = true;
-        HideVersionButton.IsEnabled = !version.IsCurrent;
-        HideHintText.Visibility = version.IsCurrent ? Visibility.Visible : Visibility.Collapsed;
-        DeleteHintText.Visibility = version.IsCurrent ? Visibility.Visible : Visibility.Collapsed;
         if (!_launching) LaunchStages.Visibility = Visibility.Collapsed;
         _ = LoadInstanceSettingsAsync(version);
     }
@@ -827,6 +853,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         CrumbCurrent.Visibility = hasDetail ? Visibility.Visible : Visibility.Collapsed;
         CrumbCurrent.Text = version?.Id ?? "";
         BackToInstanceButton.Visibility = hasDetail ? Visibility.Collapsed : Visibility.Visible;
+        DirBox.Visibility = Visibility.Collapsed;
     }
 
     private void BackToInstance_Click(object sender, RoutedEventArgs e) =>
@@ -860,6 +887,14 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private async void InstanceIsolation_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressInstanceSettings) return;
+        if (_selected is { } selected && GameSessions.IsRunning(selected.Id, selected.Root))
+        {
+            _suppressInstanceSettings = true;
+            SelectIsolation(_lastIsolationTag);
+            _suppressInstanceSettings = false;
+            ShowToast(InfoBarSeverity.Warning, "实例正在运行", "结束游戏后再迁移版本隔离内容。");
+            return;
+        }
 
         // 切换隔离会改变存档/Mod/配置实际读写的目录，先确认；取消就回滚下拉。
         var previous = _lastIsolationTag;
@@ -868,9 +903,12 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         {
             var dialog = new ContentDialog
             {
-                Title = "切换版本隔离？",
-                Content = "会改变存档、Mod 和配置文件所在的目录。已有文件不会被移动；"
-                          + "隔离关闭后游戏将读写游戏根目录（.minecraft）下的存档与 Mod。",
+                Title = next == "on" ? "开启版本隔离？" : next == "off" ? "关闭版本隔离？" : "跟随全局版本隔离？",
+                Content = next == "on"
+                    ? @"此实例内容将会迁移至 .minecraft\versions\ 下，与非版本隔离的实例分离，无法共享存档和设置。"
+                    : next == "off"
+                        ? "此实例内容将会迁移至 .minecraft 根目录，迁移存档并与非版本隔离的实例共享，但无法迁移设置。"
+                        : "将按全局设置决定此实例的游戏目录，并迁移相应内容。",
                 PrimaryButtonText = "切换",
                 CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Close,
@@ -905,18 +943,22 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         {
             InstanceUseGlobalSwitch.IsOn = settings.UseGlobal;
             InstanceMemoryBox.Value = settings.OverrideMem;
+            InstanceMemAutoSwitch.IsOn = settings.OverrideMemAuto;
 
             _instanceJavaPath = settings.JavaPath ?? "";
             UpdateInstanceJavaChoices();
             InstanceJvmBox.Text = settings.Jvm;
+            InstanceJvmAutoSwitch.IsOn = settings.JvmAuto;
+            _loadedJvmAuto = settings.JvmAuto;
+            UpdateJvmAutoHint(settings.JvmAuto);
             InstanceGlobalJvm.Text = string.IsNullOrWhiteSpace(settings.GlobalJvm) ? "默认参数" : settings.GlobalJvm;
             SelectIsolation(settings.Isolation);
             _lastIsolationTag = SelectedIsolation();
             InstanceIsolationHint.Text = settings.Isolated
-                ? "当前：已隔离（versions/" + versionId + "）"
-                : "当前：未隔离（游戏根目录）";
+                ? "当前：已隔离"
+                : "当前：未隔离";
             InstanceSettingsStatus.Text = settings.Ok
-                ? (settings.UseGlobal ? "当前跟随全局默认" : "当前使用实例覆盖")
+                ? (settings.UseGlobal ? "当前使用全局设置" : "当前使用独立设置")
                 : settings.Message;
             _loadedMemory = settings.OverrideMem;
             _loadedMemAuto = settings.OverrideMemAuto;
@@ -929,7 +971,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             _loadedStatus = InstanceSettingsStatus.Text;
             UpdateMemoryBar();
             UpdateCoverHint();
-            var extra = await App.Backend.GetLaunchExtraAsync(versionId);
+            var extra = await App.Backend.GetLaunchExtraAsync(versionId, version.Root);
             if (ReferenceEquals(_selected, version) && extra.Ok)
             {
                 ExtraPanel.Load(extra.Extra);
@@ -984,7 +1026,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             var prefs = main.Preferences;
             if (prefs is null) return;
             prefs.HomeCovers ??= new Dictionary<string, string>();
-            prefs.HomeCovers[id] = file.Path;
+            prefs.HomeCovers[InstanceSelection.Key(_selected!.Root, id)] = file.Path;
+            prefs.HomeCoverModes[InstanceSelection.Key(_selected.Root, id)] = "custom";
             AppPreferencesStore.Save(prefs);
             UpdateCoverHint();
             ShowToast(InfoBarSeverity.Success, "封面已更新", "首页这个实例的卡会换成这张图。");
@@ -997,33 +1040,42 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
 
     private void InstanceCoverReset_Click(object sender, RoutedEventArgs e)
     {
-        var id = _selected?.Id ?? "";
-        var prefs = App.MainWindow?.Preferences;
-        if (string.IsNullOrWhiteSpace(id) || prefs?.HomeCovers is null || prefs.HomeCovers.Count == 0) return;
-
-        var removed = prefs.HomeCovers.Remove(id);
-        if (!removed)
-        {
-            var key = prefs.HomeCovers.Keys.FirstOrDefault(k => string.Equals(k, id, StringComparison.OrdinalIgnoreCase));
-            if (key is not null) removed = prefs.HomeCovers.Remove(key);
-        }
-        if (!removed) return;
-
+        if (_selected is not { } version || App.MainWindow?.Preferences is not { } prefs) return;
+        prefs.HomeCoverModes[InstanceSelection.Key(version.Root, version.Id)] = "default";
         AppPreferencesStore.Save(prefs);
         UpdateCoverHint();
-        ShowToast(InfoBarSeverity.Success, "已恢复默认封面", "没有自定义封面时，会先挑这个实例的截图。");
     }
 
-    /// <summary>只有真的设过自定义封面才写一行；没设就留空，别让「跟随截图」变成常驻说明。</summary>
+    private bool _updatingCover;
     private void UpdateCoverHint()
     {
-        var id = _selected?.Id ?? "";
-        var covers = App.MainWindow?.Preferences?.HomeCovers;
-        var has = !string.IsNullOrWhiteSpace(id) && covers is not null
-                  && (covers.ContainsKey(id)
-                      || covers.Keys.Any(k => string.Equals(k, id, StringComparison.OrdinalIgnoreCase)));
-        InstanceCoverHint.Text = has ? "已使用自定义封面" : "";
-        InstanceCoverResetButton.IsEnabled = has;
+        if (_selected is not { } version || App.MainWindow?.Preferences is not { } prefs) return;
+        var key = InstanceSelection.Key(version.Root, version.Id);
+        var has = prefs.HomeCovers.ContainsKey(key) || prefs.HomeCovers.ContainsKey(version.Id);
+        var mode = prefs.HomeCoverModes.GetValueOrDefault(key, has ? "custom" : "default");
+        _updatingCover = true;
+        InstanceCoverMode.SelectedIndex = mode == "custom" ? 2 : mode == "latest" ? 1 : 0;
+        _updatingCover = false;
+        InstanceCoverHint.Text = "";
+        InstanceCoverPickButton.Visibility = mode == "custom" ? Visibility.Visible : Visibility.Collapsed;
+        InstanceCoverResetButton.Visibility = Visibility.Collapsed;
+    }
+
+    private async void InstanceCoverMode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingCover || _suppressInstanceSettings || _selected is not { } version
+            || App.MainWindow?.Preferences is not { } prefs
+            || InstanceCoverMode.SelectedItem is not ComboBoxItem { Tag: string mode }) return;
+        var key = InstanceSelection.Key(version.Root, version.Id);
+        if (mode == "custom" && !prefs.HomeCovers.ContainsKey(key) && !prefs.HomeCovers.ContainsKey(version.Id))
+        {
+            await PickInstanceCoverAsync();
+            UpdateCoverHint();
+            return;
+        }
+        prefs.HomeCoverModes[key] = mode;
+        AppPreferencesStore.Save(prefs);
+        UpdateCoverHint();
     }
 
     private void InstanceUseGlobal_Toggled(object sender, RoutedEventArgs e)
@@ -1059,8 +1111,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             || MemCapOther is null || MemCapAlloc is null || MemFreeStat is null)
             return;
         var useGlobal = InstanceUseGlobalSwitch.IsOn;
-        var legacyAutomatic = !useGlobal && _loadedMemAuto
-            && Math.Abs(InstanceMemoryBox.Value - _loadedMemory) < 0.5;
+        var legacyAutomatic = !useGlobal && InstanceMemAutoSwitch.IsOn;
         var readOnly = useGlobal || legacyAutomatic;
         InstanceMemorySummary.Visibility = Visibility.Collapsed;
         var alloc = InstanceMemoryBox.Value;
@@ -1091,7 +1142,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         var free = Math.Max(0, total - other);
         if (double.IsNaN(alloc) || alloc < 0) alloc = 0;
 
-        var running = _selected is not null && GameSessions.IsRunning(_selected.Id);
+        var running = _selected is not null && GameSessions.IsRunning(_selected.Id, _selected.Root);
         var twoSegments = running;
 
         var over = !twoSegments && alloc > free;
@@ -1172,7 +1223,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         double? fallback = useGlobal ? _globalMemoryMb : _loadedMemory;
         if (fallback is null || _selected is not { } version)
             return ("正在读取全局设置…", null);
-        if (!(useGlobal ? _globalMemAuto : _loadedMemAuto))
+        if (!(useGlobal ? _globalMemAuto : InstanceMemAutoSwitch.IsOn))
             return ($"固定 · {fallback:0} MB", fallback);
         if (_memEstimates.TryGetValue((version.Root, version.Id), out var estimate))
         {
@@ -1314,6 +1365,27 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         ScheduleInstanceSave();
     }
 
+    private void InstanceJvmAutoSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        UpdateJvmAutoHint(InstanceJvmAutoSwitch.IsOn);
+        if (_suppressInstanceSettings) return;
+        ScheduleInstanceSave();
+    }
+
+    private void InstanceMemAuto_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressInstanceSettings || !_instanceSettingsReady) return;
+        SetInstanceSettingsEnabled();
+        UpdateMemoryBar();
+        ScheduleInstanceSave();
+    }
+
+    private void UpdateJvmAutoHint(bool on)
+    {
+        if (InstanceJvmAutoHint is null) return;
+        InstanceJvmAutoHint.Text = "";
+    }
+
     private void InstanceJvmBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_suppressInstanceSettings) return;
@@ -1324,11 +1396,19 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     {
         var inherited = InstanceUseGlobalSwitch.IsOn;
         var editable = _instanceSettingsReady && !inherited;
-        var editor = editable ? Visibility.Visible : Visibility.Collapsed;
-        var summary = _instanceSettingsReady && inherited ? Visibility.Visible : Visibility.Collapsed;
-        InstanceAutoApplyLabel.Visibility = editor;
-        InstanceMemoryBox.Visibility = editor;
+        var editor = Visibility.Visible;
+        var summary = Visibility.Collapsed;
+        InstanceMemoryBox.IsEnabled = editable && !InstanceMemAutoSwitch.IsOn;
+        InstanceJvmBox.IsEnabled = editable;
+        InstanceJvmAutoSwitch.IsEnabled = editable;
+        InstanceMemAutoSwitch.IsEnabled = editable;
+        InstanceAutoApplyLabel.Visibility = Visibility.Collapsed;
+        InstanceMemoryBox.Visibility = editable && !InstanceMemAutoSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
         InstanceJvmBox.Visibility = editor;
+        InstanceJvmAutoSwitch.Visibility = editor;
+        InstanceJvmAutoHint.Visibility = Visibility.Collapsed;
+        // 跟随全局时这一行没有可操作项，整行收起，别留一个孤零零的标签。
+        InstanceJvmAutoLabel.Visibility = editor;
         InstanceJavaBox.Visibility = editor;
         InstanceJavaBox.IsEnabled = editable;
         InstanceGlobalJava.Visibility = summary;
@@ -1371,7 +1451,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         _savingExtra = true;
         try
         {
-            await App.Backend.SetLaunchExtraAsync(version.Id, ExtraPanel.Read());
+            var result = await App.Backend.SetLaunchExtraAsync(version.Id, ExtraPanel.Read(), version.Root);
+            if (!result.Ok) InstanceSettingsStatus.Text = result.Message;
         }
         catch
         {
@@ -1410,9 +1491,11 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
 
         // 打开详情时控件回填也会触发一次变更信号；值没变就别写后端，只把状态文案还原。
         var sameValues = Math.Abs(memory - _loadedMemory) < 0.5
+            && InstanceMemAutoSwitch.IsOn == _loadedMemAuto
             && InstanceUseGlobalSwitch.IsOn == _loadedUseGlobal
             && string.Equals(_instanceJavaPath, _loadedJava, StringComparison.Ordinal)
             && string.Equals(InstanceJvmBox.Text ?? "", _loadedJvm, StringComparison.Ordinal)
+            && InstanceJvmAutoSwitch.IsOn == _loadedJvmAuto
             && string.Equals(SelectedIsolation(), _loadedIsolation, StringComparison.Ordinal);
         if (sameValues)
         {
@@ -1427,9 +1510,10 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         {
             var savedUseGlobal = InstanceUseGlobalSwitch.IsOn;
             // A manually edited value must not inherit the global automatic mode.
-            var savedMemAuto = _loadedMemAuto && Math.Abs(memory - _loadedMemory) < 0.5;
+            var savedMemAuto = InstanceMemAutoSwitch.IsOn;
             var savedJava = _instanceJavaPath;
             var savedJvm = InstanceJvmBox.Text ?? "";
+            var savedJvmAuto = InstanceJvmAutoSwitch.IsOn;
             var savedIsolation = SelectedIsolation();
             var result = await App.Backend.SetInstanceLaunchSettingsAsync(
                 version.Id, (int)memory, savedUseGlobal,
@@ -1437,7 +1521,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                 savedJava,
                 savedJvm,
                 savedIsolation,
-                version.Root);
+                version.Root,
+                savedJvmAuto);
             if (!ReferenceEquals(_selected, version)) return;
             if (result.Ok)
             {
@@ -1447,8 +1532,9 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                 _loadedUseGlobal = savedUseGlobal;
                 _loadedJava = savedJava;
                 _loadedJvm = savedJvm;
+                _loadedJvmAuto = savedJvmAuto;
                 _loadedIsolation = savedIsolation;
-                _loadedStatus = savedUseGlobal ? "当前跟随全局默认" : "当前使用实例覆盖";
+                _loadedStatus = savedUseGlobal ? "当前使用全局设置" : "当前使用独立设置";
                 try
                 {
                     var fresh = await App.Backend.GetInstanceLaunchSettingsAsync(version.Id, version.Root);
@@ -1458,8 +1544,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                         _globalMemAuto = fresh.GlobalMemAuto;
                         UpdateMemoryBar();
                         InstanceIsolationHint.Text = fresh.Isolated
-                            ? "当前：已隔离（versions/" + version.Id + "）"
-                            : "当前：未隔离（游戏根目录）";
+                            ? "当前：已隔离"
+                            : "当前：未隔离";
                     }
                 }
                 catch { }
@@ -1468,7 +1554,13 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             InstanceSettingsStatus.Text = _settingsDirty ? "正在应用…"
                 : result.Ok ? _loadedStatus : ClipText(result.Message, 80);
             if (!result.Ok)
+            {
+                _suppressInstanceSettings = true;
+                SelectIsolation(_loadedIsolation);
+                _lastIsolationTag = _loadedIsolation;
+                _suppressInstanceSettings = false;
                 ShowToast(InfoBarSeverity.Warning, "设置没有写入", result.Message);
+            }
         }
         catch (Exception ex)
         {
@@ -1522,7 +1614,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private void UpdateLaunchButtonState(string versionId)
     {
         if (_launching) return;
-        var running = GameSessions.IsRunning(versionId);
+        var running = GameSessions.IsRunning(versionId, _selected?.Root ?? "");
         LaunchLabel.Text = running ? "结束游戏" : "启动该版本";
         LaunchGlyph.Glyph = running ? "\uE71A" : "\uE768";
         AutomationProperties.SetName(DetailLaunch, running ? "结束这个实例的游戏" : "启动该版本");
@@ -1530,7 +1622,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
 
     private async Task StopGameAsync(string versionId)
     {
-        var row = GameSessions.Find(versionId);
+        var row = GameSessions.Find(versionId, _selected?.Root ?? "");
         var result = await App.Backend.StopGameAsync(row?.Pid ?? 0, versionId);
         ShowToast(result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error,
             result.Ok ? "已结束游戏" : "结束失败", result.Message);
@@ -1541,69 +1633,24 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private async void Launch_Click(object sender, RoutedEventArgs e)
     {
         if (_selected is null || _launching) return;
-        if (GameSessions.IsRunning(_selected.Id))
+        if (GameSessions.IsRunning(_selected.Id, _selected.Root))
         {
             await StopGameAsync(_selected.Id);
             return;
         }
 
-        ShowToast(InfoBarSeverity.Informational, "检查文件", "正在检查实例文件是否完整…");
-        if (!await VersionHealth.EnsureReadyAsync(_selected.Id, XamlRoot))
-        {
-            ShowToast(InfoBarSeverity.Informational, "已取消启动", "文件不完整，先补全再启动。");
-            return;
-        }
-
+        var target = _selected;
         _launching = true;
         SetLaunchBusy(true);
-        StartStages();
-        var target = _selected;
-        var task = TaskCenter.Add($"启动 {target.Id}", "正在准备资源与 Java", "versions", "\uE768");
-        var stageProgress = new Progress<string>(stage =>
-        {
-            TaskCenter.SetStage(task, stage);
-            AdvanceStage(stage);
-        });
-        ShowToast(InfoBarSeverity.Informational, "正在启动", $"正在准备 {target.Id} 的资源和 Java…");
         try
         {
-            var result = await App.Backend.LaunchAsync(target.Id, stageProgress, target.Root);
-            if (result.Ok)
-            {
-                // 启动成功即视为切到这个实例，首页与版本页的「当前」保持一致。
-                await InstanceSelection.SelectAsync(target);
-
-                TaskCenter.SetStage(task, "运行中");
-                Services.LaunchWatcher.Track(target.Id, task, 0, target.Root);
-                if (string.Equals(App.MainWindow?.Preferences.AfterLaunch, "minimize", StringComparison.OrdinalIgnoreCase))
-                {
-                    _ = Task.Delay(900).ContinueWith(_ => App.MainWindow?.DispatcherQueue.TryEnqueue(
-                        () => App.MainWindow?.MinimizeForGame()));
-                }
-                CompleteStages();
-                _ = GameSessions.RefreshAsync();
-                ShowToast(InfoBarSeverity.Success, "启动成功", result.Message);
-                await Task.Delay(1200);
-                LaunchStages.Visibility = Visibility.Collapsed;
-                await RefreshAsync();
-            }
-            else
-            {
-                TaskCenter.Fail(task, result.Message);
-                FailStage();
-                ShowLaunchFailure(result.Message, _selected.Id);
-            }
+            await FlushInstanceSettingsAsync();
+            await FlushExtraAsync();
+            var result = await App.MainWindow.LaunchInstanceAsync(target);
+            if (!result.Ok) ShowToast(InfoBarSeverity.Warning, "启动未完成", result.Message);
         }
-        catch (Exception ex)
-        {
-            FailStage();
-            ShowLaunchFailure(ex.Message, _selected.Id);
-        }
-        finally
-        {
-            _launching = false;
-            SetLaunchBusy(false);
-        }
+        catch (Exception ex) { ShowToast(InfoBarSeverity.Error, "启动失败", Diagnostics.FriendlyMessage(ex)); }
+        finally { _launching = false; SetLaunchBusy(false); }
     }
 
     private void SetLaunchBusy(bool busy)
@@ -1736,21 +1783,25 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
 
     private async void HideVersion_Click(object sender, RoutedEventArgs e)
     {
-        if (_selected is null) return;
-        if (_selected.IsCurrent)
+        if (_selected is not { } target || sender is not Button button) return;
+        var main = App.MainWindow;
+        var wasCurrent = target.IsCurrent || InstanceSelection.Same(target, InstanceSelection.Resolve(main.Snapshot, main.Preferences));
+        button.IsEnabled = false;
+        try
         {
-            ShowToast(InfoBarSeverity.Warning, "当前实例不能隐藏", "无法隐藏正在使用的实例，请切换后再隐藏。");
-            return;
+            var result = await App.Backend.HideVersionAsync(target.Id, target.Root);
+            if (!result.Ok)
+            {
+                ShowToast(InfoBarSeverity.Warning, "不能隐藏", result.Message);
+                return;
+            }
+            var next = wasCurrent ? await SelectReplacementAsync(target) : null;
+            ShowList();
+            await main.RefreshShellAsync(force: true);
+            await RefreshAsync();
+            ShowToast(InfoBarSeverity.Success, "已隐藏", next is null ? result.Message : $"已选中 {next.Id}");
         }
-
-        var result = await App.Backend.HideVersionAsync(_selected.Id, _selected.Root);
-        ShowToast(result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-            result.Ok ? "已隐藏" : "不能隐藏", result.Message);
-        if (!result.Ok) return;
-
-        await App.MainWindow.RefreshShellAsync(force: true);
-        await RefreshAsync();
-        ShowList();
+        finally { button.IsEnabled = true; }
     }
 
     /// <summary>行内重命名：实例名和 versions 下的文件夹一起改，不用先选中这一行。</summary>
@@ -1824,102 +1875,118 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         else ShowList();
     }
 
-    private async void ChangeVersion_Click(object sender, RoutedEventArgs e)
+    private sealed class LoaderEditorHost(ContentDialog dialog) : ISubPageHost
     {
-        if (_selected is null || _launching) return;
-        var target = _selected;
-        var loader = target.Loader?.Trim() ?? "";
-        if (loader.Equals("Forge", StringComparison.OrdinalIgnoreCase)
-            || loader.Equals("NeoForge", StringComparison.OrdinalIgnoreCase)
-            || loader.Equals("modded", StringComparison.OrdinalIgnoreCase))
-        {
-            ShowToast(InfoBarSeverity.Warning, "暂不支持修改版本",
-                $"{target.LoaderDisplay} 实例的安装器会生成绑定自身 id 的补丁文件，不能直接换版本。请新建目标版本的实例，再拷贝存档和 Mod。");
-            return;
-        }
-
-        var list = await App.Backend.GetMojangVersionsAsync();
-        if (list is null || !list.Ok || list.Versions.Count == 0)
-        {
-            ShowToast(InfoBarSeverity.Error, "取不到版本列表", list?.Message ?? "请检查网络后重试。");
-            return;
-        }
-
-        var releases = list.Versions.Where(v => v.Type == "release").ToList();
-        var combo = new ComboBox
-        {
-            ItemsSource = releases.Select(v => v.Id).ToList(),
-            SelectedItem = releases.Any(v => v.Id == target.GameVersion) ? target.GameVersion : null,
-            PlaceholderText = "选择目标 Minecraft 版本",
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        var note = new TextBlock
-        {
-            Text = $"当前：Minecraft {target.GameVersion} · {target.LoaderDisplay}\n"
-                   + "存档、Mod 和实例设置都会保留，但 Mod 与存档可能和新版本不兼容（降级尤其可能损坏存档）。"
-                   + "旧版本文件会先备份，保存后重启启动器生效。",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.75,
-        };
-        var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(combo);
-        panel.Children.Add(note);
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = $"修改「{target.Id}」的版本",
-            Content = panel,
-            PrimaryButtonText = "修改",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Close,
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-
-        var newMc = combo.SelectedItem as string ?? "";
-        if (string.IsNullOrWhiteSpace(newMc) || newMc == target.GameVersion) return;
-
-        ShowToast(InfoBarSeverity.Informational, "正在修改版本", $"正在准备 Minecraft {newMc}，需要联网下载，请稍候…");
-        var result = await App.Backend.ChangeVersionAsync(target.Id, newMc, target.Root);
-        ShowToast(result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error,
-            result.Ok ? "已修改版本" : "修改版本失败", result.Message);
-        if (!result.Ok) return;
-
-        await App.MainWindow.RefreshShellAsync(force: true);
-        await RefreshAsync();
-        var changed = _all.FirstOrDefault(v => string.Equals(v.Id, target.Id, StringComparison.OrdinalIgnoreCase));
-        if (changed is not null) ShowDetails(changed);
-        else ShowList();
+        public void CloseSubPage() => dialog.Hide();
+        public void OpenSubPage(Type page, object args, params string[] crumbs) { }
     }
 
-    private async void DeleteVersion_Click(object sender, RoutedEventArgs e)
+    private void ChangeVersion_Click(object sender, RoutedEventArgs e)
     {
-        if (_selected is null || _launching) return;
-        if (_selected.IsCurrent)
+        if (_selected is not { } target || _launching) return;
+        if (GameSessions.IsRunning(target.Id, target.Root))
         {
-            ShowToast(InfoBarSeverity.Warning, "当前实例不能删除", "无法删除正在使用的实例，请切换后再进行删除。");
+            ShowToast(InfoBarSeverity.Warning, "实例正在运行", "请结束游戏后修改加载器。");
+            return;
+        }
+        var frame = new Frame { Width = 780, Height = 540 };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot, Title = $"修改「{target.Id}」的加载器", Content = frame,
+            CloseButtonText = "返回", RequestedTheme = ActualTheme,
+        };
+        dialog.Resources["ContentDialogMaxWidth"] = 860d;
+        var host = new LoaderEditorHost(dialog);
+        var version = new MojangVersionInfo { Id = target.GameVersion, Type = target.Type };
+        frame.Navigate(typeof(DownloadDetailPage), new DownloadDetailArgs(version, host,
+            (kind, loaderVersion, api, folder, name) => _ = ApplyInstanceLoaderAsync(target, kind, loaderVersion, api), target));
+        _ = dialog.ShowAsync();
+    }
+
+    private async Task ApplyInstanceLoaderAsync(VersionInfo target, string kind, string loaderVersion, DownloadApiSelection? api)
+    {
+        var task = TaskCenter.Add($"修改加载器 {target.Id}", "保留实例内容", "download", targetIcon: InstanceIcon.ForLoader(kind));
+        try
+        {
+            var result = await App.Backend.InstallInstanceLoaderAsync(target.Id, kind, loaderVersion, target.Root,
+                api?.ProjectId ?? "", api?.VersionId ?? "", new Progress<string>(line => TaskCenter.Report(task, line)), task.Id);
+            if (!result.Ok) { TaskCenter.Fail(task, result.Message, result.Failure); return; }
+            TaskCenter.Complete(task, result.Message);
+            await App.MainWindow.RefreshShellAsync(force: true);
+            await RefreshAsync();
+            var changed = _all.FirstOrDefault(v => InstanceSelection.Same(v, target));
+            if (changed is not null) ShowDetails(changed);
+        }
+        catch (Exception ex) { TaskCenter.Fail(task, ex.Message); }
+    }
+
+    private async void ArchiveVersion_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selected is not { } target || _launching || sender is not Button button) return;
+        if (GameSessions.IsRunning(target.Id, target.Root))
+        {
+            ShowToast(InfoBarSeverity.Warning, "实例正在运行", "结束游戏后再归档。");
             return;
         }
 
-        var target = _selected;
+        var main = App.MainWindow;
+        var prefs = main?.Preferences;
+        var wasCurrent = target.IsCurrent || InstanceSelection.Same(target, InstanceSelection.Resolve(main?.Snapshot, prefs));
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = "删除实例",
-            Content = $"是否将「{target.Id}」移动到回收站？这将不会直接删除它！",
-            PrimaryButtonText = "删除",
+            Title = "归档实例",
+            Content = wasCurrent
+                ? $"将「{target.Id}」移到回收目录，并自动选中下一个可用实例。"
+                : $"将「{target.Id}」移到回收目录。",
+            PrimaryButtonText = "归档",
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Close,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
 
-        var result = await App.Backend.DeleteVersionAsync(target.Id, target.Root);
-        ShowToast(result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error,
-            result.Ok ? "已删除" : "删除失败", result.Message);
-        if (!result.Ok) return;
+        button.IsEnabled = false;
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            var result = await App.Backend.DeleteVersionAsync(target.Id, target.Root);
+            if (!result.Ok)
+            {
+                ShowToast(InfoBarSeverity.Error, "归档失败", result.Message);
+                return;
+            }
 
-        await App.MainWindow.RefreshShellAsync(force: true);
-        await RefreshAsync();
-        ShowList();
+            var next = wasCurrent && main is not null ? await SelectReplacementAsync(target) : null;
+
+            ShowList();
+            if (main is not null) await main.RefreshShellAsync(force: true);
+            await RefreshAsync();
+            ShowToast(InfoBarSeverity.Success, "已归档", next is null
+                ? result.Message
+                : $"已选中 {next.Id}");
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
+    private async Task<VersionInfo?> SelectReplacementAsync(VersionInfo target)
+    {
+        var prefs = App.MainWindow.Preferences;
+        prefs.HomeSelectedInstance = "";
+        prefs.HomeSelectedRoot = "";
+        AppPreferencesStore.Save(prefs);
+
+        var ordered = _dirs.SelectMany(dir => _versionsByDir.TryGetValue(dir, out var versions)
+            ? OrderFor(dir, versions.Where(v => v.Valid && !v.Hidden).ToList()) : []).ToList();
+        var index = ordered.FindIndex(v => InstanceSelection.Same(v, target));
+        foreach (var candidate in ordered.Skip(index + 1).Concat(ordered.Take(index)))
+        {
+            if (!Directory.Exists(candidate.Path)) continue;
+            var (ok, _) = await InstanceSelection.SelectAsync(candidate);
+            if (ok) return candidate;
+        }
+        return null;
     }
 
     private void OpenLogs_Click(object sender, RoutedEventArgs e)
@@ -1960,7 +2027,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         OpenPath(path);
     }
 
-    private void OpenGameDir_Click(object sender, RoutedEventArgs e) => OpenPath(_snapshot?.GameDir);
+    private void OpenGameDir_Click(object sender, RoutedEventArgs e) => OpenPath(_primaryDir);
 
     private void OpenPath(string? path)
     {
@@ -2017,20 +2084,17 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     }
 
     /// <summary>启动失败统一出口：错误码 + 可复制的诊断报告。</summary>
-    private void ShowLaunchFailure(string message, string versionId)
+    private void ShowLaunchFailure(string message, string versionId, FailureInfo failure)
     {
-        var code = Diagnostics.ErrorCodeFor(message);
-        ShowToast(InfoBarSeverity.Error, $"启动失败 · {code}", message, "复制诊断",
-            () => Diagnostics.Copy(Diagnostics.BuildReport(code, "启动游戏", message, versionId, "")), 20);
+        ShowToast(InfoBarSeverity.Error, $"启动失败 · {failure.Code}", message, "复制诊断",
+            () => Diagnostics.Copy(Diagnostics.BuildReport(failure, "启动游戏", message, versionId)), 20);
     }
 }
 
 /// <summary>列表行：名称 + 一行副信息（版本 · 加载器 · Mod 数 · 最近游玩）。</summary>
 public sealed class VersionRow(VersionInfo source, string root)
 {
-    public static readonly VersionRow Placeholder = new(new VersionInfo { Id = "" }, "");
     public VersionInfo Source { get; } = source;
-    public Visibility RowVisibility => Source.Id.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     public string Root { get; } = root;
     public string Id => Source.Id;
 
@@ -2048,56 +2112,29 @@ public sealed class VersionRow(VersionInfo source, string root)
 }
 
 /// <summary>目录分组：组头显示目录名与实例数，组内保持用户自定义顺序；可折叠。</summary>
-public sealed class VersionGroup(string root) : IEnumerable<VersionRow>, INotifyPropertyChanged
+public sealed class VersionGroup(string folder, bool isExpanded, IEnumerable<VersionInfo> versions)
 {
-    private readonly List<VersionRow> _rows = [];
+    public string Folder { get; } = folder;
+    public string Title => DirectoryTitle(Folder);
+    public bool IsExpanded { get; } = isExpanded;
+    public ObservableCollection<VersionRow> Items { get; } = new(versions.Select(v => new VersionRow(v, folder)));
+    public string CountText => $"{Items.Count} 个实例";
+    public Visibility EmptyVisibility => Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    public string DefaultText => string.Equals(GameDirectoryResolver.Normalize(Folder),
+        GameDirectoryResolver.Normalize(App.MainWindow?.Preferences.McDir), StringComparison.OrdinalIgnoreCase)
+        ? "当前默认目录" : "设为默认";
 
-    public string Root { get; } = root;
-    public string Folder { get; } = root;
-    public string Title { get; } = root;
-    public int TotalCount => _rows.Count;
-    public string CountText => $"{TotalCount} 个实例";
-
-    public override string ToString() => Root;
-    public bool IsExpanded { get; private set; } = true;
-
-    /// <summary>主目录＝新实例默认装到这里，组头挂一个「默认」胶囊。</summary>
-    public bool IsPrimary { get; set; }
-
-    public Visibility DefaultVisibility => IsPrimary ? Visibility.Visible : Visibility.Collapsed;
-    public string ChevronGlyph => IsExpanded ? "\uE70D" : "\uE76C";
-    public System.Collections.ObjectModel.ObservableCollection<VersionRow> Items { get; } = [];
-
-    public void AddRow(VersionRow row)
+    private static string DirectoryTitle(string path)
     {
-        _rows.Add(row);
-        if (IsExpanded) Items.Add(row);
-    }
-
-    public void SetExpanded(bool expanded)
-    {
-        if (expanded == IsExpanded && Items.Count > 0) return;
-        IsExpanded = expanded;
-        Items.Clear();
-        if (expanded)
+        var normalized = Path.TrimEndingDirectorySeparator(path);
+        var name = Path.GetFileName(normalized);
+        if (string.Equals(name, ".minecraft", StringComparison.OrdinalIgnoreCase))
         {
-            foreach (var row in _rows) Items.Add(row);
+            var parent = Path.GetFileName(Path.GetDirectoryName(normalized));
+            if (!string.IsNullOrEmpty(parent)) return parent;
         }
-        else
-        {
-            Items.Add(VersionRow.Placeholder);
-        }
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsExpanded)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ChevronGlyph)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CountText)));
+        return string.IsNullOrEmpty(name) ? path : name;
     }
-
-    // ListView 的分组必须能枚举自身，否则组头下面不会出任何行。
-    public IEnumerator<VersionRow> GetEnumerator() => Items.GetEnumerator();
-
-    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 }
 
 internal static class VersionRowText

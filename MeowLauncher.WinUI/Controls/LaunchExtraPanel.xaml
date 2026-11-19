@@ -4,12 +4,12 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- 启动附加设置：窗口 / 进服 / 游戏参数 / 进程。全局设置页和实例页共用同一个控件。
-         行结构一律 [标签 150 | 控件 *]，标签与控件垂直居中；说明文字放在控件下方，不另起一行布局。
+         行结构一律 [标签 156 | 控件 *]，标签与控件垂直居中；说明文字放在控件下方，不另起一行布局。
          高级项放在 Expander 里默认收起。 -->
     <StackPanel Spacing="14">
         <Grid ColumnSpacing="14" RowSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="104" />
+                <ColumnDefinition Width="156" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
@@ -20,8 +20,6 @@
 
             <TextBlock Text="游戏窗口" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
             <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="10">
-                <ToggleSwitch x:Name="FullscreenSwitch" OnContent="全屏" OffContent="窗口" MinWidth="80"
-                              Toggled="AnyChanged" />
                 <NumberBox x:Name="WidthBox" Width="110" Height="32" VerticalAlignment="Center"
                            VerticalContentAlignment="Center" Minimum="0" Maximum="16384" PlaceholderText="宽"
                            ValueChanged="AnyChanged2" />
@@ -29,6 +27,10 @@
                 <NumberBox x:Name="HeightBox" Width="110" Height="32" VerticalAlignment="Center"
                            VerticalContentAlignment="Center" Minimum="0" Maximum="16384" PlaceholderText="高"
                            ValueChanged="AnyChanged2" />
+                <TextBlock Text="全屏" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" Margin="6,0,0,0" />
+                <ToggleSwitch x:Name="FullscreenSwitch" OnContent="" OffContent="" MinWidth="0" Width="56" Margin="0,0,-12,0"
+                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                              AutomationProperties.Name="全屏游戏窗口" Toggled="AnyChanged" />
             </StackPanel>
 
             <TextBlock Grid.Row="1" Text="加入服务器" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />

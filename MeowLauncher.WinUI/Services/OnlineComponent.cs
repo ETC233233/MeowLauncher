@@ -237,6 +237,7 @@ public static class OnlineComponent
         _installCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         ct = _installCts.Token;
         var task = TaskCenter.Add("下载联机组件", $"版本 {offer.Version}，约 {offer.Size / 1048576.0:0} MB", "room", "\uE896");
+        using var taskCancel = TaskCenter.CancellationFor(task.Id).Register(() => _installCts?.Cancel());
         var outer = progress;
         progress = outer is null ? null : new Progress<(double Fraction, string Text)>(p =>
         {

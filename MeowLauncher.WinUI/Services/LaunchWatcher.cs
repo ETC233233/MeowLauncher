@@ -31,12 +31,12 @@ public static class LaunchWatcher
         // 这时从 GameSessions 的运行台账里按实例名补一次，仍补不到才退回轮询。
         if (pid <= 0)
         {
-            try { pid = GameSessions.Find(version)?.Pid ?? 0; } catch { }
+            try { pid = GameSessions.Find(version, root)?.Pid ?? 0; } catch { }
         }
 
         lock (Items)
         {
-            Items.RemoveAll(t => string.Equals(t.Version, version, StringComparison.OrdinalIgnoreCase));
+            Items.RemoveAll(t => string.Equals(t.Version, version, StringComparison.OrdinalIgnoreCase) && string.Equals(t.Root, root, StringComparison.OrdinalIgnoreCase));
             Items.Add(new Tracked(version, task, pid, startedAt, root));
         }
         Hook();
@@ -72,7 +72,7 @@ public static class LaunchWatcher
             lock (Items) tracked = Items.Any(t => ReferenceEquals(t.Task, task));
             if (!tracked) return;
             try { await GameSessions.RefreshAsync(); } catch { }
-            var game = GameSessions.Find(version);
+            var game = GameSessions.Find(version, root);
             if (game is not null && game.Pid > 0)
             {
                 MarkSeen(task);
@@ -248,7 +248,7 @@ public static class LaunchWatcher
         lock (Items)
         {
             if (Items.Count == 0) return;
-            exited = Items.Where(t => Seen.Contains(t.Task) && !GameSessions.IsRunning(t.Version)).ToList();
+            exited = Items.Where(t => Seen.Contains(t.Task) && !GameSessions.IsRunning(t.Version, t.Root)).ToList();
         }
 
         if (exited.Count == 0) return;

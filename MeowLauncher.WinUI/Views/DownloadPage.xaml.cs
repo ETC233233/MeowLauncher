@@ -5,7 +5,6 @@ using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Text;
 
@@ -29,9 +28,7 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         public DownloadRow(MojangVersionInfo source, bool showType)
         {
             Source = source;
-            var (icon, stretch) = IconFor(source.Id);
-            Icon = icon;
-            IconStretch = stretch;
+            Icon = VanillaIcon;
             Meta = showType ? $"{source.TypeText} · {source.DateText}" : source.DateText;
         }
 
@@ -39,7 +36,6 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         public string Id => Source.Id;
         public string Meta { get; }
         public ImageSource Icon { get; }
-        public Stretch IconStretch { get; }
         public Visibility LatestVisibility => Source.IsLatest ? Visibility.Visible : Visibility.Collapsed;
         public Visibility InstalledVisibility => Source.Installed ? Visibility.Visible : Visibility.Collapsed;
 
@@ -62,7 +58,6 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         public string CountText { get; init; } = "";
         public bool Selected { get; init; }
         public ImageSource? Icon { get; init; }
-        public Stretch IconStretch { get; init; } = Stretch.Uniform;
 
         public Visibility SelectedVisibility => Selected ? Visibility.Visible : Visibility.Collapsed;
         public override string ToString() => Title;
@@ -74,39 +69,8 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
 
     // ------------------------------------------------------------------ 图标
 
-    private static readonly Dictionary<string, string> UpdateBanners = new(StringComparer.Ordinal)
-    {
-        ["1.21"] = "u121.jpg", ["1.20"] = "u120.jpg", ["1.19"] = "u119.jpg",
-        ["1.18"] = "u118.jpg", ["1.17"] = "u117.jpg", ["1.16"] = "u116.jpg",
-        ["1.15"] = "u115.jpg", ["1.14"] = "u114.jpg", ["1.13"] = "u113.jpg",
-        ["1.12"] = "u112.jpg", ["1.11"] = "u111.jpg", ["1.10"] = "u110.jpg",
-        ["1.9"] = "u19.jpg", ["1.8"] = "u18.jpg", ["1.7"] = "u17.jpg",
-    };
-
-    private static readonly Dictionary<string, ImageSource> _iconCache = new(StringComparer.Ordinal);
-
-    /// <summary>有该大版本的更新横幅就用横幅（居中裁成方块），没有就用 default_icon。按大版本缓存。</summary>
-    internal static (ImageSource Icon, Stretch Stretch) IconFor(string id)
-    {
-        var major = MajorOf(id);
-        if (UpdateBanners.TryGetValue(major, out var file))
-        {
-            if (_iconCache.TryGetValue(major, out var cached)) return (cached, Stretch.UniformToFill);
-            var path = Path.Combine(AppContext.BaseDirectory, "Assets", "updates", file);
-            if (File.Exists(path))
-            {
-                var img = new BitmapImage { DecodePixelWidth = 96, UriSource = new Uri(path) };
-                _iconCache[major] = img;
-                return (img, Stretch.UniformToFill);
-            }
-        }
-        if (!_iconCache.TryGetValue("logo", out var logo))
-        {
-            logo = new BitmapImage(new Uri("ms-appx:///Assets/default_icon.png"));
-            _iconCache["logo"] = logo;
-        }
-        return (logo, Stretch.Uniform);
-    }
+    private static ImageSource? _vanillaIcon;
+    private static ImageSource VanillaIcon => _vanillaIcon ??= InstanceIcon.ForLoader("vanilla");
 
     // ------------------------------------------------------------------ 状态
 
@@ -496,11 +460,10 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
                 ShowEmpty();
                 return;
             }
-            var (logo, logoStretch) = IconFor("");
             nav.Add(new NavRow
             {
                 Key = "search", Title = "搜索结果", Sub = $"跨正式版 / 快照 / 远古版",
-                CountText = items.Count.ToString(), Selected = true, Icon = logo, IconStretch = logoStretch,
+                CountText = items.Count.ToString(), Selected = true, Icon = VanillaIcon,
             });
             ListTitle.Text = "搜索结果";
             ListCount.Text = $"{items.Count} 个版本包含「{q}」";
@@ -512,12 +475,11 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             var selKey = _selKeyByCat[_selCat];
             foreach (var g in _groups.Where(g => g.Cat == _selCat))
             {
-                var (icon, stretch) = IconFor(g.Items[0].Id);
                 nav.Add(new NavRow
                 {
                     Key = g.Key, Title = g.Title, Sub = g.Sub,
                     CountText = g.Items.Count.ToString(), Selected = g.Key == selKey,
-                    Icon = icon, IconStretch = stretch,
+                    Icon = VanillaIcon,
                 });
             }
 
@@ -619,21 +581,21 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
     {
         if (_host is null) return;
         var args = new DownloadDetailArgs(v, _host,
-            (kind, loaderVersion, withPrereq, prereqVersion) =>
-                _ = InstallAsync(v, kind, loaderVersion, withPrereq, prereqVersion));
+            (kind, loaderVersion, api, folder, instanceName) =>
+                _ = InstallAsync(v, kind, loaderVersion, api, folder, instanceName));
         _host.OpenSubPage(typeof(DownloadDetailPage), args, "获取", "下载版本", v.Id);
     }
 
-    private async Task InstallAsync(MojangVersionInfo v, string kind, string loaderVersion, bool withPrereq,
-        string prereqVersion = "")
+    private async Task InstallAsync(MojangVersionInfo v, string kind, string loaderVersion,
+        DownloadApiSelection? api, string folder, string instanceName)
     {
-        // 目标文件夹已经存在时先要一个新实例名：绝不悄悄覆盖别人已有的实例。
-        var instanceName = await AskInstanceNameIfConflictAsync(v, kind, loaderVersion);
-        if (instanceName is null) return;
+        if (Directory.Exists(Path.Combine(folder, "versions", instanceName))) return;
 
-        var task = TaskCenter.Add($"安装 {v.Id}", kind == "vanilla" ? "原版" : $"{kind} 加载器", "download");
+        var task = TaskCenter.Add($"安装 {v.Id}", kind == "vanilla" ? "原版" : $"{kind} 加载器", "download",
+            targetIcon: InstanceIcon.ForLoader(kind));
         var progress = new Progress<string>(line =>
         {
+            if (!task.IsActive) return;
             var raw = line ?? "";
             // 结构化事件：@steps 步骤名 / @step 单步状态 / @stat 速度与剩余文件；其余仍是旧的「百分比|文案」。
             if (raw.StartsWith("@steps|", StringComparison.Ordinal))
@@ -644,9 +606,9 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             }
             if (raw.StartsWith("@step|", StringComparison.Ordinal))
             {
-                var f = raw[6..].Split('|');
+                var f = raw[6..].Split('|', 4);
                 if (f.Length >= 4 && int.TryParse(f[0], out var idx) && int.TryParse(f[1], out var state)
-                    && double.TryParse(f[2], out var spct))
+                    && TryReadProgress(f[2], out var spct))
                 {
                     TaskCenter.Step(task, idx, state, spct, f.Length > 3 ? f[3] : "");
                 }
@@ -659,24 +621,22 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             }
             if (raw.StartsWith("@stat|", StringComparison.Ordinal))
             {
-                var f = raw[6..].Split('|');
-                if (f.Length >= 4 && double.TryParse(f[0], out var overall))
+                var f = raw[6..].Split('|', 4);
+                if (f.Length >= 4 && TryReadProgress(f[0], out var overall))
                 {
-                    var speed = double.TryParse(f[1], out var sp) ? sp : 0;
+                    var speed = TryReadProgress(f[1], out var sp) ? sp : 0;
                     var remain = int.TryParse(f[2], out var rm) ? rm : 0;
                     TaskCenter.Stats(task, speed, remain > 0 ? $"{remain:N0} 个文件" : "");
                     TaskCenter.Progress(task, overall, task.Detail);
                     // 当前文件放任务卡右侧那行，灵动岛只留百分比
-                    if (f.Length >= 4 && f[3].Length > 0)
-                    {
-                        task.SetLive(System.IO.Path.GetFileName(f[3].Replace('\\', '/')));
-                    }
+                    task.SetLive(System.IO.Path.GetFileName(f[3].Replace('\\', '/')));
                 }
                 return;
             }
             var parts = raw.Split('|', 2);
-            if (parts.Length == 2 && double.TryParse(parts[0], out var pct) && pct > 0)
+            if (parts.Length == 2 && TryReadProgress(parts[0], out var pct) && pct > 0)
             {
+                TaskCenter.ResetDownloadStats(task);
                 TaskCenter.Progress(task, pct, parts[1]);
             }
             else
@@ -684,85 +644,29 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
                 TaskCenter.Report(task, parts.Length == 2 ? parts[1] : raw);
             }
         });
-        var result = await App.Backend.InstallVersionAsync(v.Id, kind, loaderVersion, progress, withPrereq,
-            instanceName ?? "", prereqVersion);
+        BackendResult result;
+        try
+        {
+            result = await App.Backend.InstallVersionAsync(v.Id, kind, loaderVersion, progress, api is not null,
+                instanceName, api?.VersionId ?? "", folder, api?.ProjectId ?? "", task.Id);
+        }
+        catch (Exception ex)
+        {
+            TaskCenter.Fail(task, ex.Message);
+            return;
+        }
         if (result.Ok)
         {
-            TaskCenter.Complete(task, "安装完成");
+            TaskCenter.Complete(task, result.Message ?? "安装完成");
             await SyncInstalledAsync();
-            await OfferSwitchAsync(string.IsNullOrWhiteSpace(result.Version) ? v.Id : result.Version);
+            await OfferSwitchAsync(string.IsNullOrWhiteSpace(result.Version) ? v.Id : result.Version, folder, result.Message);
         }
-        else TaskCenter.Fail(task, result.Message ?? "安装失败");
+        else TaskCenter.Fail(task, result.Message, result.Failure);
     }
 
-    /// <summary>这次安装会占用的实例文件夹名；Forge/NeoForge 由安装器决定，这里返回空。</summary>
-    private static string ExpectedInstanceId(MojangVersionInfo v, string kind, string loaderVersion) => kind switch
-    {
-        "vanilla" => v.Id,
-        "fabric" => loaderVersion.Length > 0 ? $"{v.Id}-Fabric_{loaderVersion}" : "",
-        "quilt" => loaderVersion.Length > 0 ? $"{v.Id}-Quilt_{loaderVersion}" : "",
-        _ => "",
-    };
-
-    private static string SuggestFreeName(string baseName, HashSet<string> known)
-    {
-        for (var i = 2; i < 200; i++)
-        {
-            var candidate = $"{baseName}-{i}";
-            if (!known.Contains(candidate)) return candidate;
-        }
-        return $"{baseName}-{DateTime.Now:HHmmss}";
-    }
-
-    /// <summary>返回 ""＝没有冲突直接装；返回新名字＝用这个名字装；返回 null＝用户取消。</summary>
-    private async Task<string?> AskInstanceNameIfConflictAsync(MojangVersionInfo v, string kind, string loaderVersion)
-    {
-        var expected = ExpectedInstanceId(v, kind, loaderVersion);
-        if (expected.Length == 0) return "";
-        var snapshot = await App.Backend.GetSnapshotAsync();
-        var ids = snapshot?.Versions.Select(x => x.Id).ToList() ?? new List<string>();
-        var known = ids.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!known.Contains(expected)) return "";
-
-        var box = new TextBox
-        {
-            Text = SuggestFreeName(expected, known),
-            PlaceholderText = "新的实例名称",
-            MaxLength = 64,
-            SelectionStart = 64,
-        };
-        var hint = new TextBlock
-        {
-            Text = $"已经有一个叫「{expected}」的实例文件夹了。换个名字就能并装一个新实例，原来的不受影响。",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.7,
-            Margin = new Thickness(0, 8, 0, 0),
-        };
-        var stack = new StackPanel();
-        stack.Children.Add(box);
-        stack.Children.Add(hint);
-        var invalid = new[] { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
-        while (true)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "实例名已被占用",
-                Content = stack,
-                PrimaryButtonText = "用这个名字安装",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return null;
-            var name = box.Text.Trim();
-            if (name.Length == 0) { hint.Text = "名字不能为空。"; continue; }
-            if (name.IndexOfAny(invalid) >= 0) { hint.Text = "名字里不能有 \\ / : * ? \" < > |"; continue; }
-            if (known.Contains(name)) { hint.Text = $"已经有叫「{name}」的实例了，换一个。"; continue; }
-            var dir = Path.Combine(GameDirectoryResolver.Resolve(AppPreferencesStore.Load()).FirstOrDefault() ?? "", "versions", name);
-            if (dir.Length > 0 && Directory.Exists(dir)) { hint.Text = $"游戏目录里已经有「{name}」文件夹了，换一个。"; continue; }
-            return name;
-        }
-    }
+    private static bool TryReadProgress(string text, out double value) =>
+        double.TryParse(text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out value);
 
     private static ScrollViewer? FindScrollViewer(DependencyObject? root)
     {
@@ -778,12 +682,14 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
     }
 
     /// <summary>装完在底部提示一下，并给一个「切换到它」：新实例不会自己变成当前实例。</summary>
-    private async Task OfferSwitchAsync(string versionId)
+    private async Task OfferSwitchAsync(string versionId, string folder, string? resultMessage)
     {
-        var snapshot = await App.Backend.GetSnapshotAsync(true);
+        var snapshot = await App.Backend.ScanDirAsync(folder);
         var target = snapshot?.Versions.FirstOrDefault(x => string.Equals(x.Id, versionId, StringComparison.OrdinalIgnoreCase));
-        var isCurrent = target is not null && string.Equals(snapshot?.Current?.Id, target.Id, StringComparison.OrdinalIgnoreCase);
-        ShowStatus(InfoBarSeverity.Success, "安装完成", isCurrent ? $"{versionId} 已安装，它就是当前实例。" : $"已安装 {versionId}。");
+        if (target is not null) target.Root = folder;
+        var isCurrent = InstanceSelection.Same(App.MainWindow?.Snapshot?.Current, target);
+        var message = resultMessage ?? $"已安装 {versionId}";
+        ShowStatus(InfoBarSeverity.Success, "安装完成", isCurrent ? $"{message}。它就是当前实例。" : message);
         if (target is null || isCurrent) return;
         var button = new Button { Content = "切换到这个实例" };
         button.Click += async (_, _) =>

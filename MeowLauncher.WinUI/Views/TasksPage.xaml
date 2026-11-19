@@ -1,4 +1,4 @@
-<Page
+﻿<Page
     x:Class="MeowLauncher.WinUI.Views.TasksPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -15,12 +15,11 @@
                             IsTabStop="True" UseSystemFocusVisuals="True"
                             HorizontalContentAlignment="Stretch"
                             AutomationProperties.Name="{x:Bind Title}"
-                            Tag="{x:Bind PageTag}" KeyDown="TaskRow_KeyDown">
+                            Tag="{x:Bind}" KeyDown="TaskRow_KeyDown" Tapped="TaskRow_Tapped">
                 <Border Background="{ThemeResource AppCardBrush}"
                         BorderBrush="{ThemeResource CardStrokeBrush}"
                         BorderThickness="1"
-                        CornerRadius="{StaticResource CardCornerRadius}" Padding="0"
-                        Tapped="TaskRow_Tapped">
+                        CornerRadius="{StaticResource CardCornerRadius}" Padding="0">
                     <Grid Padding="14,12" ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="38" />
@@ -28,11 +27,14 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Width="38" Height="38" CornerRadius="19"
-                            Background="{ThemeResource TintTasksSoftBrush}" VerticalAlignment="Top">
-                        <FontIcon Glyph="{x:Bind views:TaskVisuals.IconFor(Title)}" FontSize="16"
-                                  Foreground="{ThemeResource TintTasksBrush}" />
-                    </Border>
+                    <Grid Width="38" Height="38" VerticalAlignment="Top">
+                        <Border CornerRadius="19" Background="{ThemeResource TintTasksSoftBrush}"
+                                Visibility="{x:Bind TaskGlyphVisibility, Mode=OneWay}">
+                            <FontIcon Glyph="{x:Bind views:TaskVisuals.IconFor(Title)}" FontSize="16"
+                                      Foreground="{ThemeResource TintTasksBrush}" />
+                        </Border>
+                        <Image Source="{x:Bind TargetIcon, Mode=OneWay}" Width="32" Height="32" Stretch="Uniform" />
+                    </Grid>
 
                     <StackPanel Grid.Column="1" Spacing="10">
                         <!-- 标题行：任务名 + 进行中胶囊 + 右侧时间 -->
@@ -54,13 +56,13 @@
 
                         <!-- 进行中：大号总进度 + 进度条 + 速度 / 剩余文件 -->
                         <Grid ColumnSpacing="14"
-                              Opacity="{x:Bind ProgressOpacity, Mode=OneWay}"
-                              Visibility="{x:Bind ProgressVisibility, Mode=OneWay}">
+                              Visibility="{x:Bind views:TaskVisuals.ActiveVisibility(Status), Mode=OneWay}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom"
+                                        Visibility="{x:Bind views:TaskVisuals.DeterminateVisibility(IsIndeterminate), Mode=OneWay}">
                                 <TextBlock Text="{x:Bind views:TaskVisuals.PercentNumber(Progress), Mode=OneWay}"
                                            FontSize="26" FontWeight="SemiBold" Foreground="{ThemeResource AppTextBrush}" />
                                 <TextBlock Text="%" FontSize="13" Margin="2,0,0,4" VerticalAlignment="Bottom"
@@ -92,7 +94,7 @@
                         <TextBlock Text="{x:Bind Detail, Mode=OneWay}"
                                    FontSize="12" Foreground="{ThemeResource AppText2Brush}"
                                    TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
-                                   Visibility="{x:Bind views:TaskVisuals.FinishedVisibility(Status), Mode=OneWay}" />
+                                   Visibility="{x:Bind views:TaskVisuals.TaskDetailVisibility(Status, IsIndeterminate), Mode=OneWay}" />
 
                         <!-- 分步明细：一行一步（✓ 完成 / ◐ 进行中 / 等待） -->
                         <ItemsControl ItemsSource="{x:Bind Steps, Mode=OneWay}" Margin="0,2,0,0"
@@ -126,7 +128,7 @@
 
                         <StackPanel Orientation="Horizontal" Spacing="8"
                                     Visibility="{x:Bind views:TaskVisuals.FailedVisibility(Status), Mode=OneWay}">
-                            <TextBlock Text="{x:Bind views:TaskVisuals.ErrorCode(Detail), Mode=OneWay}"
+                            <TextBlock Text="{x:Bind ErrorCodeText, Mode=OneWay}"
                                        FontSize="11.5" Foreground="{ThemeResource AppBadBrush}"
                                        VerticalAlignment="Center" />
                             <Button Content="复制诊断" Height="32" Padding="10,0"
@@ -139,8 +141,8 @@
                     </StackPanel>
 
                     <!-- 尾部只留一个可操作元素：进行中=取消，结束=状态；时间与进度都在左侧文字块里。 -->
-                    <Grid Grid.Column="2" VerticalAlignment="Top">
-                        <Button Content="取消" Height="32" Padding="14,0"
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top"><Button Content="取消" Height="32" Padding="14,0"
                                 CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
                                 Background="{ThemeResource AppChipBrush}" FontSize="12"
                                 Foreground="{ThemeResource AppText2Brush}"
@@ -150,6 +152,10 @@
                                 IsEnabled="{x:Bind views:TaskVisuals.CancelEnabled(Status, Detail), Mode=OneWay}"
                                 Visibility="{x:Bind views:TaskVisuals.CancelVisibility(Status), Mode=OneWay}"
                                 Tag="{x:Bind Id}" Click="Cancel_Click" />
+<Button Width="32" Height="32" Padding="0" CornerRadius="6" Tag="{x:Bind Id}"
+    Visibility="{x:Bind views:TaskVisuals.FinishedVisibility(Status), Mode=OneWay}"
+    AutomationProperties.Name="移除此任务记录" Click="DismissTask_Click"><FontIcon Glyph="&#xE711;" FontSize="12"/></Button>
+</StackPanel>
                         <Border Background="{x:Bind views:TaskVisuals.PillBackground(Status), Mode=OneWay}"
                                 CornerRadius="{StaticResource ChipCornerRadius}" Padding="9,3"
                                 HorizontalAlignment="Right"
@@ -157,7 +163,7 @@
                             <TextBlock Text="{x:Bind Status, Mode=OneWay}" FontSize="11.5"
                                        Foreground="{x:Bind views:TaskVisuals.StatusBrush(Status), Mode=OneWay}" />
                         </Border>
-                    </Grid>
+                    </StackPanel>
                     </Grid>
                 </Border>
             </ContentControl>
@@ -414,7 +420,7 @@
                                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                     <Border Width="8" Height="8" CornerRadius="4"
                                             Background="{ThemeResource AppGoodBrush}" VerticalAlignment="Center" />
-                                    <TextBlock Text="已完成" FontSize="14" FontWeight="SemiBold"
+                                    <TextBlock Text="完成与取消" FontSize="14" FontWeight="SemiBold"
                                                Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
                                     <Border Background="{ThemeResource AppChipBrush}"
                                             CornerRadius="{StaticResource ChipCornerRadius}" Padding="7,2">

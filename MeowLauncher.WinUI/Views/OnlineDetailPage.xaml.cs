@@ -41,6 +41,7 @@ public sealed partial class OnlineDetailPage : Page
             File.GameShort,
             File.Loader,
             File.RequiredText,
+            File.Installed ? "已安装 · " + File.InstalledInstance : "",
         }.Where(part => !string.IsNullOrWhiteSpace(part)));
 
         public Visibility SelectedVisibility => _selected ? Visibility.Visible : Visibility.Collapsed;
@@ -58,6 +59,12 @@ public sealed partial class OnlineDetailPage : Page
     private bool _installed;
     private bool _busy;
     private bool _noFiles;
+    private bool _loadingFiles;
+    private bool _wasInstallingPack;
+    private string _installedInstanceId = "";
+    private string _installedRoot = "";
+    private TaskEntry? InstallingPack => _project?.IsModpack == true && _args is { } args
+        ? TaskCenter.Entries.FirstOrDefault(task => task.IsActive && task.ResourceKey == $"pack:{args.Source}:{_project.Id}") : null;
 
     public OnlineDetailPage()
     {
@@ -69,7 +76,9 @@ public sealed partial class OnlineDetailPage : Page
         base.OnNavigatedTo(e);
         if (e.Parameter is not OnlineDetailArgs args) return;
         _args = args;
+        TaskCenter.Changed += PackTask_Changed;
         var p = _project = args.Project;
+        _wasInstallingPack = InstallingPack is not null;
         try
         {
             App.Trace("OnlineDetail: navigated " + p.Title);
@@ -131,6 +140,18 @@ public sealed partial class OnlineDetailPage : Page
 
     private async Task LoadFilesAsync()
     {
+        if (_loadingFiles || _busy) return;
+        _loadingFiles = true;
+        try { await ReadFilesAsync(); }
+        finally
+        {
+            _loadingFiles = false;
+            UpdateBottom();
+        }
+    }
+
+    private async Task ReadFilesAsync()
+    {
         var p = _project!;
         var a = _args!;
         FilesRetry.Visibility = Visibility.Collapsed;
@@ -147,6 +168,7 @@ public sealed partial class OnlineDetailPage : Page
         }
 
         SetNote("正在读取版本列表…", busy: true);
+        UpdateBottom();
         OnlineFilesResult? files = null;
         string error = "";
         try
@@ -206,6 +228,12 @@ public sealed partial class OnlineDetailPage : Page
         if (_selected is not null) _selected.Selected = false;
         _selected = row;
         row.Selected = true;
+        if (_project?.IsModpack == true)
+        {
+            _installed = row.File.Installed;
+            _installedInstanceId = row.File.InstalledInstance;
+            _installedRoot = row.File.InstalledRoot;
+        }
         ApplyHint();
         UpdateBottom();
     }
@@ -214,6 +242,20 @@ public sealed partial class OnlineDetailPage : Page
     {
         if (!_busy) await LoadFilesAsync();
     }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        TaskCenter.Changed -= PackTask_Changed;
+        base.OnNavigatedFrom(e);
+    }
+
+    private void PackTask_Changed(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
+    {
+        var installing = InstallingPack is not null;
+        if (_wasInstallingPack && !installing && !_busy) _ = LoadFilesAsync();
+        _wasInstallingPack = installing;
+        UpdateBottom();
+    });
 
     private void UpdateBottom()
     {
@@ -231,7 +273,7 @@ public sealed partial class OnlineDetailPage : Page
         if (dp && _saves is null && !_savesLoading) _ = LoadSavesAsync();
         SavePanel.Visibility = dp ? Visibility.Visible : Visibility.Collapsed;
         var needSave = dp && (SelectedSave() is null || (_selected is null && _rows.Count == 0));
-        var canInstall = (p.IsInstallable || dp) && !needSave && hasTarget && !_busy && !_installed && !_noFiles && !loaderBlocked;
+        var canInstall = (p.IsInstallable || dp) && !needSave && hasTarget && !_busy && !_loadingFiles && !_installed && !_noFiles && !loaderBlocked;
         string summary;
         var where = p.IsModpack ? "新实例" : dp ? $"{a.VersionId} / {SelectedSave()}" : a.VersionId;
         if (_installed) summary = p.IsModpack ? $"{p.Title} 已安装为新实例" : $"{p.Title} 已安装到 {a.VersionId}";
@@ -239,6 +281,7 @@ public sealed partial class OnlineDetailPage : Page
         else if (needSave) summary = _saves is { Count: 0 } ? "先在游戏里创建一个存档" : "请选择要装进的存档";
         else if (!hasTarget) summary = "还没有选择实例";
         else if (loaderBlocked) summary = "实例加载器不兼容";
+        else if (_loadingFiles) summary = "正在读取版本列表…";
         else if (_noFiles) summary = "无兼容版本";
         else if (_selected is not null) summary = $"将安装 {_selected.Name}（{where}）";
         else summary = $"将安装最新版本（{where}）";
@@ -250,8 +293,9 @@ public sealed partial class OnlineDetailPage : Page
             : "";
         DetailDeps.Visibility = DetailDeps.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
 
-        DetailInstall.IsEnabled = canInstall;
-        DetailInstall.Content = _installed ? "已安装" : _busy ? "安装中…" : "安装";
+        var installingPack = InstallingPack is not null;
+        DetailInstall.IsEnabled = installingPack || canInstall || (_project?.IsModpack == true && _installed && !_busy);
+        DetailInstall.Content = installingPack ? "查看安装进度" : _installed ? (p.IsModpack ? "查看实例" : "已安装") : _busy ? "安装中…" : "安装";
     }
 
     private List<string>? _saves;
@@ -291,7 +335,17 @@ public sealed partial class OnlineDetailPage : Page
 
     private async void DetailInstall_Click(object sender, RoutedEventArgs e)
     {
-        if (_project is null || _args is null || _busy || _installed) return;
+        if (InstallingPack is not null)
+        {
+            App.MainWindow.Navigate("tasks");
+            return;
+        }
+        if (_project?.IsModpack == true && _installed && _installedInstanceId.Length > 0)
+        {
+            App.MainWindow.OpenInstalledInstance(_installedInstanceId, _installedRoot);
+            return;
+        }
+        if (_project is null || _args is null || _busy || _loadingFiles || _installed) return;
         var p = _project;
         var a = _args;
         _busy = true;
@@ -311,25 +365,41 @@ public sealed partial class OnlineDetailPage : Page
                 SetNote("", busy: false);
                 if (plan is null) return;
             }
+            var snapshot = App.MainWindow.Snapshot;
+            var targetInstance = snapshot?.Current is { } current && current.Id == target
+                ? current : snapshot?.Versions.FirstOrDefault(v => v.Id == target);
             task = TaskCenter.Add($"安装 {p.Title}",
                 $"{a.SourceName} · {(file is null ? p.TypeText : file.Display)} · {(p.IsModpack ? "新实例" : a.VersionId)}",
-                PageTagFor(p), "");
+                PageTagFor(p), "", InstanceIcon.For(targetInstance));
+            if (p.IsModpack) task.ResourceKey = $"pack:{a.Source}:{p.Id}";
+            var packProgress = p.IsModpack ? new Progress<string>(stage => TaskCenter.Report(task, stage)) : null;
             var result = plan is not null
-                ? await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, plan.FileId, target, p.InstallKind, plan.Confirmation)
+                ? await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, plan.FileId, target, p.InstallKind, plan.Confirmation, taskId: task.Id)
                 : dpInstall
-                ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file?.Id ?? "", target, SelectedSave() ?? "")
+                ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file?.Id ?? "", target, SelectedSave() ?? "", task.Id)
                 : file is null
-                ? await App.Backend.InstallOnlineAsync(a.Source, p.Id, target, p.InstallKind)
-                : await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, file.Id, target, p.InstallKind);
+                ? await App.Backend.InstallOnlineAsync(a.Source, p.Id, target, p.InstallKind, packProgress, task.Id)
+                : await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, file.Id, target, p.InstallKind, progress: packProgress, taskId: task.Id);
             if (result.Ok)
             {
+                if (p.IsModpack) task.TargetIcon = InstanceIcon.ForInstalledPack(result);
                 TaskCenter.Complete(task, result.Message);
                 _installed = true;
+                if (p.IsModpack)
+                {
+                    _installedInstanceId = result.Version;
+                    _installedRoot = System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(result.InstancePath)) ?? "";
+                }
+                if (p.IsModpack && _selected is not null)
+                {
+                    _selected.File.InstalledInstance = result.Version;
+                    _selected.File.InstalledRoot = System.IO.Path.GetDirectoryName(System.IO.Path.GetDirectoryName(result.InstancePath)) ?? "";
+                }
                 a.OnInstalled(p);
             }
             else
             {
-                TaskCenter.Fail(task, result.Message);
+                TaskCenter.Fail(task, result.Message, result.Failure);
                 SetNote($"安装失败：{result.Message}", busy: false);
             }
         }

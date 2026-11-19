@@ -3,6 +3,7 @@ namespace MeowLauncher.WinUI.Models;
 public sealed class HiddenVersionInfo
 {
     public string Id { get; set; } = "";
+    public string Root { get; set; } = "";
     public long Time { get; set; }
 
     public override string ToString() => Id;

@@ -1,4 +1,4 @@
-using MeowLauncher.WinUI.Models;
+﻿using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI;

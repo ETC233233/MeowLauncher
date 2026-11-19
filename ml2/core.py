@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -153,6 +154,27 @@ def java_major(path: Path, *, infer_from_path: bool = True) -> int:
     return 0
 
 
+def java_details(path: Path) -> dict:
+    text = ""
+    try: text = (path.parent.parent / "release").read_text(encoding="utf-8")
+    except (OSError, UnicodeError): pass
+    version = re.search(r'JAVA_VERSION="([^"]+)"', text)
+    arch = re.search(r'OS_ARCH="([^"]+)"', text)
+    if not version or not arch:
+        probe = path.with_name("java.exe") if path.name.lower() == "javaw.exe" and path.with_name("java.exe").is_file() else path
+        proc = subprocess.run([str(probe), "-XshowSettings:properties", "-version"], capture_output=True,
+                              text=True, errors="replace", timeout=8,
+                              creationflags=0x08000000 if os.name == "nt" else 0)
+        if proc.returncode != 0: raise RuntimeError("Java 无法运行")
+        text = proc.stdout + proc.stderr
+        version = re.search(r'java.version\s*=\s*(\S+)', text)
+        arch = re.search(r'os.arch\s*=\s*(\S+)', text)
+    major = re.match(r'(?:1\.)?(\d+)', version[1]) if version else None
+    raw = arch[1].lower() if arch else ""
+    return {"major": int(major[1]) if major else 0,
+            "arch": {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64", "i386": "x86", "i686": "x86"}.get(raw, raw)}
+
+
 def find_java(need: int = 0) -> Path | None:
     cands = java_candidates()
     if not cands:
@@ -196,38 +218,56 @@ def _ver_key(s: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", s))
 
 
+def system_arch() -> str:
+    raw = platform.machine().lower()
+    return {"amd64": "x86_64", "x64": "x86_64", "i386": "x86", "i686": "x86", "arm64": "aarch64"}.get(raw, raw)
+
+
 def rule_allows(rules: list, features: dict | None = None) -> bool:
     if not rules:
         return True
     features = features or {}
     allowed = False
-    for r in rules:
-        action = r.get("action", "allow")
-        os_ = r.get("os")
-        ok = True
-        if os_:
-            if os_.get("name") and os_["name"] != "windows":
-                ok = False
-            if os_.get("arch"):
-                bits = "64" if sys.maxsize > 2 ** 32 else "32"
-                if os_["arch"] not in (bits, sys.machine if hasattr(sys, "machine") else ""):
-                    if os_["arch"] == "x86" and bits == "32":
-                        pass
-                    elif os_["arch"] == "x86":  # x86 rule on 64-bit -> usually false
-                        ok = False
-            if os_.get("version") and ok:
+    os_name = {"Windows": "windows", "Darwin": "osx", "Linux": "linux"}.get(platform.system(), platform.system().lower())
+    os_version = platform.version()
+    for rule in rules:
+        os_rule = rule.get("os") or {}
+        matches = True
+        for key, actual in (("name", os_name), ("arch", system_arch()), ("version", os_version)):
+            if key in os_rule:
                 try:
-                    if not re.search(os_["version"], "10.0.26300"):
-                        ok = False
+                    matches = matches and (re.search(str(os_rule[key]), actual) if key == "version" else re.fullmatch(str(os_rule[key]), actual)) is not None
                 except re.error:
-                    pass
-        if r.get("features"):
-            for fk, fv in r["features"].items():
-                if bool(features.get(fk, False)) != bool(fv):
-                    ok = False
-        if ok:
-            allowed = action == "allow"
+                    matches = False
+        if any(bool(features.get(key, False)) != bool(value) for key, value in (rule.get("features") or {}).items()):
+            matches = False
+        if matches:
+            allowed = rule.get("action", "allow") == "allow"
     return allowed
+
+
+def split_arguments(text: str) -> list[str]:
+    # Windows CRT quote/backslash rules, also usable by tests without a Windows shell.
+    args, i = [], 0
+    while i < len(text):
+        while i < len(text) and text[i].isspace(): i += 1
+        if i == len(text): break
+        value, quoted = [], False
+        while i < len(text) and (quoted or not text[i].isspace()):
+            slashes = 0
+            while i < len(text) and text[i] == "\\": slashes += 1; i += 1
+            if i < len(text) and text[i] == '"':
+                value.extend("\\" * (slashes // 2))
+                if slashes % 2: value.append('"')
+                elif quoted and i + 1 < len(text) and text[i + 1] == '"': value.append('"'); i += 1
+                else: quoted = not quoted
+                i += 1
+            else:
+                value.extend("\\" * slashes)
+                if i < len(text) and (quoted or not text[i].isspace()): value.append(text[i]); i += 1
+        if quoted: raise ValueError("启动参数的引号没有闭合。")
+        args.append("".join(value))
+    return args
 
 
 @dataclass
@@ -245,6 +285,9 @@ class LaunchOptions:
     access_token: str = "0"
     uuid: str = ""
     user_type: str = "legacy"
+    client_id: str = ""
+    xuid: str = ""
+    user_properties: dict = field(default_factory=dict)
     # 额外启动参数（DESIGN-1110 第 4 项）：游戏参数、环境变量、包装命令
     extra_game: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -263,11 +306,13 @@ class Version:
 
     def _resolve(self, data: dict, depth: int) -> dict:
         parent_id = data.get("inheritsFrom")
-        if not parent_id or depth > 6:
-            return data
+        if depth > 16: raise ValueError("版本配置存在循环或过深的继承关系。")
+        if not parent_id: return data
         parent_path = self.mc / "versions" / parent_id / f"{parent_id}.json"
         if not parent_path.exists():
-            return data
+            if data.get("mainClass") and "libraries" in data and (data.get("arguments") or data.get("minecraftArguments")):
+                return data
+            raise FileNotFoundError(f"缺少父版本配置：{parent_id}")
         parent = self._resolve(json.loads(parent_path.read_text(encoding="utf-8")), depth + 1)
         return _merge(parent, data)
 
@@ -353,6 +398,10 @@ class Version:
     def base_version(self) -> str:
         # 加载器版本（Fabric/Quilt）的 id 是 fabric-loader-x-y，依赖 inheritsFrom/clientVersion
         # 才能找到原版客户端 jar；只靠 id 正则会把父版本认成自己。
+        # 整合包的直接父版本可能是另一层加载器，clientVersion 则直接指向游戏 jar。
+        client = str(self.raw.get("clientVersion") or "")
+        if client:
+            return client
         try:
             parent = str(self.raw.get("inheritsFrom") or "")
         except Exception:
@@ -392,32 +441,32 @@ class Version:
             if len(parts) > 3:
                 cls = parts[3]
             fname = f"{artifact}-{version}" + (f"-{cls}" if cls else "") + ".jar"
-            return self.mc / "libraries" / Path(group.replace(".", "/")) / artifact / version / fname
+            from ml2.integrity import safe_child
+            return safe_child(self.mc / "libraries", f"{group.replace('.', '/')}/{artifact}/{version}/{fname}")
         return None
 
-    def libraries(self) -> list[Path]:
-        out = []
+    def selected_libraries(self):
+        from ml2.integrity import safe_child
         for lib in self.data.get("libraries", []):
-            if not rule_allows(lib.get("rules"), {}):
-                continue
+            if not rule_allows(lib.get("rules"), {}): continue
             downloads = lib.get("downloads") or {}
-            classifiers = downloads.get("classifiers") or {}
-            native_key = None
-            natives = lib.get("natives") or {}
-            if natives:
-                native_key = natives.get("windows")
-                if native_key is None:
-                    continue
-                native_key = native_key.replace("${arch}", "64" if sys.maxsize > 2 ** 32 else "32")
-            if native_key and native_key in classifiers:
-                art = classifiers[native_key]
-                if art.get("path"):
-                    out.append(self.mc / "libraries" / art["path"])
-                    continue
-            p = self._lib_path(lib)
-            if p and p.exists():
-                out.append(p)
-        return out
+            art = downloads.get("artifact")
+            if art or not lib.get("natives"):
+                path = safe_child(self.mc / "libraries", art["path"]) if art and art.get("path") else self._lib_path(lib)
+                if path:
+                    entry = dict(art or {})
+                    entry.setdefault("url", (lib.get("url") or "https://libraries.minecraft.net/").rstrip("/") + "/" + path.relative_to(self.mc / "libraries").as_posix())
+                    yield lib, entry, path, False
+            key = (lib.get("natives") or {}).get("windows")
+            if key:
+                key = key.replace("${arch}", "64" if sys.maxsize > 2 ** 32 else "32")
+                native = (downloads.get("classifiers") or {}).get(key)
+                if not native or not native.get("path"):
+                    raise ValueError("版本声明的原生依赖没有对应下载条目。")
+                yield lib, native, safe_child(self.mc / "libraries", native["path"]), True
+
+    def libraries(self) -> list[Path]:
+        return list(dict.fromkeys(path for _, _, path, native in self.selected_libraries() if not native))
 
     def classpath(self, extra: list[Path] | None = None) -> str:
         items = self.libraries()
@@ -440,50 +489,56 @@ class Version:
         fid = f.get("id")
         if not url or not fid:
             return None
-        dest = assets / "log_configs" / fid
-        if not dest.is_file():
-            try:
-                from ml2 import net
-                net._download(url, dest, sha1=str(f.get("sha1") or ""), size=int(f.get("size") or 0))
-            except Exception:
-                return None
+        from ml2.integrity import safe_child, valid_file
+        dest = safe_child(assets / "log_configs", fid)
+        if not valid_file(dest, str(f.get("sha1") or ""), int(f.get("size") or 0)):
+            from ml2 import net
+            net._download(url, dest, sha1=str(f.get("sha1") or ""), size=int(f.get("size") or 0))
         return str(dest)
 
-    def extract_natives(self, natives: Path, on_log: Callable[[str], None] | None = None) -> None:
-        """把带 classifiers 的 natives jar 解压到 natives 目录（旧版 LWJGL2 必需）。"""
+    def extract_natives(self, natives: Path, on_log=None) -> None:
         import zipfile
-        log = on_log or (lambda s: None)
+        from ml2.integrity import safe_child
         natives.mkdir(parents=True, exist_ok=True)
-        done = 0
-        for lib in self.data.get("libraries", []):
-            if not rule_allows(lib.get("rules"), {}):
-                continue
-            natives_map = lib.get("natives") or {}
-            key = natives_map.get("windows")
-            if not key:
-                continue
-            key = key.replace("${arch}", "64" if sys.maxsize > 2 ** 32 else "32")
-            art = ((lib.get("downloads") or {}).get("classifiers") or {}).get(key)
-            if not art or not art.get("path"):
-                continue
-            jar = self.mc / "libraries" / art["path"]
-            if not jar.is_file():
-                continue
+        for lib, art, jar, native in self.selected_libraries():
+            if not native: continue
+            excludes = ["META-INF/"] + list((lib.get("extract") or {}).get("exclude") or [])
             try:
-                with zipfile.ZipFile(jar) as z:
-                    for info in z.infolist():
-                        if info.is_dir() or info.filename.startswith("META-INF/"):
-                            continue
-                        target = natives / Path(info.filename).name
-                        if target.is_file() and target.stat().st_size == info.file_size:
-                            continue
-                        with z.open(info) as src, open(target, "wb") as dst:
-                            dst.write(src.read())
-                        done += 1
-            except Exception as e:
-                log(f"[警告] 解压 natives 失败 {jar.name}: {e}")
-        if done:
-            log(f"[natives] 已解压 {done} 个库文件到 {natives}")
+                with zipfile.ZipFile(jar) as archive:
+                    for info in archive.infolist():
+                        name = info.filename.replace("\\", "/")
+                        if info.is_dir() or any(name.startswith(prefix) for prefix in excludes): continue
+                        target = safe_child(natives, name)
+                        data = archive.read(info)  # CRC is checked before replacing the destination.
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = target.with_name(target.name + ".meow-native-tmp")
+                        temporary.write_bytes(data)
+                        os.replace(temporary, target)
+            except Exception as exc:
+                raise RuntimeError(f"原生依赖解压失败：{jar.name}，请修复实例文件。") from exc
+
+    def prepare_assets(self, game_dir: Path) -> Path:
+        from ml2.integrity import safe_child, valid_file, atomic_copy
+        assets = self.mc / "assets"
+        index = assets / "indexes" / (self.asset_index + ".json")
+        if not index.is_file():
+            if self.data.get("assetIndex"): raise RuntimeError("资源索引缺失，请先修复实例。")
+            return assets
+        data = json.loads(index.read_text(encoding="utf-8"))
+        roots = []
+        virtual = assets / "virtual" / self.asset_index
+        if data.get("virtual"): roots.append(virtual)
+        if data.get("map_to_resources"): roots.append(game_dir / "resources")
+        for name, info in (data.get("objects") or {}).items():
+            if not roots: break
+            h = str(info["hash"])
+            if len(h) != 40 or any(c not in "0123456789abcdef" for c in h.lower()): raise ValueError("资源哈希无效")
+            source = assets / "objects" / h[:2] / h
+            if not valid_file(source, h, int(info.get("size") or 0)): raise RuntimeError("资源对象损坏，请先修复实例。")
+            for root in roots:
+                target = safe_child(root, name)
+                if not valid_file(target, h, int(info.get("size") or 0)): atomic_copy(source, target)
+        return virtual if data.get("virtual") else (game_dir / "resources" if data.get("map_to_resources") else assets)
 
     def natives_dir(self, writable_root: Path | None = None) -> Path:
         base = writable_root or self.dir
@@ -517,11 +572,9 @@ class Version:
         if not is_writable(game_dir):
             self._warn.append(f"[警告] 游戏目录不可写，仍按原目录启动：{game_dir}")
         natives = self.natives_dir(data_dir if is_writable(self.dir) else user_dir())
-        try:
-            self.extract_natives(natives)
-        except Exception:
-            pass
+        self.extract_natives(natives)
         assets = data_dir / "assets"
+        game_assets = self.prepare_assets(game_dir)
         ctx = {
             "auth_player_name": opt.player,
             "version_name": self.id,
@@ -530,8 +583,11 @@ class Version:
             "assets_index_name": self.asset_index,
             "auth_uuid": (opt.uuid.replace("-", "") if opt.uuid else offline_uuid(opt.player).replace("-", "")),
             "auth_access_token": opt.access_token or "0",
-            "clientid": "0",
-            "auth_xuid": "0",
+            "clientid": opt.client_id,
+            "auth_xuid": opt.xuid,
+            "user_properties": json.dumps(opt.user_properties, separators=(",", ":")),
+            "user_property_map": json.dumps(opt.user_properties, separators=(",", ":")),
+            "auth_session": "token:" + opt.access_token + ":" + opt.uuid,
             "user_type": opt.user_type or "legacy",
             "version_type": self.type,
             "natives_directory": str(natives),
@@ -540,7 +596,7 @@ class Version:
             "classpath": self.classpath(),
             "library_directory": str(data_dir / "libraries"),
             "classpath_separator": os.pathsep,
-            "game_assets": str(assets),
+            "game_assets": str(game_assets),
             "resolution_width": str(opt.width or 1280),
             "resolution_height": str(opt.height or 720),
         }
@@ -552,12 +608,10 @@ class Version:
             elif isinstance(a, dict) and rule_allows(a.get("rules"), {}):
                 val = a.get("value", [])
                 jvm.extend(self._sub(v, ctx) for v in ([val] if isinstance(val, str) else val))
-        try:
-            _lc = self.log_config(assets)
-            if _lc:
-                jvm.append(f"-Dlog4j.configurationFile={_lc}")
-        except Exception:
-            pass
+        _lc = self.log_config(assets)
+        if _lc:
+            argument = ((self.data.get("logging") or {}).get("client") or {}).get("argument") or "-Dlog4j.configurationFile=${path}"
+            jvm.append(self._sub(argument, {"path": _lc}))
         # GC dedup
         has_zgc = any(x.startswith("-XX:+UseZGC") for x in jvm)
         if has_zgc:
@@ -573,7 +627,7 @@ class Version:
                 continue
             cleaned.append(x)
         jvm = cleaned
-        extra = [x for x in opt.extra_jvm.split() if x.strip()]
+        extra = split_arguments(opt.extra_jvm)
         cmd = [str(java), f"-Xms{opt.min_mem}", f"-Xmx{opt.max_mem}"] + jvm + extra
         cmd += [f"-Djava.library.path={natives}", f"-Djna.tmpdir={natives}",
                 f"-Dorg.lwjgl.system.SharedLibraryExtractPath={natives}/lwjgl",
@@ -586,19 +640,23 @@ class Version:
             if isinstance(a, str):
                 gargs.append(self._sub(a, ctx))
             elif isinstance(a, dict) and rule_allows(a.get("rules"), {"is_demo_user": False,
-                                                                     "has_custom_resolution": False,
+                                                                     "has_custom_resolution": bool(opt.width and opt.height),
                                                                      "has_quick_plays_support": False,
                                                                      "is_quick_play_singleplayer": False}):
                 val = a.get("value", [])
                 gargs.extend(self._sub(v, ctx) for v in ([val] if isinstance(val, str) else val))
         if not gargs and self.data.get("minecraftArguments"):
-            gargs = [self._sub(x, ctx) for x in self.data["minecraftArguments"].split()]
+            gargs = [self._sub(x, ctx) for x in split_arguments(self.data["minecraftArguments"])]
         if opt.fullscreen and "--fullscreen" not in gargs:
             gargs.append("--fullscreen")
-        for extra_arg in getattr(opt, "extra_game", []) or []:
-            if str(extra_arg) not in gargs:
-                gargs.append(str(extra_arg))
+        gargs.extend(str(arg) for arg in (opt.extra_game or []))
+        if opt.width and opt.height:
+            if "--width" not in gargs: gargs += ["--width", str(opt.width)]
+            if "--height" not in gargs: gargs += ["--height", str(opt.height)]
         cmd += gargs
+        unresolved = sorted({key for arg in cmd for key in re.findall(r"\$\{([^}]+)\}", arg)})
+        if unresolved: raise ValueError("启动参数包含未处理的占位符：" + ", ".join(unresolved))
+        if not self.main_class: raise ValueError("版本配置缺少 mainClass。")
         return cmd, game_dir
 
 
@@ -668,12 +726,8 @@ class Launcher:
                                          stdout=logf, stderr=subprocess.STDOUT,
                                          creationflags=0x08000000)
         except Exception:
-            # 连重定向都不行时，至少把游戏拉起来（日志由游戏自己写）
-            self.proc = subprocess.Popen(cmd, cwd=str(cwd), env=env,
-                                         stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL,
-                                         creationflags=0x08000000)
+            logf.close()
+            raise
         try:
             logf.close()  # 子进程已继承句柄，父进程关掉自己的
         except Exception:

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.RegularExpressions;
 using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Models;
@@ -147,7 +147,7 @@ public sealed partial class AccountPage : Page
             _friendsAccountKey = active?.Key ?? "";
             _friends = null;
             _friendsLoaded = false;
-            FriendsSummary.Text = "正在读取好友列表…";
+            FriendsSummary.Text = "好友";
             FriendList.Children.Clear();
             IncomingList.Children.Clear();
             OutgoingList.Children.Clear();
@@ -1096,17 +1096,27 @@ public sealed partial class AccountPage : Page
     {
         var input = new TextBox
         {
-            PlaceholderText = "1–16 位字母、数字或下划线",
-            MaxLength = 16,
-            Width = 320,
+            PlaceholderText = "请输入玩家名",
+            MinWidth = 180,
         };
         var hint = new TextBlock
         {
-            Text = "离线账户只在本机使用，不能进入正版服务器。",
+            Text = "离线账户不适用于开启了正版验证的服务器或正版账号玩家所开启的非自定义局域网联机。"
+                 + "此外，在联机时为了显示自己的皮肤，需要玩家同时安装皮肤补丁模组。"
+                 + "离线账户仅供体验使用，如需完整的游玩体验，请支持正版 Minecraft。",
             FontSize = 11.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
         };
+        var buyLink = new HyperlinkButton
+        {
+            Content = "购买 Minecraft",
+            Padding = new Thickness(0, 0, 0, 0),
+            FontSize = 11.5,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        buyLink.Click += async (_, _) =>
+            await Windows.System.Launcher.LaunchUriAsync(new Uri("https://www.minecraft.net/store"));
         var model = new RadioButtons
         {
             Header = "皮肤模型",
@@ -1118,6 +1128,7 @@ public sealed partial class AccountPage : Page
         var body = new StackPanel { Spacing = 12, Width = 340 };
         body.Children.Add(input);
         body.Children.Add(hint);
+        body.Children.Add(buyLink);
         body.Children.Add(model);
 
         var dialog = new ContentDialog
@@ -1201,9 +1212,9 @@ public sealed partial class AccountPage : Page
         _permsUnavailable = false;
         PermsReloginButton.Visibility = Visibility.Collapsed;
         PermsStatus.Foreground = (Brush)Application.Current.Resources["AppText3Brush"];
-        PermsStatus.Text = perms.Banned
+        SetPermsStatus(perms.Banned
             ? "该账户当前无法使用在线服务。"
-            : "";
+            : "");
         PermPrivileges.Text = BuildPrivilegesText(perms);
     }
 
@@ -1230,8 +1241,17 @@ public sealed partial class AccountPage : Page
         return string.Join("；", parts);
     }
 
+    private void SetPermsStatus(string message)
+    {
+        PermsStatus.Text = message;
+        PermsFeedback.Visibility = string.IsNullOrWhiteSpace(message)
+            && PermsReloginButton.Visibility != Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void SetPermsBusy(bool busy)
     {
+        PermsLoadingRing.IsActive = busy;
+        PermsLoadingRing.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         var enabled = !busy && !_permsUnavailable;
         PermFriendsSwitch.IsEnabled = enabled;
         PermInvitesSwitch.IsEnabled = enabled;
@@ -1239,7 +1259,7 @@ public sealed partial class AccountPage : Page
         if (busy)
         {
             PermsStatus.Foreground = (Brush)Application.Current.Resources["AppText3Brush"];
-            PermsStatus.Text = "正在同步账户权限…";
+            SetPermsStatus("");
         }
     }
 
@@ -1255,7 +1275,7 @@ public sealed partial class AccountPage : Page
         }
         PermsReloginButton.Visibility = needsLogin ? Visibility.Visible : Visibility.Collapsed;
         PermsStatus.Foreground = (Brush)Application.Current.Resources["AppBadBrush"];
-        PermsStatus.Text = message;
+        SetPermsStatus(message);
     }
 
     private async void Perm_Toggled(object sender, RoutedEventArgs e)
@@ -1269,7 +1289,7 @@ public sealed partial class AccountPage : Page
         if (kind == "profanity") value = toggle.IsOn ? "ON" : "OFF";
 
         SetPermsBusy(true);
-        PermsStatus.Text = "正在写入 Minecraft 账户…";
+        SetPermsStatus("正在写入 Minecraft 账户…");
         try
         {
             var result = await App.Backend.SetAccountPermAsync(kind, value);
@@ -1485,14 +1505,14 @@ public sealed partial class AccountPage : Page
         FriendsLoadingRing.IsActive = true;
         FriendsLoadingRing.Visibility = Visibility.Visible;
         FriendsRefreshButton.IsEnabled = false;
-        SetFriendsStatus("正在读取好友列表…");
+        SetFriendsStatus("");
         try
         {
             var result = await App.Backend.GetFriendsAsync();
             if (!result.Ok)
             {
                 // 到 Mojang 的网络偶发失败很常见（慢网络 / 代理），自动重试一次再认定失败
-                SetFriendsStatus("读取失败，正在重试…", error: true);
+                SetFriendsStatus("");
                 result = await App.Backend.GetFriendsAsync();
             }
 
@@ -1504,7 +1524,8 @@ public sealed partial class AccountPage : Page
                 RenderFriends();
                 // 显示上次成功更新的时间，让人一眼看出列表是不是新的
                 var note = $"上次更新 {DateTime.Now:HH:mm:ss}";
-                SetFriendsStatus(string.IsNullOrWhiteSpace(result.Message) ? note : $"{result.Message}（{note}）");
+                FriendsUpdatedAt.Text = note;
+                SetFriendsStatus(result.Message ?? "");
             }
             else
             {
@@ -1560,12 +1581,8 @@ public sealed partial class AccountPage : Page
         var friends = result.Friends ?? new List<FriendInfo>();
         var incoming = result.Incoming ?? new List<FriendInfo>();
         var outgoing = result.Outgoing ?? new List<FriendInfo>();
-        var online = friends.Count(friend => friend.Online);
-        var meow = friends.Count(friend => friend.Meow);
 
-        FriendsSummary.Text = friends.Count == 0
-            ? "还没有好友"
-            : $"{friends.Count} 位好友 · {online} 人在线 · {meow} 人在用 MeowLauncher";
+        FriendsSummary.Text = "好友";
 
         // 提示：上报失败 / 因为游戏在运行或用户关了「显示在线」而没有刷新在线状态
         var hint = !string.IsNullOrWhiteSpace(result.PresenceError)
@@ -1863,13 +1880,13 @@ public sealed partial class AccountPage : Page
             Text = current,
             PlaceholderText = "3–16 位字母、数字或下划线",
             MaxLength = 16,
-            Width = 320,
+            MinWidth = 180,
         };
         input.Loaded += (_, _) => input.SelectAll();
 
         var hint = new TextBlock
         {
-            Text = "改名次数有限，想好再提交。",
+            Text = "请确保您的新昵称长度为 3 到 16 个字符，仅包含字母、数字和下划线（_）。\n您每 30 天只能更改一次昵称。",
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
             Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
@@ -1881,8 +1898,28 @@ public sealed partial class AccountPage : Page
             Foreground = (Brush)Application.Current.Resources["AppWarnBrush"],
         };
         var panel = new StackPanel { Width = 360, Spacing = 10 };
-        panel.Children.Add(input);
         panel.Children.Add(hint);
+        var nameRow = new Grid { ColumnSpacing = 8 };
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var checkName = new Button { Content = "检查可用性", VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(checkName, 1);
+        nameRow.Children.Add(input);
+        nameRow.Children.Add(checkName);
+        checkName.Click += async (_, _) =>
+        {
+            checkName.IsEnabled = false;
+            var name = input.Text.Trim();
+            var result = await App.Backend.CheckMinecraftNameAsync(name);
+            if (input.Text.Trim() == name)
+            {
+                status.Text = result.Message;
+                status.Foreground = (Brush)Application.Current.Resources[result.Ok ? "AppGoodBrush" : "AppBadBrush"];
+            }
+            checkName.IsEnabled = true;
+        };
+        input.TextChanged += (_, _) => status.Text = "";
+        panel.Children.Add(nameRow);
         panel.Children.Add(status);
 
         var dialog = new ContentDialog

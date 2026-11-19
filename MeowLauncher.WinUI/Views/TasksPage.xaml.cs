@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
@@ -73,59 +73,18 @@ public sealed partial class TasksPage : Page
         ShowContent(PageState.Content);
     }
 
-    private readonly Dictionary<TaskEntry, DateTime> _doneAt = new();
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _holdTick;
-
-    /// <summary>渐隐播完后再刷一次，把任务从「进行中」挪到「已完成」。</summary>
-    private void ScheduleHoldRefresh()
-    {
-        if (_holdTick is not null) return;
-        var queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-        if (queue is null) return;
-        _holdTick = queue.CreateTimer();
-        _holdTick.Interval = TimeSpan.FromMilliseconds(340);
-        _holdTick.IsRepeating = false;
-        _holdTick.Tick += (_, _) =>
-        {
-            _holdTick = null;
-            Refresh();
-        };
-        _holdTick.Start();
-    }
-
     private void Refresh()
     {
         // 只做增删/换位，不 Clear 再重建：重建会让每行重新加载，进度条会从 0 重跑一遍（一闪一闪）。
         var activeNow = new List<TaskEntry>();
         var failedNow = new List<TaskEntry>();
         var doneNow = new List<TaskEntry>();
-        var now = DateTime.UtcNow;
-        var holding = false;
         foreach (var entry in TaskCenter.Entries)
         {
-            if (entry.IsActive)
-            {
-                activeNow.Add(entry);
-                continue;
-            }
-            // 刚跑完的先在「进行中」区多留 320ms，让进度区把渐隐播完，再挪到已完成。
-            if (!_doneAt.TryGetValue(entry, out var at))
-            {
-                at = now;
-                _doneAt[entry] = at;
-            }
-            if ((now - at).TotalMilliseconds < 320)
-            {
-                activeNow.Add(entry);
-                holding = true;
-                continue;
-            }
-            if (entry.Status == "失败") failedNow.Add(entry);
+            if (entry.IsActive) activeNow.Add(entry);
+            else if (entry.Status == "失败") failedNow.Add(entry);
             else doneNow.Add(entry);
         }
-        foreach (var gone in _doneAt.Keys.Where(k => !TaskCenter.Entries.Contains(k)).ToList()) _doneAt.Remove(gone);
-        if (holding) ScheduleHoldRefresh();
-        else _holdTick?.Stop();
         SyncList(ActiveTasks, activeNow);
         SyncList(FailedTasks, failedNow);
         SyncList(DoneTasks, doneNow);
@@ -157,7 +116,7 @@ public sealed partial class TasksPage : Page
         UpdateActionVisibility();
 
         // 通知通道
-        NotificationsTab.Content = unread > 0 ? $"通知 {unread}" : "通知";
+        NotificationsTab.Content = Notifications.Count > 0 ? $"通知 {Notifications.Count}" : "通知";
         NotificationEmptyHost.Visibility = Notifications.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         NotificationsScroll.Visibility = Notifications.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         UpdateActionVisibility();
@@ -274,6 +233,12 @@ public sealed partial class TasksPage : Page
     // ── 操作 ────────────────────────────────────────────────────────────
 
     private void Clear_Click(object sender, RoutedEventArgs e) => TaskCenter.ClearFinished();
+    private void DismissTask_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id } && TaskCenter.Entries.FirstOrDefault(x => x.Id == id) is { } entry)
+            TaskCenter.Dismiss(entry);
+    }
+
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
@@ -378,12 +343,7 @@ public sealed partial class TasksPage : Page
     {
         if (sender is not Button { Tag: string id }) return;
         var entry = TaskCenter.Entries.FirstOrDefault(item => item.Id == id);
-        if (entry is null) return;
-
-        var code = Diagnostics.ErrorCodeFor(entry.Detail);
-        var report = Diagnostics.BuildReport(code, "任务", entry.Detail, "", entry.Title);
-        Diagnostics.Copy(report);
-        ShowToast(InfoBarSeverity.Success, "诊断信息", $"已复制错误码 {code} 与任务上下文，粘贴到反馈里即可。");
+        if (entry is not null) CopyTaskFailure(entry);
     }
 
     // ── 任务详情：四阶段时间线 + 实时日志尾 ──────────────────────────────
@@ -413,7 +373,7 @@ public sealed partial class TasksPage : Page
     private void OpenDetail(TaskEntry entry)
     {
         _detailEntry = entry;
-        DetailPanel.Visibility = Visibility.Visible;
+        DetailPanel.Visibility = Visibility.Collapsed;
         DetailStages.Clear();
         var trace = TaskCenter.TraceFor(entry.Id);
         if (trace is not null)
@@ -462,6 +422,12 @@ public sealed partial class TasksPage : Page
         }
 
         var log = trace?.LogText ?? "";
+        if (entry.Failure is { } failure)
+        {
+            var phase = string.IsNullOrWhiteSpace(failure.Stage) ? "" : $" · {failure.Stage}";
+            var error = $"[{failure.TimeText}] {failure.Code}{phase} · {entry.Detail}";
+            log = log.Length == 0 ? error : log + Environment.NewLine + error;
+        }
         if (LogText.Text != log)
         {
             LogText.Text = log;
@@ -471,10 +437,10 @@ public sealed partial class TasksPage : Page
         var failed = entry.Status == "失败";
         DetailError.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
         DetailError.Text = failed
-            ? $"错误码 {Diagnostics.ErrorCodeFor(entry.Detail)} · {ClipText(entry.Detail, 120)}"
+            ? $"{entry.ErrorCodeText} · {ClipText(entry.Detail, 120)}"
             : "";
         DetailOpenLogButton.IsEnabled = trace is not null && !string.IsNullOrWhiteSpace(trace.LogPath);
-        DetailCopyButton.IsEnabled = !entry.IsActive || failed;
+        DetailCopyButton.IsEnabled = failed;
     }
 
     private void ScrollLogToEnd()
@@ -490,11 +456,14 @@ public sealed partial class TasksPage : Page
 
     private void DetailCopy_Click(object sender, RoutedEventArgs e)
     {
-        if (_detailEntry is null) return;
-        var code = Diagnostics.ErrorCodeFor(_detailEntry.Detail);
-        var report = Diagnostics.BuildReport(code, "任务", _detailEntry.Detail, "", _detailEntry.Title);
-        Diagnostics.Copy(report);
-        ShowToast(InfoBarSeverity.Success, "诊断信息", $"已复制错误码 {code} 与任务上下文，粘贴到反馈里即可。");
+        if (_detailEntry is not null) CopyTaskFailure(_detailEntry);
+    }
+
+    private void CopyTaskFailure(TaskEntry entry)
+    {
+        if (entry.Failure is not { } failure) return;
+        Diagnostics.Copy(Diagnostics.BuildReport(failure, entry.Title, entry.Detail));
+        ShowToast(InfoBarSeverity.Success, "诊断信息", $"已复制错误码 {failure.Code} 与任务上下文，粘贴到反馈里即可。");
     }
 
     private void DetailOpenLog_Click(object sender, RoutedEventArgs e)
@@ -542,6 +511,11 @@ public sealed partial class TasksPage : Page
 /// <summary>任务行的类型/状态视觉：图标按任务类型（启动/下载/安装），颜色按状态（进行中蓝、完成绿、失败红）。</summary>
 public static class TaskVisuals
 {
+    public static Visibility DeterminateVisibility(bool indeterminate) => indeterminate ? Visibility.Collapsed : Visibility.Visible;
+
+    public static Visibility TaskDetailVisibility(string status, bool indeterminate) =>
+        indeterminate || status != "进行中" ? Visibility.Visible : Visibility.Collapsed;
+
     public static string IconFor(string? title)
     {
         var text = title ?? "";
@@ -690,6 +664,4 @@ public static class TaskVisuals
         ? ProgressText(entry.Title, entry.Progress, entry.IsIndeterminate)
         : entry.Status;
 
-    public static string ErrorCode(string? detail) =>
-        "错误码 " + Diagnostics.ErrorCodeFor(detail);
 }

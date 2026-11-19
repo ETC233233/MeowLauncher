@@ -67,7 +67,7 @@ public sealed partial class AssetsPage : Page, IPageSearchFilter
             var snapshot = await App.Backend.GetSnapshotAsync();
             var vid = snapshot?.Current?.Id ?? snapshot?.Selected ?? "";
             _versionId = vid;
-            _gameDir = snapshot?.GameDir ?? "";
+            _gameDir = snapshot?.Current?.Root ?? snapshot?.GameDir ?? "";
             var result = await App.Backend.GetPacksAsync(vid);
             if (result is null || !result.Ok)
             {

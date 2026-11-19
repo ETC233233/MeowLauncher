@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SIDECAR = ROOT / "MeowLauncher.WinUI" / "Backend" / "sidecar.py"
 
 results: list[tuple[bool, str, str]] = []
+INSTANCE_ROOT = ""
 
 
 def record(ok: bool, name: str, detail: str) -> None:
@@ -24,9 +25,13 @@ def record(ok: bool, name: str, detail: str) -> None:
     print(("PASS " if ok else "FAIL ") + name + " — " + detail)
 
 
-def run_sidecar(*args: str) -> dict:
+def run_sidecar(*args: str, game_root: str = "") -> dict:
+    env = dict(os.environ)
+    if not game_root and len(args) > 1 and args[0] in {"--saves", "--shots", "--mods", "--mem-estimate", "--tuning"}:
+        game_root = INSTANCE_ROOT
+    if game_root: env["MEOW_MC_DIR"] = game_root
     out = subprocess.run([sys.executable, str(SIDECAR), *args], cwd=str(ROOT),
-                         capture_output=True, text=True, timeout=180)
+                         capture_output=True, text=True, timeout=180, env=env)
     text = out.stdout.strip()
     if not text:
         raise RuntimeError((out.stderr or "无输出")[:400])
@@ -82,12 +87,20 @@ def check_mirror() -> None:
 
 
 def check_mod_project() -> None:
-    mods_dir = Path(os.path.expandvars(r"D:\\Plain Craft Launcher 2\\.minecraft\\versions\\Hypixel Premium\\mods"))
-    sample = next((f.name for f in mods_dir.glob("*.jar")), "") if mods_dir.is_dir() else ""
+    snapshot = run_sidecar("--snapshot")
+    candidates = [v for v in snapshot.get("versions", []) if v.get("valid", True) and int(v.get("mods") or 0) > 0]
+    sample = ""
+    chosen = {}
+    for version in candidates:
+        mods = run_sidecar("--mods", version["id"], game_root=version.get("root", ""))
+        sample = next((m.get("file", "") for m in mods.get("mods", []) if str(m.get("file") or "").endswith(".jar")), "")
+        if sample:
+            chosen = version
+            break
     if not sample:
         record(True, "--mod-project", "跳过（找不到样例 jar）")
         return
-    r = run_sidecar("--mod-project", "Hypixel Premium", sample)
+    r = run_sidecar("--mod-project", chosen["id"], sample, game_root=chosen.get("root", ""))
     ok = bool(r.get("ok")) or "Modrinth 上没有这个文件" in str(r.get("message", ""))
     record(ok, "--mod-project", f"{sample} → {r.get('title') or r.get('message')}")
 
@@ -127,8 +140,12 @@ def check_tuning_auto(vid: str) -> None:
 
 
 def main() -> int:
+    global INSTANCE_ROOT
     snapshot = run_sidecar("--snapshot")
     vid = sys.argv[1] if len(sys.argv) > 1 else (snapshot.get("current") or {}).get("id", "")
+    current = snapshot.get("current") or {}
+    chosen = current if current.get("id") == vid else next((v for v in snapshot.get("versions", []) if v.get("id") == vid), {})
+    INSTANCE_ROOT = str(chosen.get("root") or "")
     check_ships(snapshot)
     if vid:
         check_saves(vid)

@@ -12,6 +12,7 @@ public sealed class Snapshot
     public string GameDir { get; set; } = "";
     public VersionInfo? Current { get; set; }
     public List<VersionInfo> Versions { get; set; } = new();
+    public List<string> HiddenVersionIds { get; set; } = new();
     public MemoryInfo? Memory { get; set; }
     public ShotInfo? Shots { get; set; }
     public OnlineInfo? Online { get; set; }
@@ -69,6 +70,8 @@ public sealed class VersionInfo
 
     /// <summary>实例所在的游戏目录（多目录时用于分组、启动与打开目录）。</summary>
     public string Root { get; set; } = "";
+    public string PackSource { get; set; } = "";
+    public string PackProject { get; set; } = "";
 
     public string Loader { get; set; } = "";
     public string LoaderVersion { get; set; } = "";

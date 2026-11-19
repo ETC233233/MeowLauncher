@@ -1,4 +1,4 @@
-using MeowLauncher.WinUI.Models;
+﻿using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -34,8 +34,6 @@ public sealed partial class InstancePicker : UserControl
     {
         var snapshot = App.MainWindow?.Snapshot;
         var usable = snapshot?.Versions.Where(v => v.Valid && !v.Hidden).ToList() ?? [];
-        var multiRoot = usable.Select(v => GameDirectoryResolver.Normalize(v.Root))
-            .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
         var current = snapshot?.Current;
 
         _all = usable
@@ -45,13 +43,12 @@ public sealed partial class InstancePicker : UserControl
             .Select(v =>
             {
                 var parts = new List<string> { v.GameVersion, v.LoaderDisplay, v.AgoText };
-                if (multiRoot) parts.Add(Path.GetFileName(v.Root.TrimEnd('\\', '/')));
                 return new InstanceRow
                 {
                     Source = v,
                     Sub = string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p))),
                     IsCurrent = InstanceSelection.Same(v, current),
-                    Badge = GameSessions.IsRunning(v.Id) ? "运行中" : "",
+                    Badge = GameSessions.IsRunning(v.Id, v.Root) ? "运行中" : "",
                 };
             })
             .ToList();
