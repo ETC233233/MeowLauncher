@@ -55,23 +55,13 @@ dotnet build MeowLauncher.WinUI/MeowLauncher.WinUI.csproj -c Debug -p:Platform=x
 
 后端需要 Python；便携测试包包含内嵌 Python。运行源码时可通过 `MEOW_PYTHON` 指定解释器。联机组件仍按需下载，默认不会开启。
 
-Debug 预览为 Review 开发构建，不是正式版。启动协议、整合包与取消任务的回归命令：
+Debug 预览为 Review 开发构建，不是正式版。后端自检命令（唯一随源码发布的检查脚本）：
 
 ```powershell
-python tools/test_launch_hardening.py
-python tools/test_nov19_regressions.py
-python tools/test_pack_install_status.py
-dotnet run --project tools/task-cancellation-test/TaskCancellationTest.csproj
 python tools/selfcheck_backend.py 26.3
 ```
 
-准备包含内嵌 Python 的 Debug 便携测试包：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_debug_preview.ps1 -PythonDir <内嵌Python目录>
-```
-
-输出位于 `_export/debug-preview/`，包含 ZIP、SHA-256 校验值和依赖说明。此包需要 .NET 8 Desktop Runtime、Windows App Runtime 1.8 与 WebView2 Runtime；打包不会修改既有发布目录。
+启动协议、整合包与取消任务的回归脚本是本机开发用的，写死本机路径与验收入口，不随仓库发布。
 
 ## 从源码构建
 

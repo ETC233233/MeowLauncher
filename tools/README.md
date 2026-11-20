@@ -1,13 +1,10 @@
 # mclauncher/tools
 
-正式工具（构建/守卫/截图/锁/上下文交接）：
+对使用者有价值、能独立跑的自检工具：
 
 | 文件 | 用途 |
 | --- | --- |
-| `guard.py` | 设计红线扫描（8+2 规则） |
-| `meowlock.py` | build / run / shot 统一文件锁 |
-| `shot_page.py` | 真机截图（UIA 导航、页头+内容就绪校验、hover 动作） |
-| `prefs_guard.py` | shot 期间 app.json 的窗口键保护 |
-| `context.py` | 新会话 30 秒接续（契约/验收/ADR/红线/截图） |
+| `selfcheck_backend.py` | 后端联调自检：给一个版本号（如 `python tools/selfcheck_backend.py 26.3`），逐项检查版本解析、资源索引、库文件、启动参数，全 PASS 才算后端可用 |
+| `dl_selftest.py` | 下载器自检：并发分块、断点续传、校验与失败重试的端到端验证 |
 
-`probes/` 是一次性诊断脚本，不参与构建与验收。保留原因：需要时回查当时怎么量的，别再重写。
+构建、截图、发版用的本机脚本（`guard.py`、`shot_page.py`、`meowlock.py`、`prefs_guard.py`、`promote.ps1` 等）写死了本机路径与流程，不随仓库发布，见 `.gitignore`。

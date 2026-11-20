@@ -95,8 +95,31 @@ _rtver.ps1
 _ui10.ps1
 _ui*.ps1
 
+# ===== 提交前检查（2026-11-20）=====
+# OOBE 高保真原型：内嵌本机用户名与游戏目录绝对路径，不公开
+_mock/
+# 安装脚本只用于本机出包，没有开源价值（用户 2026-11-20 决定）
+installer/
+
 # Bundled Minecraft default skins used by offline account and OOBE previews
 !MeowLauncher.WinUI/Assets/skinviewer/demo/
 !MeowLauncher.WinUI/Assets/skinviewer/demo/default_classic.png
 !MeowLauncher.WinUI/Assets/skinviewer/demo/default_slim.png
 !MeowLauncher.WinUI/Assets/skinviewer/demo/SOURCES.md
+
+# ===== 仓库清理（2026-11-20）：内部脚手架与过程材料不入库 =====
+# 本机专用脚本：写死本机路径 / 只服务本地构建、截图、发版流程
+tools/guard.py
+tools/prefs_guard.py
+tools/meowlock.py
+tools/shot_page.py
+tools/promote.ps1
+tools/pack_online_component.ps1
+tools/make_loader_icons.py
+tools/build_debug_preview.ps1
+tools/dev_verdict_selftest.py
+# 一次性验证脚本与验证工程
+tools/test_*.py
+tools/task-cancellation-test/
+# 联机组件的打包残留；组件本体在 _export/meow-room-module 子模块里
+tools/online-component/

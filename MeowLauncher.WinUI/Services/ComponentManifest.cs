@@ -11,7 +11,7 @@ public sealed record ComponentOffer(
     long Size, string Sha256, string[] Urls, string Notes);
 
 /// <summary>
-/// 云端组件清单的验签与挑包逻辑。不依赖界面和 App，方便单独测试（tools/online-component/test）。
+/// 云端组件清单的验签与挑包逻辑。不依赖界面和 App，方便单独测试。
 /// </summary>
 public static class ComponentManifest
 {
