@@ -19,6 +19,7 @@ public partial class App : Application
 
     public App()
     {
+        PrepareWebView2UserDataFolder();
         UnhandledException += (_, e) =>
         {
             LogCrash("XamlUnhandled", e.Exception);
@@ -33,6 +34,22 @@ public partial class App : Application
             e.SetObserved();
         };
         InitializeComponent();
+    }
+
+    /// <summary>
+    /// WebView2 默认把浏览器用户数据放在 exe 所在目录（安装版是 Program Files），普通用户没有写权限，
+    /// 于是引导页、皮肤立绘等所有 WebView2 都静默初始化失败。这里统一改到 LocalAppData，必须在创建任何 WebView2 之前执行。
+    /// </summary>
+    private static void PrepareWebView2UserDataFolder()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MeowLauncher.WinUI", "WebView2");
+            Directory.CreateDirectory(dir);
+            Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", dir);
+        }
+        catch { }
     }
 
     /// <summary>

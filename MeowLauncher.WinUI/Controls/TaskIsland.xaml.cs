@@ -326,8 +326,10 @@ public sealed partial class TaskIsland : UserControl
         PercentText.Text = showPercent ? $"{Math.Round(primary!.Progress)}%" : "";
         PercentText.Visibility = showPercent ? Visibility.Visible : Visibility.Collapsed;
         Bar.Visibility = showCompactProgress ? Visibility.Visible : Visibility.Collapsed;
-        Bar.IsIndeterminate = showCompactProgress && primary!.IsIndeterminate;
-        if (showPercent) Bar.Value = primary!.Progress;
+        var barIdle = showCompactProgress && primary!.IsIndeterminate;
+        BarIndeterminate.Visibility = barIdle ? Visibility.Visible : Visibility.Collapsed;
+        BarFill.Visibility = showCompactProgress && !barIdle ? Visibility.Visible : Visibility.Collapsed;
+        if (showPercent) BarScale.ScaleX = Math.Clamp(primary!.Progress, 0, 100) / 100.0;
 
         var more = active.Count - 1;
         MoreChip.Visibility = !expanded && more > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -428,11 +430,31 @@ public sealed partial class TaskIsland : UserControl
                 Text = string.IsNullOrWhiteSpace(entry.Detail) ? entry.Status : entry.Detail, FontSize = 11.5,
                 Foreground = (Brush)Application.Current.Resources["AppText3Brush"], TextTrimming = TextTrimming.CharacterEllipsis,
             });
-            text.Children.Add(new ProgressBar
+            // 自绘条：展开体每次刷新都会重建这些行，内置 ProgressBar 会从 0 重播动画，看着就是「抽抽」
+            var bar = new Grid { Height = 3 };
+            bar.Children.Add(new Border
             {
-                Height = 3, Minimum = 0, Maximum = 100, Value = entry.Progress, IsIndeterminate = entry.IsIndeterminate,
-                Foreground = (Brush)Application.Current.Resources["TintTasksBrush"],
+                CornerRadius = new CornerRadius(1.5),
+                Background = (Brush)Application.Current.Resources["AppChipBrush"],
             });
+            bar.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(1.5),
+                Background = (Brush)Application.Current.Resources["TintTasksBrush"],
+                RenderTransformOrigin = new Windows.Foundation.Point(0, 0.5),
+                RenderTransform = new ScaleTransform
+                {
+                    ScaleX = entry.IsIndeterminate ? 0 : Math.Clamp(entry.Progress, 0, 100) / 100.0,
+                },
+            });
+            if (entry.IsIndeterminate)
+                bar.Children.Add(new ProgressBar
+                {
+                    IsIndeterminate = true, Height = 3, Minimum = 0, Maximum = 100,
+                    Foreground = (Brush)Application.Current.Resources["TintTasksBrush"],
+                    Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                });
+            text.Children.Add(bar);
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
 

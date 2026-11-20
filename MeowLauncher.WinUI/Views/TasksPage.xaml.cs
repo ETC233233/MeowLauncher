@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
@@ -513,6 +513,12 @@ public sealed partial class TasksPage : Page
 public static class TaskVisuals
 {
     public static Visibility DeterminateVisibility(bool indeterminate) => indeterminate ? Visibility.Collapsed : Visibility.Visible;
+
+    public static Visibility IndeterminateVisibility(bool indeterminate) => indeterminate ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>自绘进度条的横向缩放（0-1）：走 RenderTransform，没有内置动画，按上报值直接到位。</summary>
+    public static double ProgressScale(double progress) =>
+        double.IsNaN(progress) ? 0 : Math.Clamp(progress, 0, 100) / 100.0;
 
     public static Visibility TaskDetailVisibility(string status, bool indeterminate) =>
         indeterminate || status != "进行中" ? Visibility.Visible : Visibility.Collapsed;

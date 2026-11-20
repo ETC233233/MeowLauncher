@@ -97,6 +97,8 @@ html[data-theme="dark"] .page-error{color:#FF99A4}
 .tog input:checked+.tr{background:var(--accent)}
 .tog input:checked+.tr::after{transform:translateX(20px)}
 .togs .tog+.tog{margin-top:12px}
+.tog input:disabled+.tr{opacity:.4;filter:grayscale(1)}
+.tog:has(input:disabled){cursor:not-allowed;color:var(--fg2)}
 html[data-theme="dark"] #art svg{--soft:#2E3742;--line2:#5A6675}
 .updstat{margin-top:12px;font-size:12.5px;color:var(--sub)}
 .wall{margin-top:16px;display:inline-block;font-size:13px;color:var(--accent);cursor:pointer}
@@ -112,7 +114,7 @@ html[data-theme="dark"] #art svg{--soft:#2E3742;--line2:#5A6675}
 .back{width:34px;height:34px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .back:hover{background:var(--panel)}
 .fleft{display:flex;align-items:center;gap:10px}
-.skipbtn{font-size:12.5px;color:var(--sub);cursor:pointer;border-radius:4px;padding:6px 8px;transition:background .15s,color .15s}
+.skipbtn{font-size:12.5px;color:var(--accent);cursor:pointer;border-radius:4px;padding:6px 8px;transition:background .15s,color .15s}
 .skipbtn:hover{background:var(--panel);color:var(--accent)}
 .btn{height:32px;border-radius:4px;padding:0 22px;font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s}
 .btn.primary{margin-left:auto;background:var(--accent);color:var(--accent-fg)}
@@ -411,7 +413,7 @@ const P=[null,
 {mode:'plain',body:'<h1>登录你的 Minecraft 账户</h1><p class="lead">使用正版账户登录，拥有最完整的 Minecraft 体验。<br>没有购买 Minecraft？我们在此提供了离线账户的登录方式，但离线账户的部分功能受限。<br>如需获取正版 Minecraft，请前往 <a style="color:var(--accent);text-decoration:none;border-bottom:1px solid currentColor" href="https://www.xbox.com/zh-CN/games/store/minecraft-java-bedrock-edition-for-pc/9nxp44l49shj" target="_blank">Xbox 商店</a> 或 <a style="color:var(--accent);text-decoration:none;border-bottom:1px solid currentColor" href="https://www.minecraft.net/zh-hans/store/minecraft-java-bedrock-edition-pc" target="_blank">Minecraft 官网</a>，你也可以在第三方购物平台购买兑换码，但无法保证其商品的可用性与稳定性。</p><div class="list" id="opts"><div class="row sel" data-i="0"><div class="dot on"></div><div><div class="t">Microsoft 账户</div><div class="d">前往 Microsoft 登录并授权</div></div></div><div class="row" data-i="1"><div class="dot"></div><div><div class="t">离线账户</div><div class="d">前往创建本地离线账户，仅在本机保存</div></div></div></div><p class="oldacc">仍在使用旧 Mojang 账户？<a style="color:var(--accent);text-decoration:none;border-bottom:1px solid currentColor" href="https://help.minecraft.net/hc/en-us/articles/19615552270221" target="_blank">在此处查看更多信息</a>。</p><a class="link" id="later">稍后再说</a>',btn:'下一步'},
 {mode:'look',body:'<h1>设置你的外观</h1><p class="lead">根据你的喜好对外观进行个性化。</p><div class="list" id="themes"><div class="opt l sel" data-theme="light"><span class="pdot"></span>浅色</div><div class="opt d" data-theme="dark"><span class="pdot"></span>深色</div><div class="opt a" data-theme="auto"><span class="pdot"></span>跟随系统</div></div><div class="sec">主题色</div><div class="sws" id="sws"></div>',btn:'下一步'},
 {mode:'plain',body:'<h1>选择默认游戏目录</h1><p class="lead" id="leadDirs">我们在你的电脑上找到了其他启动器的游戏目录，但它有时不是完全的，可能需要你手动添加未列出的目录以在 MeowLauncher 管理你原有的实例。<br>建议使用我们默认的启动器版本目录，方便区分其他启动器的实例文件夹。</p><div class="list" id="opts"></div><p class="lead" style="margin-top:14px">手动添加目录需要定位到 .minecraft 文件夹，均支持版本隔离或未开启版本隔离的文件夹。</p><a class="link" id="browse" style="margin-top:8px">添加游戏目录…</a>',btn:'下一步'},
-{mode:'plain',body:'<h1>自动检查更新</h1><p class="lead">保持最新的启动器版本往往能解决很多问题，并跟进我们研发的新特性！</p><div class="togs"><label class="tog"><input type="checkbox" data-k="check" checked><span class="tr"></span>自动检查更新</label><label class="tog"><input type="checkbox" data-k="download" checked><span class="tr"></span>自动下载更新</label><label class="tog"><input type="checkbox" data-k="install"><span class="tr"></span>自动安装更新</label></div><p class="updstat">我们会在有可用更新时提醒你。<br>当自动安装启用时，我们会在游戏启动时进行自动安装并重新开启启动器。</p>',btn:'下一步'},
+{mode:'plain',body:'<h1>自动检查更新</h1><p class="lead">保持最新的启动器版本往往能解决很多问题，并跟进我们研发的新特性！</p><div class="togs"><label class="tog"><input type="checkbox" data-k="check" checked><span class="tr"></span>自动检查更新</label><label class="tog"><input type="checkbox" data-k="download" checked><span class="tr"></span>自动下载更新</label><label class="tog"><input type="checkbox" data-k="install"><span class="tr"></span>自动安装更新</label></div><p class="updstat">我们会在每次启动前检查更新，在有可用更新时会提醒你。<br>当自动安装启用时，我们会在游戏启动时进行自动安装并重新开启启动器。</p>',btn:'下一步'},
 {mode:'plain',body:'<h1>准备就绪</h1><p class="lead">好东西就要来了！请检查你的配置，准备出发吧~</p><div class="sum"><div class="srow"><div class="k">账号</div><div class="v">未添加账户</div></div><div class="srow"><div class="k">账号类型</div><div class="v">正版账号</div></div><div class="srow"><div class="k">外观</div><div class="v" id="vTheme">浅色</div></div><div class="srow"><div class="k">主题色</div><div class="v" id="vAcc"></div></div><div class="srow"><div class="k">默认游戏目录</div><div class="v">正在读取游戏目录…</div></div></div>',btn:'进入启动器'}];
 
 let accountFlow={state:'idle',kind:'',name:'',slim:false,code:'',url:'',copied:false,message:'',profile:null};
@@ -716,7 +718,7 @@ function render(){
  const s=P[n===2?3:n===3?2:n],stage=document.getElementById('stage');
  disposeAccountModel();stage.classList.remove('login-wait','account-confirm');stage.classList.toggle('welcome',n===1);stage.classList.toggle('dense', n===4);stage.innerHTML=s.body;if(n===4)fillDirs();
  const art=document.getElementById('art');const tpl=document.getElementById(n===1?'heroTpl':('artTpl'+(n===2?3:n===3?2:n)));art.innerHTML='';requestAnimationFrame(()=>{if(n===3&&accountView==='confirm')showAccountModel(art,accountFlow.profile);else if(n===3&&accountView==='offline')showAccountModel(art,{skin:defaultAccountSkin(accountFlow.slim),variant:accountFlow.slim?'slim':'classic'});else if(tpl)art.innerHTML=tpl.innerHTML});
- document.getElementById('foot').innerHTML='<div class="fleft">'+(n>1?'<span class="back" id="bk">'+BACK+'</span>':'<span class="back"></span>')+'<span class="skipbtn" id="skip">不再显示</span></div>'+'<div class="btn primary" id="next">'+s.btn+'</div>';
+ document.getElementById('foot').innerHTML='<div class="fleft">'+(n>1?'<span class="back" id="bk">'+BACK+'</span>':'<span class="back"></span>')+(n===1?'<span class="skipbtn" id="skip">不再显示</span>':'')+'</div>'+'<div class="btn primary" id="next">'+s.btn+'</div>';
  document.getElementById('next').onclick=()=>{
  if(n===3){nextAccount();return}
  if(n<6)go(1);else bridge({type:'finish'});
@@ -746,7 +748,7 @@ updDirCount();
  tg.forEach(i=>{i.onchange=()=>{HOST.updates=HOST.updates||{};HOST.updates[i.dataset.k]=i.checked;bridge({type:'update',key:i.dataset.k,value:i.checked})};
   if(i.dataset.k!=='check'){i.disabled=true;i.checked=false;i.closest('.tog').title='当前版本尚不支持自动下载和安装更新'}
  });
- if(tg.length)accountText(stage,'p','d','当前版本支持检查更新；自动下载和安装将在后续版本提供。');
+ if(tg.length){const ft=accountText(stage,'p','d','*当前版本仅支持自动检查更新，自动下载和安装将在后续版本提供。');ft.style.marginTop='10px';ft.style.opacity='.72'}
  const vt=document.getElementById('vTheme');if(vt)vt.textContent=label[themeChoice];
  const va=document.getElementById('vAcc');if(va)va.textContent=accentHex?accentHex.toUpperCase():curPal()[Math.min(aIdx,curPal().length-1)].n;
  fillAccountSummary();

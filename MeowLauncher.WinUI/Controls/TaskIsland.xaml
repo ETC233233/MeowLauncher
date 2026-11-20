@@ -39,8 +39,20 @@
                     <TextBlock x:Name="MoreText" FontSize="11.5" Foreground="{ThemeResource AppText2Brush}" />
                 </Border>
             </Grid>
-            <ProgressBar x:Name="Bar" Height="2" Minimum="0" Maximum="100" Margin="14,0,14,0"
-                         Foreground="{ThemeResource TintTasksBrush}" Background="Transparent" />
+            <!-- 自绘进度条：内置 ProgressBar 每次 Value 变化都会重启一遍填充动画，
+                 高频上报时动画永远追不上，看起来像一直从头跑 -->
+            <Grid x:Name="Bar" Height="2" Margin="14,0,14,0">
+                <Border CornerRadius="1" Background="{ThemeResource AppChipBrush}" />
+                <Border x:Name="BarFill" CornerRadius="1" Background="{ThemeResource TintTasksBrush}"
+                        RenderTransformOrigin="0,0.5" Visibility="Collapsed">
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="BarScale" ScaleX="0" />
+                    </Border.RenderTransform>
+                </Border>
+                <ProgressBar x:Name="BarIndeterminate" IsIndeterminate="True" Height="2"
+                             Minimum="0" Maximum="100" Visibility="Collapsed"
+                             Foreground="{ThemeResource TintTasksBrush}" Background="Transparent" />
+            </Grid>
             <!-- 展开体：和药丸是同一个形状。BodyHost 的高度做动画（从 0 撑开），多出来的部分被它自己的槽位裁掉；
                  Body 固定宽度、靠左，药丸变宽时文字不会跟着重新折行。 -->
             <Grid x:Name="BodyHost" Height="0" Visibility="Collapsed">

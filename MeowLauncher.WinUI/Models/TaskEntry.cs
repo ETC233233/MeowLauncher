@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using MeowLauncher.WinUI.Services;
@@ -77,8 +77,9 @@ public class TaskEntry : INotifyPropertyChanged
         OnPropertyChanged(nameof(StepsVisibility));
     }
 
+    /// <summary>分步明细只在进行中显示：装完/失败后那串步骤已经是过去时，留在卡片里只是噪音。</summary>
     public Microsoft.UI.Xaml.Visibility StepsVisibility =>
-        Steps.Count > 0 ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+        IsActive && Steps.Count > 0 ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
 
     public string Status
     {
@@ -89,6 +90,7 @@ public class TaskEntry : INotifyPropertyChanged
             _status = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsActive));
+            OnPropertyChanged(nameof(StepsVisibility));
         }
     }
 

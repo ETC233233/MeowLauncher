@@ -120,7 +120,7 @@ public sealed partial class SkinViewer3D : UserControl
             Web.Source = PageUri;
             Web.Visibility = Visibility.Visible;
 
-            // 3 秒没收到 ready 就显示错误，避免白屏
+            // 8 秒没收到 ready 才显示错误：首次冷启动 + 1.1MB 脚本，慢盘/杀软扫描时 3 秒不够
             _ = WatchdogAsync();
         }
         catch (Exception ex)
@@ -131,7 +131,7 @@ public sealed partial class SkinViewer3D : UserControl
 
     private async Task WatchdogAsync()
     {
-        await Task.Delay(3000);
+        await Task.Delay(8000);
         if (!_ready && !_failed)
         {
             Fail("WebView2 3 秒内未就绪");
@@ -285,6 +285,7 @@ public sealed partial class SkinViewer3D : UserControl
         _failed = true;
         _ready = false;
         System.Diagnostics.Debug.WriteLine($"[SkinViewer3D] 3D 预览不可用：{reason}");
+        try { App.Trace($"[SkinViewer3D] 3D 预览不可用：{reason}"); } catch { /* ignore */ }
 
         try { Web.Visibility = Visibility.Collapsed; } catch { /* ignore */ }
         LoadingRing.IsActive = false;

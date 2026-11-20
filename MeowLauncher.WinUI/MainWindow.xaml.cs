@@ -907,6 +907,7 @@ public sealed partial class MainWindow : Window
         {
             CloseOnboardingWindow();
             App.Trace("ShowOnboarding: " + ex);
+            ShowOnboardingFailure(ex);
         }
         finally { _onboardingOpening = false; }
     }
@@ -928,6 +929,29 @@ public sealed partial class MainWindow : Window
         SidebarRoot.Visibility = Visibility.Visible;
         SetOnboardingChrome(false);
         UpdateSearchLayout();
+    }
+
+    /// <summary>引导打不开时给一句看得见的话：安装到 Program Files 的机器最常见原因是 WebView2 运行时缺失或用户数据目录不可写。</summary>
+    private void ShowOnboardingFailure(Exception ex)
+    {
+        try
+        {
+            if (CrashToast is null) return;
+            var code = ex is System.Runtime.InteropServices.COMException com && com.HResult != 0
+                ? $"（0x{com.HResult:X8}）"
+                : "";
+            CrashToastTitle.Text = "新手引导没能打开";
+            CrashToastBody.Text = $"WebView2 初始化失败{code}。请安装 Microsoft Edge WebView2 运行时后，在设置里点「开始新手引导」重试。";
+            CrashToast.Visibility = Visibility.Visible;
+            _crashToastTimer ??= DispatcherQueue.CreateTimer();
+            _crashToastTimer.Stop();
+            _crashToastTimer.Interval = TimeSpan.FromSeconds(12);
+            _crashToastTimer.IsRepeating = false;
+            _crashToastTimer.Tick -= CrashToastTimer_Tick;
+            _crashToastTimer.Tick += CrashToastTimer_Tick;
+            _crashToastTimer.Start();
+        }
+        catch { }
     }
 
     private void SetOnboardingChrome(bool onboarding)

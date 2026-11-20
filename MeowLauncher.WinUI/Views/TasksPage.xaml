@@ -1,4 +1,4 @@
-﻿<Page
+<Page
     x:Class="MeowLauncher.WinUI.Views.TasksPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -71,11 +71,21 @@
                                            TextTrimming="CharacterEllipsis" MaxLines="1"
                                            Visibility="{x:Bind LiveVisibility, Mode=OneWay}"
                                            ToolTipService.ToolTip="{x:Bind LiveText, Mode=OneWay}" />
-                                <ProgressBar Value="{x:Bind Progress, Mode=OneWay}" Maximum="100"
-                                             IsIndeterminate="{x:Bind IsIndeterminate, Mode=OneWay}"
-                                             Height="4" CornerRadius="2"
-                                             Foreground="{ThemeResource TintTasksBrush}"
-                                             Background="{ThemeResource AppChipBrush}" />
+                                <!-- 自绘进度条：内置 ProgressBar 每次 Value 变化都会重启一次动画，
+                                     任务上报是 250ms 一级、缓动 40ms 一帧，用内置条会一直"从头冲"，看着抽抽 -->
+                                <Grid Height="4">
+                                    <Border CornerRadius="2" Background="{ThemeResource AppChipBrush}" />
+                                    <Border CornerRadius="2" Background="{ThemeResource TintTasksBrush}"
+                                            RenderTransformOrigin="0,0.5"
+                                            Visibility="{x:Bind views:TaskVisuals.DeterminateVisibility(IsIndeterminate), Mode=OneWay}">
+                                        <Border.RenderTransform>
+                                            <ScaleTransform ScaleX="{x:Bind views:TaskVisuals.ProgressScale(Progress), Mode=OneWay}" />
+                                        </Border.RenderTransform>
+                                    </Border>
+                                    <ProgressBar IsIndeterminate="True" Height="4" CornerRadius="2"
+                                                 Foreground="{ThemeResource TintTasksBrush}" Background="Transparent"
+                                                 Visibility="{x:Bind views:TaskVisuals.IndeterminateVisibility(IsIndeterminate), Mode=OneWay}" />
+                                </Grid>
                                 <StackPanel Orientation="Horizontal" Spacing="14"
                                             Visibility="{x:Bind views:TaskVisuals.HasStatsVisibility(HasStats), Mode=OneWay}">
                                     <TextBlock Text="{x:Bind SpeedText, Mode=OneWay}" FontSize="11.5"
