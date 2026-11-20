@@ -151,7 +151,7 @@ public sealed partial class SkinHeadView : UserControl
         var bgra = new byte[size * size * 4];
         var depth = new double[size * size];
         for (var i = 0; i < depth.Length; i++) depth[i] = double.NegativeInfinity;
-        var (scale, offX, offY) = Projection(size);
+        var (scale, offX, offY) = ComputeProjection(size);
         RenderCube(source, sourceW, sourceH, bgra, depth, size, scale, offX, offY, 0.5, HeadFaces);
         RenderCube(source, sourceW, sourceH, bgra, depth, size, scale, offX, offY, 0.545, HatFaces);
 
@@ -203,7 +203,7 @@ public sealed partial class SkinHeadView : UserControl
         return (x1, y * CosPitch - z1 * SinPitch, y * SinPitch + z1 * CosPitch);
     }
 
-    private static (double Scale, double OffX, double OffY) Projection(int size)
+    private static (double Scale, double OffX, double OffY) ComputeProjection(int size)
     {
         var minX = double.MaxValue; var maxX = double.MinValue;
         var minY = double.MaxValue; var maxY = double.MinValue;
