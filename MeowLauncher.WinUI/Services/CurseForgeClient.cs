@@ -45,7 +45,8 @@ public static class CurseForgeClient
     /// <summary>按分类搜索；category = all 时并发抓全部分类后轮流合并，避免结果被 Mod 淹没。</summary>
     public static async Task<IReadOnlyList<ModrinthProject>> SearchAsync(
         string query, int limit = 20, string category = "all",
-        string? gameVersion = null, string? loader = null, string sort = "relevance", int offset = 0)
+        string? gameVersion = null, string? loader = null, string sort = "relevance", int offset = 0,
+        string cfSource = "mcim")
     {
         var targets = category == "all"
             ? Classes
@@ -65,11 +66,11 @@ public static class CurseForgeClient
 
         // 单分类失败要报错；all 里某一个分类失败不该拖垮整页结果。
         if (category != "all")
-            return await SearchClassAsync(query, targets[0].Category, targets[0].ClassId, perClass, gameVersion, loader, sort, offset);
+            return await SearchClassAsync(query, targets[0].Category, targets[0].ClassId, perClass, gameVersion, loader, sort, offset, cfSource);
 
         var attempts = await Task.WhenAll(targets.Select(async t =>
         {
-            try { return (Ok: true, Items: await SearchClassAsync(query, t.Category, t.ClassId, perClass, gameVersion, loader, sort, offset)); }
+            try { return (Ok: true, Items: await SearchClassAsync(query, t.Category, t.ClassId, perClass, gameVersion, loader, sort, offset, cfSource)); }
             catch { return (Ok: false, Items: (IReadOnlyList<ModrinthProject>)Array.Empty<ModrinthProject>()); }
         }));
         if (attempts.All(a => !a.Ok))
@@ -109,7 +110,8 @@ public static class CurseForgeClient
 
     private static async Task<IReadOnlyList<ModrinthProject>> SearchClassAsync(
         string query, string category, int classId, int limit,
-        string? gameVersion = null, string? loader = null, string sort = "relevance", int offset = 0)
+        string? gameVersion = null, string? loader = null, string sort = "relevance", int offset = 0,
+        string cfSource = "mcim")
     {
         var parameters = new Dictionary<string, string>
         {
@@ -118,6 +120,7 @@ public static class CurseForgeClient
             ["index"] = Math.Max(0, offset).ToString(),
             ["pageSize"] = Math.Clamp(limit, 1, 50).ToString(),
             ["sortField"] = SortField(sort),
+            ["cfSource"] = cfSource,
             ["sortOrder"] = "desc",
         };
         if (!string.IsNullOrWhiteSpace(query)) parameters["searchFilter"] = query.Trim();

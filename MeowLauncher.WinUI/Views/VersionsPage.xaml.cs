@@ -46,6 +46,9 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private bool _changingDefaultDir;
 
     private VersionInfo? _selected;
+    // 实例「路径」显示实际生效的游戏目录：隔离开是 versions/<id>，关就是 .minecraft 根。
+    // 之前固定显示版本目录，和下面的「未隔离」互相打架。
+    private bool _detailIsolated;
     private ListState _listState = ListState.Loading;
     private bool _loading;
     private bool _launching;
@@ -809,7 +812,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             || string.Equals(version.Loader, "vanilla", StringComparison.OrdinalIgnoreCase)
             ? Visibility.Collapsed : Visibility.Visible;
         DetailMods.Text = version.Mods.ToString();
-        DetailPath.Text = version.Path;
+        UpdateDetailPath();
         DetailCreated.Text = Directory.Exists(version.Path)
             ? Directory.GetCreationTime(version.Path).ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)
             : "—";
@@ -865,6 +868,18 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private void CrumbRoot_Tapped(object sender, TappedRoutedEventArgs e) => ShowList();
 
     private string _lastIsolationTag = "follow";
+
+    /// <summary>实例路径 = 实际生效的游戏目录（隔离开：versions/<id>；关：.minecraft 根）。</summary>
+    private void UpdateDetailPath()
+    {
+        if (_selected is null) return;
+        var root = _selected.Root;
+        DetailPath.Text = string.IsNullOrWhiteSpace(root)
+            ? _selected.Path
+            : _detailIsolated
+                ? System.IO.Path.Combine(root, "versions", _selected.Id)
+                : root;
+    }
 
     private void SelectIsolation(string? tag)
     {
@@ -957,6 +972,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             InstanceIsolationHint.Text = settings.Isolated
                 ? "当前：已隔离"
                 : "当前：未隔离";
+            _detailIsolated = settings.Isolated;
+            UpdateDetailPath();
             InstanceSettingsStatus.Text = settings.Ok
                 ? (settings.UseGlobal ? "当前使用全局设置" : "当前使用独立设置")
                 : settings.Message;
@@ -1100,6 +1117,15 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     /// 内存条：整条 = 本机总内存；其他占用 = 总 − 当前可用；预估分配 = 输入框里的值。
     /// 上面一排大数字和三段同色；条上的把手可以直接拖出分配量；分配超过剩余时变警示色并说明。
     /// </summary>
+    /// <summary>「手动分配内存」这一行只在关掉自动分配（或跟随全局给出只读摘要）时出现。</summary>
+    private void SyncManualMemRow()
+    {
+        if (InstanceManualMemRow is null) return;
+        var show = (InstanceMemoryBox?.Visibility == Visibility.Visible)
+                || (InstanceMemorySummary?.Visibility == Visibility.Visible);
+        InstanceManualMemRow.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void UpdateMemoryBar()
     {
         // XAML 解析时 NumberBox 的 Value="4096" 会立刻触发 ValueChanged，那时条形里的控件还没创建（为 null）。
@@ -1120,6 +1146,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             var (summary, allocation) = ReadOnlyMemoryState(useGlobal);
             InstanceMemorySummary.Text = summary;
             InstanceMemorySummary.Visibility = summary.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            SyncManualMemRow();
             if (allocation is not { } mb)
             {
                 MemBarHost.Visibility = Visibility.Collapsed;
@@ -1404,6 +1431,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         InstanceMemAutoSwitch.IsEnabled = editable;
         InstanceAutoApplyLabel.Visibility = Visibility.Collapsed;
         InstanceMemoryBox.Visibility = editable && !InstanceMemAutoSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SyncManualMemRow();
         InstanceJvmBox.Visibility = editor;
         InstanceJvmAutoSwitch.Visibility = editor;
         InstanceJvmAutoHint.Visibility = Visibility.Collapsed;
@@ -1416,6 +1444,24 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         InstanceGlobalExtra.Visibility = summary;
         ExtraPanel.Visibility = editor;
         ExtraPanel.IsEnabled = editable && _extraReady;
+        DimBelowGlobalRow(inherited);
+    }
+
+    /// <summary>
+    /// 「跟随全局设置」是它下面所有设置的总开关：开启时把后面这些卡整体压暗并禁掉交互，
+    /// 而不是把它们藏起来——藏了用户不知道自己在跟随什么。
+    /// </summary>
+    private void DimBelowGlobalRow(bool dim)
+    {
+        if (DetailPanel is null || LaunchSettingsSourceRow is null) return;
+        var start = DetailPanel.Children.IndexOf(LaunchSettingsSourceRow);
+        if (start < 0) return;
+        for (var i = start + 1; i < DetailPanel.Children.Count; i++)
+        {
+            if (DetailPanel.Children[i] is not UIElement el) continue;
+            el.Opacity = dim ? 0.45 : 1.0;
+            el.IsHitTestVisible = !dim;
+        }
     }
 
     // ---- 启动附加设置（DESIGN-1110 第 4 项，scope=当前实例）

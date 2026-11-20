@@ -49,6 +49,10 @@ public static class InstanceIcon
     public static ImageSource ForLoader(string? loader) =>
         new BitmapImage(new Uri(LoaderAsset(loader))) { DecodePixelWidth = 64 };
 
+    /// <summary>下载/安装类任务用：优先显示被下载内容自己的图标（mod 封面等），没有才退回实例图标。</summary>
+    public static ImageSource ForProject(Models.ModrinthProject? project, Models.VersionInfo? fallback = null) =>
+        project?.IconSource ?? For(fallback);
+
     public static ImageSource ForInstalledPack(BackendResult result) =>
         For(new VersionInfo { Path = result.InstancePath, Loader = result.Loader });
 }

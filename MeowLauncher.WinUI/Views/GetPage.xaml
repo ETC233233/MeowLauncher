@@ -91,10 +91,10 @@
                         <TextBlock Text="Modrinth" FontSize="{StaticResource FontSizeBody}" />
                     </ToggleButton>
                     <ToggleButton x:Name="SrcCurseForge" Style="{StaticResource SegTabToggleStyle}" Tag="1" Click="Source_Click"
-                                  AutomationProperties.Name="数据源：CurseForge" ToolTipService.ToolTip="从 CurseForge 搜索"
+                                  AutomationProperties.Name="数据源：MCIM / Meow-CFMI" ToolTipService.ToolTip="从 MCIM / Meow-CFMI 镜像搜索"
                                   Padding="12,4" CornerRadius="{StaticResource ChipCornerRadius}"
                                   BorderThickness="0" VerticalAlignment="Center">
-                        <TextBlock Text="CurseForge" FontSize="{StaticResource FontSizeBody}" />
+                        <TextBlock Text="MCIM / Meow-CFMI" FontSize="{StaticResource FontSizeBody}" />
                     </ToggleButton>
                 </StackPanel>
             </Border>

@@ -55,6 +55,15 @@ public static class Diagnostics
 
     public static string BuildReport(FailureInfo failure, string task, string message, string versionId = "")
     {
+        message = Trim(message, 4000);
+        return BuildReportCore(failure, task, message, versionId);
+    }
+
+    private static string Trim(string text, int max) =>
+        string.IsNullOrEmpty(text) || text.Length <= max ? text : text[..max] + "\n…（已截断）";
+
+    private static string BuildReportCore(FailureInfo failure, string task, string message, string versionId = "")
+    {
         var sb = new StringBuilder();
         sb.AppendLine("MeowLauncher 诊断报告");
         sb.AppendLine($"发生时间：{failure.TimeText}");
@@ -62,7 +71,20 @@ public static class Diagnostics
         sb.AppendLine($"任务：{task}");
         if (!string.IsNullOrWhiteSpace(versionId)) sb.AppendLine($"实例：{versionId}");
         if (!string.IsNullOrWhiteSpace(failure.Stage)) sb.AppendLine($"失败环节：{failure.Stage}");
-        sb.AppendLine($"说明：{message}");
+        if (message.Contains('\n'))
+        {
+            // 多行说明（例如安装器原始输出）单独成块，别和前面的键值挤一行。
+            sb.AppendLine("说明：");
+            foreach (var line in message.Replace("\r", "").Split('\n'))
+            {
+                if (line.Trim().Length == 0) continue;
+                sb.AppendLine("  " + line);
+            }
+        }
+        else
+        {
+            sb.AppendLine($"说明：{message}");
+        }
         sb.AppendLine($"启动器：{VersionText()}");
         sb.AppendLine($"系统：{Environment.OSVersion} · {RuntimeInformation.OSArchitecture}");
         return sb.ToString();

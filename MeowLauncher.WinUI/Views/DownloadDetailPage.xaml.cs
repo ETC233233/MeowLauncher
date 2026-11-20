@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Models;
@@ -133,6 +134,9 @@ public sealed partial class DownloadDetailPage : Page
     /// <summary>每个加载器单独回来的结果：不能等四种都查完再放行版本下拉，否则先回来的 Forge 会被判成「版本还没选到」。</summary>
     private readonly Dictionary<string, LoaderKindInfo> _kinds = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<LoaderRow> _loaderRows = [];
+    // 列表只绑一次，逐行回来时只改行内文字：重建 ItemsSource 会让整块列表闪一下，
+    // 四种加载器各自异步返回时就是连续闪四次。
+    private readonly ObservableCollection<LoaderRow> _visibleRows = new();
     private string _selKind = "vanilla";
     private string _suggestedName = "";
     private bool _settingName;
@@ -140,6 +144,7 @@ public sealed partial class DownloadDetailPage : Page
     public DownloadDetailPage()
     {
         InitializeComponent();
+        DetailLoaderList.ItemsSource = _visibleRows;
     }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -185,7 +190,25 @@ public sealed partial class DownloadDetailPage : Page
     }
 
     private void RefreshLoaderList() =>
-        DetailLoaderList.ItemsSource = _loaderRows.Where(r => r.Visible).ToList();
+        SyncRows(_visibleRows, _loaderRows.Where(r => r.Visible).ToList());
+
+    /// <summary>原地对齐：多删、缺插、错位移动，已存在的行对象原样保留（只更新文字）。</summary>
+    private static void SyncRows<T>(ObservableCollection<T> target, IReadOnlyList<T> wanted)
+    {
+        var keep = new HashSet<T>(wanted);
+        for (var i = target.Count - 1; i >= 0; i--)
+            if (!keep.Contains(target[i])) target.RemoveAt(i);
+
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var item = wanted[i];
+            var at = -1;
+            for (var j = i; j < target.Count; j++)
+                if (EqualityComparer<T>.Default.Equals(target[j], item)) { at = j; break; }
+            if (at < 0) target.Insert(i, item);
+            else if (at != i) target.Move(at, i);
+        }
+    }
 
     private static string LoaderLabel(string kind) => kind switch
     {

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """MeowLauncher WinUI sidecar.
 
 只做两件事：
@@ -274,10 +274,7 @@ def add_offline_account(name: str, variant: str = "classic") -> dict:
     accounts = st.get("accounts")
     if not isinstance(accounts, list):
         accounts = []
-    if any(str(a.get("type") or "") == "offline"
-           and str(a.get("name") or "").lower() == name.lower()
-           for a in accounts if isinstance(a, dict)):
-        return {"ok": False, "message": f"离线账号 {name} 已存在"}
+    # 重名不拦截：重复添加视为新增一个账户条目（同名同 UUID）。
     acc = {"type": "offline", "name": name, "uuid": core.offline_uuid(name),
            "skinVariant": variant}
     accounts.append(acc)
@@ -3839,7 +3836,7 @@ def read_logs(file_name: str = "", limit: int = 400) -> dict:
             "lines": tail, "total": len(lines), "truncated": len(lines) > len(tail)}
 
 
-def list_mojang_versions() -> dict:
+def list_mojang_versions(force: bool = False) -> dict:
     root = Path(os.getcwd())
     sys.path.insert(0, str(root))
     from ml2 import net
@@ -3847,7 +3844,7 @@ def list_mojang_versions() -> dict:
     mc = game_dir(st)
     installed = {str(v.get("id") or "") for v in scan_versions(mc, st)}
     rows = []
-    for item in net.mojang_versions():
+    for item in net.mojang_versions(force=force):
         kind = str(item.get("type") or "")
         # old_beta / old_alpha 也要放行：下载页的「远古」分段靠它们，不放行就永远是空的。
         if kind not in ("release", "snapshot", "old_beta", "old_alpha"):
@@ -4100,7 +4097,7 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
     _LOADER_NAMES = {"forge": "Forge", "neoforge": "NeoForge", "fabric": "Fabric", "quilt": "Quilt"}
     _loader_label = _LOADER_NAMES.get(_loader, (_loader.title() if _loader else "加载器"))
     _inst_step = f"下载{_loader_label}安装文件"
-    _STEPS = ["下载依赖库", "下载游戏主文件", "下载资源文件"]
+    _STEPS = ["获取版本信息", "下载依赖库", "下载游戏主文件", "下载资源文件"]
     if _loader in ("forge", "neoforge"):
         _STEPS.append(_inst_step)
     if _loader != "vanilla":
@@ -4146,7 +4143,7 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{n / 1024:.0f} KB"
 
     def _tail(info: dict) -> str:
-        """文件名 + 速度（PCL 风格的详情尾巴）。"""
+        """文件名 + 速度的详情尾巴。"""
         parts = []
         nm = str(info.get("name") or "")
         if nm:
@@ -4190,6 +4187,9 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         last_txt[0] = now
         pct_in = int(100 * done / total)
         if phase == "libraries":
+            # 三块是并发跑的：每个阶段一开线程就先点亮自己的步骤，否则界面会一直显示「等待」，
+            # 让人以为下载是一段一段排队的。
+            step(si("下载依赖库"), 1, 100.0 * done / total if total else -1)
             stage(0, f"下载依赖库 {done}/{total}（{pct_in}%）{_tail(info)}")
             stat(float(info.get("speed") or 0), max(0, total - done), str(info.get("name") or ""))
         elif phase == "client":
@@ -4202,10 +4202,12 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
             step(si("下载资源文件"), 1, -1, "下载资源索引")
             stage(0, "下载资源索引")
         else:
+            step(si("下载资源文件"), 1, 100.0 * done / total if total else -1)
             stage(0, f"下载资源文件 {done}/{total}（{pct_in}%）{_tail(info)}")
             stat(float(info.get("speed") or 0), max(0, total - done), str(info.get("name") or ""))
 
     declare_steps()
+    step(si("获取版本信息"), 1, -1)
     stage(1, "检查安装目录")
     st = load_settings()
     mc = game_dir(st)
@@ -4218,6 +4220,7 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         return {"ok": False, "errorCode": "FILE-ACCESS",
                 "message": f"启动器无法写入安装目录：{versions_dir}。请选择其他安装目录。"}
     stage(2, "获取版本清单")
+    step(si("获取版本信息"), 1, 30, "读取版本清单")
     entry = next((v for v in net.mojang_versions() if str(v.get("id") or "") == vid), None)
     if not entry:
         raise RuntimeError(f"找不到 Mojang 版本 {vid}")
@@ -4342,6 +4345,7 @@ def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
         _prereq_th.start()
 
     try:
+        step(si("获取版本信息"), 2, 100)
         stage(5, "下载版本信息 JSON")
         net.install_vanilla(mc, net.mojang_version_json(str(entry["url"])),
                             on_log=lambda s: stage(0, s), on_progress=progress)
@@ -5590,7 +5594,7 @@ def main(argv: list[str]) -> int:
                              separators=(",", ":")))
             return 0
         if "--mojang-versions" in argv:
-            print(json.dumps(list_mojang_versions(), ensure_ascii=False, separators=(",", ":")))
+            print(json.dumps(list_mojang_versions(force="--force" in argv), ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--packs" in argv:
             idx = argv.index("--packs")
@@ -5883,6 +5887,7 @@ def main(argv: list[str]) -> int:
             params = {field: str(raw[field]) for field in allowed if field in raw}
             params["gameId"] = "432"
             key = str(load_settings().get("cfApiKey") or "") or None
+            net.set_cf_source(str(raw.get("cfSource") or "").strip().lower() or None)
             print(json.dumps(net._cf_get("/mods/search", params, key, timeout=6), ensure_ascii=False))
             return 0
         if "--general-settings" in argv:

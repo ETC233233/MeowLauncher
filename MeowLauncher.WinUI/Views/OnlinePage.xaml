@@ -99,7 +99,9 @@
                           SelectedIndex="0" SelectionChanged="SourceBox_SelectionChanged"
                           AutomationProperties.Name="在线资源来源">
                     <ComboBoxItem Content="Modrinth" />
-                    <ComboBoxItem Content="CurseForge" />
+                    <ComboBoxItem Content="MCIM（CurseForge 镜像）" />
+                    <ComboBoxItem Content="Meow-CFMI（自建代理）" />
+                    <ComboBoxItem Content="CurseForge 直连（需 Key）" />
                 </ComboBox>
             </Grid>
         </Border>

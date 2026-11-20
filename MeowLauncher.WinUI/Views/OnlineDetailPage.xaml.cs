@@ -370,7 +370,7 @@ public sealed partial class OnlineDetailPage : Page
                 ? current : snapshot?.Versions.FirstOrDefault(v => v.Id == target);
             task = TaskCenter.Add($"安装 {p.Title}",
                 $"{a.SourceName} · {(file is null ? p.TypeText : file.Display)} · {(p.IsModpack ? "新实例" : a.VersionId)}",
-                PageTagFor(p), "", InstanceIcon.For(targetInstance));
+                PageTagFor(p), "\uE7B8", InstanceIcon.ForProject(p, targetInstance));
             if (p.IsModpack) task.ResourceKey = $"pack:{a.Source}:{p.Id}";
             var packProgress = p.IsModpack ? new Progress<string>(stage => TaskCenter.Report(task, stage)) : null;
             var result = plan is not null

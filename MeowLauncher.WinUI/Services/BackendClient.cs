@@ -742,9 +742,9 @@ public sealed partial class BackendClient
         }
     }
 
-    public async Task<MojangVersionsResult?> GetMojangVersionsAsync()
+    public async Task<MojangVersionsResult?> GetMojangVersionsAsync(bool force = false)
     {
-        var result = await RunAsync("--mojang-versions", TimeSpan.FromSeconds(45));
+        var result = await RunAsync(force ? "--mojang-versions --force" : "--mojang-versions", TimeSpan.FromSeconds(45));
         if (!result.Success)
         {
             return new MojangVersionsResult { Ok = false, Message = result.Error };
@@ -1690,7 +1690,7 @@ public sealed partial class BackendClient
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python"),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-            @"C:\",
+            Environment.GetEnvironmentVariable("SystemDrive") + @"\",
         };
         var common = new List<string>();
         foreach (var root in roots)
@@ -1707,7 +1707,7 @@ public sealed partial class BackendClient
         }
         if (!cands.Any(c => c.Label == "常见位置"))
         {
-            tried.Add(@"常见安装位置：%LOCALAPPDATA%\Programs\Python、Program Files、C:\ 下没有 Python3* 目录");
+            tried.Add(@"常见安装位置：%LOCALAPPDATA%\Programs\Python、Program Files、系统盘根目录下没有 Python3* 目录");
         }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

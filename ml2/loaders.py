@@ -140,13 +140,28 @@ def _preseed_installer_libs(jar: Path, mc_dir: Path, on_log) -> None:
         on_log(f"[镜像] 预下载出错（{e}），继续用官方源")
 
 
-def _run_installer(jar: Path, mc_dir: Path, java_exe: str, on_log) -> int:
+def _installer_tail_lines(tail: list[str], limit: int = 25) -> str:
+    """把安装器最后几行拼进报错，省得用户只看到「退出码 1」。"""
+    lines = [ln for ln in tail if ln.strip()][-limit:]
+    if not lines:
+        return ""
+    return "\n—— 安装器最后 %d 行 ——\n%s" % (len(lines), "\n".join(lines))
+
+
+def _run_installer(jar: Path, mc_dir: Path, java_exe: str, on_log, tail: list[str] | None = None) -> int:
     _preseed_installer_libs(jar, mc_dir, on_log)
     mirror = _installer_mirror()
-    code = _run_installer_once(jar, mc_dir, java_exe, on_log, mirror)
+    sink = tail if tail is not None else []
+
+    def tap(line: str) -> None:
+        sink.append(line)
+        del sink[:-40]           # 只留最近 40 行，够定位又不会太长
+        on_log(line)
+
+    code = _run_installer_once(jar, mc_dir, java_exe, tap, mirror)
     if code != 0 and mirror:
         on_log(f"[提示] 带镜像安装失败（退出码 {code}），改用官方源重试一次…")
-        code = _run_installer_once(jar, mc_dir, java_exe, on_log, None)
+        code = _run_installer_once(jar, mc_dir, java_exe, tap, None)
     return code
 
 
@@ -275,9 +290,10 @@ def install_forge(mc_dir: Path, mc_version: str, loader_version: str | None = No
         loader_version = vers[0]  # list_forge 已按新→旧排序
     jar = prefetch_installer(mc_version, "forge", loader_version, on_log)
     before = {p.name for p in _versions_dir(mc_dir).iterdir() if p.is_dir()}
-    code = _run_installer(jar, mc_dir, java_exe, on_log)
+    _tail: list[str] = []
+    code = _run_installer(jar, mc_dir, java_exe, on_log, _tail)
     if code != 0:
-        raise RuntimeError(f"Forge 安装器退出码 {code}")
+        raise RuntimeError(f"Forge 安装器退出码 {code}" + _installer_tail_lines(_tail))
     vid = _newest_version_id(mc_dir, before)
     on_log(f"[完成] Forge 已安装：{vid or '(未检测到新版本目录)'}")
     return vid
@@ -438,9 +454,10 @@ def install_neoforge(mc_dir: Path, mc_version: str, loader_version: str | None =
         loader_version = vers[-1]
     jar = prefetch_installer(mc_version, "neoforge", loader_version, on_log)
     before = {p.name for p in _versions_dir(mc_dir).iterdir() if p.is_dir()}
-    code = _run_installer(jar, mc_dir, java_exe, on_log)
+    _tail: list[str] = []
+    code = _run_installer(jar, mc_dir, java_exe, on_log, _tail)
     if code != 0:
-        raise RuntimeError(f"NeoForge 安装器退出码 {code}")
+        raise RuntimeError(f"NeoForge 安装器退出码 {code}" + _installer_tail_lines(_tail))
     vid = _newest_version_id(mc_dir, before)
     on_log(f"[完成] NeoForge 已安装：{vid or '(未检测到新版本目录)'}")
     return vid
@@ -511,8 +528,13 @@ def api_mod_versions(project_id: str, mc_version: str) -> list[dict]:
     platform = platforms.get(project_id)
     if platform is None:
         raise ValueError("未知的加载器 API 项目")
+    key = f"api:{project_id}:{platform}:{mc_version}"
+    cached = _cache_get(key)
+    if isinstance(cached, list):
+        return cached
     rows = net.modrinth_versions(project_id, loaders=[platform],
                                  game_versions=[mc_version] if mc_version else None) or []
+    _cache_put(key, rows)
 
     def published(row: dict) -> datetime:
         try:
@@ -607,8 +629,45 @@ def strip_loader(vid: str) -> dict:
 
 # ---------------- 追加：按 Minecraft 版本精确列加载器（覆盖旧实现） ----------------
 
+_META_TTL = 1800  # 加载器/API 版本列表缓存 30 分钟：每次进页面都重查会白等好几秒
+
+
+def _meta_cache_path(key: str) -> "Path":
+    import hashlib
+    base = Path(os.environ.get("APPDATA") or str(Path.home())) / "MeowLauncher" / "cache" / "meta"
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
+    return base / f"{digest}.json"
+
+
+def _cache_get(key: str):
+    import time as _t
+    path = _meta_cache_path(key)
+    try:
+        if path.is_file() and (_t.time() - path.stat().st_mtime) < _META_TTL:
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def _cache_put(key: str, value) -> None:
+    try:
+        path = _meta_cache_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _get_json(url: str, timeout: int = 20):
-    return net._get(url, timeout=timeout)
+    """元数据请求：先看 30 分钟磁盘缓存，再走「镜像 / 官方竞速」。"""
+    cached = _cache_get(url)
+    if cached is not None:
+        return cached
+    value = net._get(url, timeout=timeout)
+    if value:
+        _cache_put(url, value)
+    return value
 
 
 def _quilt_versions_v2(mc: str) -> list:

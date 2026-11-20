@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using MeowLauncher.WinUI.Models;
@@ -77,6 +78,10 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
     private readonly List<MojangVersionInfo> _all = [];
     private List<NavGroup> _groups = [];
     private List<DownloadRow> _rows = [];
+    // 列表只绑一次集合，之后原地增删/移动：重新赋值 ItemsSource 会让列表整体重建，
+    // 视觉上就是「一直刷新页面」，滚动位置和动画也跟着跳。
+    private readonly ObservableCollection<NavRow> _navItems = new();
+    private readonly ObservableCollection<DownloadRow> _rowItems = new();
 
     // 左栏的分类 / 选中状态在页面实例之间记住：离开再回来保持原样。
     private static string _selCat = "release";
@@ -112,6 +117,11 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         Unloaded += (_, _) => VersionNames.Changed -= OnVersionNamesChanged;
         Loaded += (_, _) => _ = LoadAsync();
         Loaded += (_, _) => _ = LoadSourceAsync();
+        Loaded += (_, _) =>
+        {
+            if (NavList.ItemsSource is null) NavList.ItemsSource = _navItems;
+            if (VersionList.ItemsSource is null) VersionList.ItemsSource = _rowItems;
+        };
         Loaded += (_, _) => ApplyCompact(App.MainWindow?.IsCompact ?? false);
         if (App.MainWindow is { } shell) shell.CompactChanged += (_, _) => ApplyCompact(shell.IsCompact);
     }
@@ -145,14 +155,16 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
 
     // ------------------------------------------------------------------ 读取
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(bool force = false)
     {
         if (_loading) return;
         _loading = true;
-        SetState(PageState.Loading);
+        // 已经有列表时重进页面不再切回整页 Loading：只把状态条文字换掉，
+        // 否则每次进来都像「页面重新刷新了一遍」。
+        if (_all.Count == 0) SetState(PageState.Loading);
         try
         {
-            var result = await App.Backend.GetMojangVersionsAsync();
+            var result = await App.Backend.GetMojangVersionsAsync(force);
             _all.Clear();
             if (result?.Versions is { Count: > 0 })
             {
@@ -489,18 +501,38 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             ListCount.Text = $"{items.Count} 个版本";
         }
 
-        NavList.ItemsSource = nav;
+        SyncRows(_navItems, nav);
         if (navOffset > 0)
             DispatcherQueue.TryEnqueue(() => FindScrollViewer(NavList)?.ChangeView(null, navOffset, null, true));
 
-        if (resetList || VersionList.ItemsSource is null)
+        if (resetList || VersionList.ItemsSource is null || _rowItems.Count != items.Count)
         {
-            _rows = items.Select(v => new DownloadRow(v, searching || v.Type == "snapshot")).ToList();
-            VersionList.ItemsSource = _rows;
-            FindScrollViewer(VersionList)?.ChangeView(null, 0, null, true);
+            // 同一个版本复用原来的行对象，只让它的文字变；换了分类/搜索才整批换。
+            var old = _rows.ToDictionary(r => r.Id, StringComparer.Ordinal);
+            _rows = items.Select(v => old.TryGetValue(v.Id, out var keep) ? keep : new DownloadRow(v, searching || v.Type == "snapshot")).ToList();
+            SyncRows(_rowItems, _rows);
+            if (resetList) FindScrollViewer(VersionList)?.ChangeView(null, 0, null, true);
         }
 
         SetState(PageState.List);
+    }
+
+    /// <summary>原地对齐集合：多删、缺插、错位移动，已存在的实例原样保留（不重建控件）。</summary>
+    private static void SyncRows<T>(ObservableCollection<T> target, IReadOnlyList<T> wanted)
+    {
+        var keep = new HashSet<T>(wanted);
+        for (var i = target.Count - 1; i >= 0; i--)
+            if (!keep.Contains(target[i])) target.RemoveAt(i);
+
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var item = wanted[i];
+            var at = -1;
+            for (var j = i; j < target.Count; j++)
+                if (EqualityComparer<T>.Default.Equals(target[j], item)) { at = j; break; }
+            if (at < 0) target.Insert(i, item);
+            else if (at != i) target.Move(at, i);
+        }
     }
 
     private void Nav_ItemClick(object sender, ItemClickEventArgs e)
@@ -566,7 +598,7 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
-        await LoadAsync();
+        await LoadAsync(force: true);
     }
 
     // ------------------------------------------------------------------ 子页 / 安装
@@ -586,13 +618,41 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         _host.OpenSubPage(typeof(DownloadDetailPage), args, "获取", "下载版本", v.Id);
     }
 
+    /// <summary>任务标题就用即将装出来的那个实例名（原版＝版本号，带加载器则把加载器和版本拼进去）。</summary>
+    private static string DefaultInstanceName(string versionId, string kind, string loaderVersion)
+    {
+        var ver = (loaderVersion ?? "").Trim();
+        if (kind == "vanilla" || ver.Length == 0) return versionId;
+        return kind switch
+        {
+            "fabric" => $"{versionId}-Fabric_{ver}",
+            "quilt" => $"{versionId}-Quilt_{ver}",
+            "forge" => $"{versionId}-forge-{ver}",
+            "neoforge" => $"{versionId}-neoforge-{ver}",
+            _ => versionId,
+        };
+    }
+
+    private static string InstallTaskDetail(string kind) =>
+        kind == "vanilla" ? "原版" : $"{LoaderDisplayName(kind)} 加载器";
+
+    private static string LoaderDisplayName(string kind) => kind switch
+    {
+        "fabric" => "Fabric",
+        "quilt" => "Quilt",
+        "forge" => "Forge",
+        "neoforge" => "NeoForge",
+        _ => "原版",
+    };
+
     private async Task InstallAsync(MojangVersionInfo v, string kind, string loaderVersion,
         DownloadApiSelection? api, string folder, string instanceName)
     {
         if (Directory.Exists(Path.Combine(folder, "versions", instanceName))) return;
 
-        var task = TaskCenter.Add($"安装 {v.Id}", kind == "vanilla" ? "原版" : $"{kind} 加载器", "download",
-            targetIcon: InstanceIcon.ForLoader(kind));
+        var task = TaskCenter.Add(
+            string.IsNullOrWhiteSpace(instanceName) ? DefaultInstanceName(v.Id, kind, loaderVersion) : instanceName,
+            InstallTaskDetail(kind), "download", targetIcon: InstanceIcon.ForLoader(kind));
         var progress = new Progress<string>(line =>
         {
             if (!task.IsActive) return;

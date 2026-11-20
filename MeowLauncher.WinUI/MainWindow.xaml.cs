@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -1257,6 +1257,7 @@ public sealed partial class MainWindow : Window
                         AppPreferencesStore.Save(_preferences);
                         break;
                     }
+                    case "skip":
                     case "finish":
                         await FinishOnboardingAsync();
                         break;
@@ -2753,6 +2754,35 @@ public sealed partial class MainWindow : Window
 				await Task.Delay(120);
 				TaskFlyout.ShowAt(TaskDock);
 				L("dtasks opened");
+				break;
+			case "dtaskdemo":
+				// dtaskdemo：塞几条假任务进任务中心（只用于截图看样式）
+				{
+					var t1 = TaskCenter.Add("26.1.2", "正在准备…", "download", "\uE896");
+					TaskCenter.BuildSteps(t1, new[] { "下载依赖库", "下载游戏主文件", "下载资源文件", "写入实例配置" });
+					TaskCenter.Step(t1, 0, 2, 100, "115/115");
+					TaskCenter.Step(t1, 1, 1, 62, "23.4 MB / 38.1 MB");
+					TaskCenter.Stats(t1, 15.2 * 1024 * 1024, "剩余 4,120 个文件");
+					TaskCenter.Progress(t1, 58.4, "正在下载游戏主文件 23.4 MB / 38.1 MB");
+					t1.SetLive("Downloading library from https://bmclapi2.bangbang93.com/maven/…");
+
+					var t2 = TaskCenter.Add("1.20.1-forge-47.4.29", "安装完成", "download", "\uE896");
+					TaskCenter.BuildSteps(t2, new[] { "下载依赖库", "下载游戏主文件", "下载资源文件", "下载 Forge 安装文件", "安装加载器", "写入实例配置" });
+					for (var i = 0; i < 6; i++) TaskCenter.Step(t2, i, 2, 100, "");
+					TaskCenter.Progress(t2, 100, "安装完成");
+					TaskCenter.Complete(t2, "安装完成");
+
+					var t3 = TaskCenter.Add("1.21.11-neoforge-21.11.48", "连接被重置（ECONNRESET）", "download", "\uE896");
+					TaskCenter.BuildSteps(t3, new[] { "下载依赖库", "下载游戏主文件", "下载资源文件", "写入实例配置" });
+					TaskCenter.Step(t3, 0, 2, 100, "");
+					TaskCenter.Step(t3, 1, 3, 0, "连接被重置");
+					TaskCenter.Progress(t3, 31.5, "下载游戏主文件失败：连接被重置（ECONNRESET）");
+					TaskCenter.Fail(t3, "下载游戏主文件失败：连接被重置（ECONNRESET）", null);
+
+					Navigate("tasks");
+					await Task.Delay(400);
+					L("dtaskdemo seeded");
+				}
 				break;
 			case "ddetail":
 				// ddetail|版本号：进下载页并直接打开该版本的安装设置页（截图用）

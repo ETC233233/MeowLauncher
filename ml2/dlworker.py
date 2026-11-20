@@ -51,18 +51,27 @@ def main() -> int:
         return sess
 
     def light(url: str, dest: Path, on_bytes) -> None:
-        sess = _session()
-        resp = sess.get(url, timeout=20, stream=True)
-        resp.raise_for_status()
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".part")
-        with open(tmp, "wb") as fh:
-            for chunk in resp.iter_content(net._CHUNK):
-                if not chunk:
-                    continue
-                fh.write(chunk)
-                on_bytes(len(chunk), 0)
-        os.replace(tmp, dest)
+        last: Exception | None = None
+        for attempt in range(2):
+            try:
+                sess = _session()
+                # 连接 5 秒、读 15 秒：个别镜像会挂住不回数据，卡 20 秒就把整批进度拖死。
+                with sess.get(url, timeout=(5, 15), stream=True) as resp:
+                    resp.raise_for_status()
+                    tmp = dest.with_name(dest.name + ".part")
+                    with open(tmp, "wb") as fh:
+                        for chunk in resp.iter_content(net._CHUNK):
+                            if not chunk:
+                                continue
+                            fh.write(chunk)
+                            on_bytes(len(chunk), 0)
+                    os.replace(tmp, dest)
+                return
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+        if last is not None:
+            raise last
 
     def emit(line: str) -> None:
         with out_lock:

@@ -111,6 +111,9 @@ html[data-theme="dark"] #art svg{--soft:#2E3742;--line2:#5A6675}
 .foot{height:74px;flex:0 0 74px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-top:1px solid var(--line);background:transparent}
 .back{width:34px;height:34px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .back:hover{background:var(--panel)}
+.fleft{display:flex;align-items:center;gap:10px}
+.skipbtn{font-size:12.5px;color:var(--sub);cursor:pointer;border-radius:4px;padding:6px 8px;transition:background .15s,color .15s}
+.skipbtn:hover{background:var(--panel);color:var(--accent)}
 .btn{height:32px;border-radius:4px;padding:0 22px;font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s}
 .btn.primary{margin-left:auto;background:var(--accent);color:var(--accent-fg)}
 .btn.primary:hover{background:var(--accent-h)}
@@ -713,12 +716,13 @@ function render(){
  const s=P[n===2?3:n===3?2:n],stage=document.getElementById('stage');
  disposeAccountModel();stage.classList.remove('login-wait','account-confirm');stage.classList.toggle('welcome',n===1);stage.classList.toggle('dense', n===4);stage.innerHTML=s.body;if(n===4)fillDirs();
  const art=document.getElementById('art');const tpl=document.getElementById(n===1?'heroTpl':('artTpl'+(n===2?3:n===3?2:n)));art.innerHTML='';requestAnimationFrame(()=>{if(n===3&&accountView==='confirm')showAccountModel(art,accountFlow.profile);else if(n===3&&accountView==='offline')showAccountModel(art,{skin:defaultAccountSkin(accountFlow.slim),variant:accountFlow.slim?'slim':'classic'});else if(tpl)art.innerHTML=tpl.innerHTML});
- document.getElementById('foot').innerHTML=(n>1?'<span class="back" id="bk">'+BACK+'</span>':'<span class="back"></span>')+'<div class="btn primary" id="next">'+s.btn+'</div>';
+ document.getElementById('foot').innerHTML='<div class="fleft">'+(n>1?'<span class="back" id="bk">'+BACK+'</span>':'<span class="back"></span>')+'<span class="skipbtn" id="skip">不再显示</span></div>'+'<div class="btn primary" id="next">'+s.btn+'</div>';
  document.getElementById('next').onclick=()=>{
  if(n===3){nextAccount();return}
  if(n<6)go(1);else bridge({type:'finish'});
 };
  const bk=document.getElementById('bk');if(bk)bk.onclick=()=>{if(n===3)backAccount();else go(-1)};
+ const sk=document.getElementById('skip');if(sk)sk.onclick=()=>bridge({type:'skip'});
  const opts=n===4?document.querySelectorAll('#opts .row'):[];
  opts.forEach(r=>{r.onclick=()=>{opts.forEach(o=>{o.classList.remove('sel');o.querySelector('.dot').classList.remove('on')});r.classList.add('sel');r.querySelector('.dot').classList.add('on');const t=r.querySelector('.t');if(t)selectDirectory(t.textContent)}});
  const th=document.querySelectorAll('#themes .opt');th.forEach(o=>o.classList.toggle('sel',o.dataset.theme===themeChoice));

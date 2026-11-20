@@ -43,6 +43,9 @@ public class TaskEntry : INotifyPropertyChanged
         internal set { _failure = value; OnPropertyChanged(nameof(ErrorCodeText)); }
     }
 
+    /// <summary>完整失败信息（可能含安装器多行输出）；卡片只显示第一行，复制诊断用全文。</summary>
+    public string FailureMessage { get; set; } = "";
+
     public string ErrorCodeText => Failure is null ? "" : $"错误码 {Failure.Code}";
 
     public override string ToString() => Title;

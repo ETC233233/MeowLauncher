@@ -682,7 +682,7 @@
                                     <ComboBox Style="{StaticResource SettingsComboStyle}" Grid.Column="2" x:Name="DownloadSourceBox"
                                               SelectionChanged="DownloadSource_Changed">
                                         <ComboBoxItem Content="Modrinth" Tag="priority:modrinth,curseforge" />
-                                        <ComboBoxItem Content="CurseForge" Tag="priority:curseforge,modrinth" />
+                                        <ComboBoxItem Content="MCIM / Meow-CFMI" Tag="priority:curseforge,modrinth" />
                                     </ComboBox>
                                 </Grid>
 
@@ -704,6 +704,23 @@
                                         <ComboBoxItem Content="MCIM 优先" />
                                         <ComboBoxItem Content="官方优先" />
                                     </ComboBox>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="CurseForge Key" Style="{StaticResource RowLabelStyle}" />
+                                        <TextBlock Text="选填。镜像连不上时用它直连 CurseForge 官方接口；留空则只走镜像"
+                                                   Style="{StaticResource GroupDescStyle}" />
+                                    </StackPanel>
+                                    <PasswordBox Grid.Column="1" x:Name="CfKeyBox" Height="32" Width="280"
+                                                 VerticalAlignment="Center" PlaceholderText="未设置"
+                                                 AutomationProperties.Name="CurseForge Key"
+                                                 PasswordChanged="CfKey_Changed" />
                                 </Grid>
                             </Border>
                         </StackPanel>

@@ -37,7 +37,7 @@ public sealed partial class SettingsPage : Page
     private DispatcherTimer? _statusTimer;
 
 
-    /// <summary>CurseForge Key 已从 UI 移除；仅缓存后端现有值，保存时原样回传，避免把用户已有的 Key 清空。</summary>
+    /// <summary>后端现有的 CurseForge Key；界面上的 CfKeyBox 只在用户改动时覆盖它。</summary>
     private string _cfApiKey = "";
     private string _legacyGlobalJavaPath = "";
     private string _savedGameMirror = "";
@@ -604,6 +604,7 @@ public sealed partial class SettingsPage : Page
         GameMirrorNotice.Visibility = DownloadPage.IsGitHubMirror(general.Mirror)
             ? Visibility.Visible : Visibility.Collapsed;
         _cfApiKey = general.CfApiKey ?? "";
+        CfKeyBox.Password = _cfApiKey;
         DownloadThreadsBox.Value = Math.Clamp(general.DlThreads, 1, 32);
         DownloadParallelBox.Value = Math.Clamp(App.MainWindow?.Preferences?.DownloadParallel ?? 8, 1, 16);
         _suppress = false;
@@ -1189,6 +1190,8 @@ public sealed partial class SettingsPage : Page
 
     private void ProxyUser_Changed(object sender, TextChangedEventArgs e) => SaveProxy();
 
+    private void CfKey_Changed(object sender, RoutedEventArgs e) => NetworkEdited();
+
     private void ProxyPass_Changed(object sender, RoutedEventArgs e) => SaveProxy();
 
     private void LoadProxyFromPreferences()
@@ -1248,6 +1251,7 @@ public sealed partial class SettingsPage : Page
                 || string.IsNullOrEmpty(address.Host)
                 || DownloadPage.IsGitHubMirror(mirror));
         if (invalidCustomMirror) mirror = _savedGameMirror;
+        _cfApiKey = CfKeyBox.Password.Trim();
         var result = await App.Backend.SetGeneralSettingsAsync(source, mirror, threads,
             _cfApiKey, _legacyGlobalJavaPath);
         if (!result.Ok)

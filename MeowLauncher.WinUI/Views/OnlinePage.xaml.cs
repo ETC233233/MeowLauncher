@@ -430,9 +430,17 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         await SearchAsync(_query);
     }
 
+    /// <summary>0 Modrinth；1 MCIM 镜像；2 Meow-CFMI 自建代理；3 CurseForge 直连（需 Key）。</summary>
+    private static string CfSourceFor(int index) => index switch
+    {
+        2 => "cfmi",
+        3 => "official",
+        _ => "mcim",
+    };
+
     private void UpdateSourceCategories()
     {
-        var isCurseForge = SourceBox.SelectedIndex == 1;
+        var isCurseForge = SourceBox.SelectedIndex >= 1;
         CatAll.Visibility = isCurseForge ? Visibility.Collapsed : Visibility.Visible;
         if (isCurseForge && _category == "all") _category = "mod";
         UpdateCategoryVisuals();
@@ -443,8 +451,15 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         var query = (raw ?? "").Trim();
         _query = query;
         if (ActiveQueryBox.Text.Trim() != query) ActiveQueryBox.Text = query;   // 同步外部带进来的关键词；不触发再次搜索
-        var useCurseForge = SourceBox.SelectedIndex == 1;
-        var sourceName = useCurseForge ? "CurseForge" : "Modrinth";
+        var useCurseForge = SourceBox.SelectedIndex >= 1;
+        var cfSource = CfSourceFor(SourceBox.SelectedIndex);
+        var sourceName = SourceBox.SelectedIndex switch
+        {
+            1 => "MCIM",
+            2 => "Meow-CFMI",
+            3 => "CurseForge 直连",
+            _ => "Modrinth",
+        };
 
         // 两家现在都支持游戏版本/加载器/排序；CurseForge 没有"相关度"，回落成热门。
         UpdateFilterHint();
@@ -459,7 +474,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             var limit = _category == "all" ? 20 : 60;
             var searchTask = useCurseForge
                 ? CurseForgeClient.SearchAsync(query, limit, _category,
-                    NullIfEmpty(EffectiveGameVersion()), NullIfEmpty(EffectiveLoader()), _sort, _offset)
+                    NullIfEmpty(EffectiveGameVersion()), NullIfEmpty(EffectiveLoader()), _sort, _offset, cfSource)
                 : ModrinthClient.SearchAsync(query, limit, _category,
                     NullIfEmpty(EffectiveGameVersion()), NullIfEmpty(EffectiveLoader()), _sort, _offset);
             var done = await Task.WhenAny(searchTask, Task.Delay(TimeSpan.FromSeconds(15)));
@@ -560,7 +575,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
     private bool IsInstalled(ModrinthProject project)
     {
-        if (project.IsModpack) return _installed.Contains($"pack:{(SourceBox.SelectedIndex == 1 ? "curseforge" : "modrinth")}:{project.Id}");
+        if (project.IsModpack) return _installed.Contains($"pack:{(SourceBox.SelectedIndex >= 1 ? "curseforge" : "modrinth")}:{project.Id}");
         if (_installed.Count == 0) return false;
         if (!string.IsNullOrWhiteSpace(project.Id) && _installed.Contains(project.Id)) return true;
         if (string.IsNullOrWhiteSpace(project.Slug)) return false;
@@ -571,9 +586,9 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
     private void MarkInstalled(ModrinthProject project)
     {
-        if (project.IsModpack) _installed.Add($"pack:{(SourceBox.SelectedIndex == 1 ? "curseforge" : "modrinth")}:{project.Id}");
+        if (project.IsModpack) _installed.Add($"pack:{(SourceBox.SelectedIndex >= 1 ? "curseforge" : "modrinth")}:{project.Id}");
         if (!project.IsModpack && !string.IsNullOrWhiteSpace(project.Id)) _installed.Add(project.Id);
-        ApplyResults(SourceBox.SelectedIndex == 1 ? "CurseForge" : "Modrinth", _query);
+        ApplyResults(SourceBox.SelectedIndex >= 1 ? "CurseForge" : "Modrinth", _query);
     }
 
     private async void Category_Click(object sender, RoutedEventArgs e)
@@ -582,7 +597,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         // Modrinth 可以再点整合包回到「全部」，CurseForge 始终保留具体分类。
         if (category == _category)
         {
-            if (category != "modpack" || SourceBox.SelectedIndex == 1) return;
+            if (category != "modpack" || SourceBox.SelectedIndex >= 1) return;
             category = "all";
         }
         await SwitchCategoryAsync(category);
@@ -709,7 +724,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             return;
         }
 
-        var source = SourceBox.SelectedIndex == 1 ? "curseforge" : "modrinth";
+        var source = SourceBox.SelectedIndex >= 1 ? "curseforge" : "modrinth";
         var sourceName = source == "curseforge" ? "CurseForge" : "Modrinth";
         if (project.IsModpack)
         {
@@ -751,7 +766,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 }
             }
             task = TaskCenter.Add($"安装 {project.Title}",
-                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.For(current));
+                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.ForProject(project, current));
             ResultCount.Text = $"正在安装 {project.Title}…";
             var result = plan is not null
                 ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind, plan.Confirmation, taskId: task.Id)
@@ -784,7 +799,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     {
         button.IsEnabled = false;
         var task = TaskCenter.Add($"安装整合包 {project.Title}", $"{sourceName} · 新实例", PageTagFor(project),
-            "\uE8F1", InstanceIcon.ForLoader(null));
+            "\uE8F1", project.IconSource ?? InstanceIcon.ForLoader(null));
         task.ResourceKey = $"pack:{source}:{project.Id}";
         ResultCount.Text = $"正在安装整合包 {project.Title}…";
         try
@@ -880,7 +895,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             ResultCount.Text = "当前入口不支持打开详情子页。";
             return;
         }
-        var source = SourceBox.SelectedIndex == 1 ? "curseforge" : "modrinth";
+        var source = SourceBox.SelectedIndex >= 1 ? "curseforge" : "modrinth";
         var sourceName = source == "curseforge" ? "CurseForge" : "Modrinth";
         App.Trace("OpenDetail: begin " + project.Title);
         // 只读缓存快照：详情页要的只是「装到哪个实例」，不必为此再跑一次后端。

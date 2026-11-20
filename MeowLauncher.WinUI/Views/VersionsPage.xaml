@@ -729,16 +729,6 @@
                             <ToggleSwitch x:Name="InstanceConsoleSwitch" Grid.Column="1" MinWidth="0" Width="56" Margin="0,0,-12,0" HorizontalAlignment="Right" OnContent="" OffContent="" AutomationProperties.Name="启动时显示控制台窗口" Toggled="InstanceConsole_Toggled"/>
                         </Grid>
                     </Border>
-                    <Border x:Name="LaunchSettingsSourceRow" Style="{StaticResource InstanceSettingCardStyle}">
-                        <Grid ColumnSpacing="20" MinHeight="40">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="跟随全局设置" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                            <ToggleSwitch x:Name="InstanceUseGlobalSwitch" Grid.Column="1" OnContent="" OffContent="" Width="56" Margin="0,0,-12,0" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="0" AutomationProperties.Name="跟随全局启动设置" Toggled="InstanceUseGlobal_Toggled"/>
-                        </Grid>
-                    </Border>
                     <Border Style="{StaticResource InstanceSettingCardStyle}">
                         <Grid ColumnSpacing="20" MinHeight="40">
                             <Grid.ColumnDefinitions>
@@ -755,6 +745,16 @@
                             </StackPanel>
                         </Grid>
                     </Border>
+                    <Border x:Name="LaunchSettingsSourceRow" Style="{StaticResource InstanceSettingCardStyle}">
+                        <Grid ColumnSpacing="20" MinHeight="40">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="跟随全局设置" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <ToggleSwitch x:Name="InstanceUseGlobalSwitch" Grid.Column="1" OnContent="" OffContent="" Width="56" Margin="0,0,-12,0" HorizontalAlignment="Right" VerticalAlignment="Center" MinWidth="0" AutomationProperties.Name="跟随全局启动设置" Toggled="InstanceUseGlobal_Toggled"/>
+                        </Grid>
+                    </Border>
                     <Grid ColumnSpacing="20" MinHeight="40">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -765,30 +765,18 @@
                         <TextBlock x:Name="InstanceSettingsStatus" Grid.Column="1" HorizontalAlignment="Right" FontSize="{StaticResource FontSizeCaption}" Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center"/>
                     </Grid>
                     <Border Style="{StaticResource InstanceSettingCardStyle}">
-                        <Grid ColumnSpacing="20" MinHeight="40">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Text="由启动器智能分配内存" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                <TextBlock Text="将会根据实例内容自动计算所需内存" FontSize="12" Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <ToggleSwitch x:Name="InstanceMemAutoSwitch" Grid.Column="1" OnContent="" OffContent="" Width="56" MinWidth="0" Margin="0,0,-12,0" HorizontalAlignment="Right" Toggled="InstanceMemAuto_Toggled"/>
-                        </Grid>
-                    </Border>
-                    <Border Style="{StaticResource InstanceSettingCardStyle}">
                         <StackPanel Spacing="16">
+                            <!-- 内存：自动分配开关与内存条放同一张卡；关掉自动才露出下面的手动输入 -->
                             <Grid ColumnSpacing="20" MinHeight="40">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="最大内存" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                <StackPanel Grid.Column="1">
-                                    <TextBlock x:Name="InstanceMemorySummary" Visibility="Collapsed" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap"/>
-                                    <NumberBox x:Name="InstanceMemoryBox" Width="150" Minimum="1024" HorizontalAlignment="Right" Maximum="65536" SmallChange="512" LargeChange="2048" SpinButtonPlacementMode="Compact" ValueChanged="InstanceMemoryBox_ValueChanged"/>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Text="自动分配内存" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    <TextBlock Text="按实例内容与 Mod 数量自动计算所需内存" FontSize="12" Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap"/>
                                 </StackPanel>
+                                <ToggleSwitch x:Name="InstanceMemAutoSwitch" Grid.Column="1" OnContent="" OffContent="" Width="56" MinWidth="0" Margin="0,0,-12,0" HorizontalAlignment="Right" Toggled="InstanceMemAuto_Toggled"/>
                             </Grid>
                             <StackPanel x:Name="MemBarHost" Spacing="10" HorizontalAlignment="Stretch">
                                 <Grid x:Name="MemStatRow" ColumnSpacing="12">
@@ -845,6 +833,17 @@
                                 </StackPanel>
                                 <TextBlock x:Name="MemWarn" Visibility="Collapsed" FontSize="{StaticResource FontSizeCaption}" Foreground="{ThemeResource AppWarnBrush}" TextWrapping="Wrap"/>
                             </StackPanel>
+                            <Grid x:Name="InstanceManualMemRow" ColumnSpacing="20" MinHeight="40">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="手动分配内存" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock x:Name="InstanceMemorySummary" Visibility="Collapsed" FontSize="{StaticResource FontSizeBody}" Foreground="{ThemeResource AppTextBrush}" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap"/>
+                                    <NumberBox x:Name="InstanceMemoryBox" Width="150" Minimum="1024" HorizontalAlignment="Right" Maximum="65536" SmallChange="512" LargeChange="2048" SpinButtonPlacementMode="Compact" ValueChanged="InstanceMemoryBox_ValueChanged"/>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource InstanceSettingCardStyle}">

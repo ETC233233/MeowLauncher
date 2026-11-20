@@ -105,9 +105,19 @@ def _major_from_name(name: str) -> int:
 
 def java_candidates() -> list[Path]:
     out: list[Path] = []
-    roots = [Path(os.environ.get("ProgramFiles", "C:/Program Files")),
-             Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")),
-             Path("C:/Program Files"), Path("D:/Program Files"), Path("D:/Java")]
+    # 不写死盘符：Windows 可能装在 D:/，用户的 Java 也可能在任意盘。
+    roots: list[Path] = []
+    for env in ("ProgramFiles", "ProgramFiles(x86)"):
+        value = os.environ.get(env)
+        if value:
+            roots.append(Path(value))
+    for drive in "CDEFGH":
+        base = Path(f"{drive}:/")
+        if not base.exists():
+            continue
+        for name in ("Program Files", "Program Files (x86)", "Java", "Java/jdk"):
+            roots.append(base / name)
+    roots = list(dict.fromkeys(roots))
     for root in roots:
         for pat in ("Zulu/*/bin/java.exe", "Java/*/bin/java.exe", "Eclipse Adoptium/*/bin/java.exe",
                     "Microsoft/jdk-*/bin/java.exe", "Amazon Corretto/*/bin/java.exe",

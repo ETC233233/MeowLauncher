@@ -424,11 +424,40 @@ def _get(url: str, timeout: int = 20):
         return mcim.modrinth_json(url, timeout=timeout)
     alt = _mirrored(url)
     if alt:
-        try:
-            return _get_raw(alt, timeout)
-        except Exception:
-            pass
+        # 元数据都很小，镜像和官方同时问、谁先回来用谁：
+        # 镜像慢的时候不必白等一轮超时，官方抽风时也不至于整页转圈。
+        return _race_json([alt, url], timeout)
     return _get_raw(url, timeout)
+
+
+def _race_json(urls: list[str], timeout: int = 20):
+    """并发请求几个等价的元数据地址，第一个成功解析的胜出。"""
+    first: list = [None, None]  # [json, error]
+    got = threading.Event()
+    lock = threading.Lock()
+
+    def run(target: str) -> None:
+        try:
+            value = _get_raw(target, timeout)
+        except Exception as exc:  # noqa: BLE001
+            with lock:
+                if first[1] is None:
+                    first[1] = exc
+            return
+        with lock:
+            if first[0] is None:
+                first[0] = value
+        got.set()
+
+    for target in urls:
+        threading.Thread(target=run, args=(target,), daemon=True).start()
+    got.wait(timeout=timeout)
+    with lock:
+        if first[0] is not None:
+            return first[0]
+        if first[1] is not None:
+            raise first[1]
+    raise TimeoutError("元数据请求超时")
 
 
 def _open_url(url: str, timeout: int = 60, proxy: str | None = None):
@@ -885,8 +914,20 @@ _CF_KEY_CACHE: dict[str, str] = {}
 
 # CurseForge 官方 API 在国内经常被墙（连接会挂到超时），mod.mcimirror.top 是社区镜像（同结构、免 key）。
 # 镜像优先，官方兜底；成功过的源记下来，后续请求直接用它。
-CF_API_BASES = (mcim.BASE + "/curseforge/v1", mcim.CURSEFORGE_API)
+# 顺序：社区镜像 MCIM → 自建代理 Meow-CFMI（服务端持有 key，客户端免 key）→ 官方直连（需 key）。
+# Meow-CFMI 的地址可用环境变量 MEOW_CFMI 覆盖，方便换部署。
+import os as _os
+MEOW_CFMI = (_os.environ.get("MEOW_CFMI") or "https://cf-api.sadcgame.top/v1").rstrip("/")
+CF_API_BASES = (mcim.BASE + "/curseforge/v1", MEOW_CFMI, mcim.CURSEFORGE_API)
 _CF_BASE_CACHE: dict[str, str] = {}
+_CF_PREF: dict[str, str | None] = {"src": None}
+
+
+def set_cf_source(src: str | None) -> None:
+    """固定 CurseForge 源：mcim（社区镜像）/ cfmi（自建代理）/ official（直连，需 key）/ None（自动）。"""
+    v = (src or "").strip().lower()
+    _CF_PREF["src"] = v if v in ("mcim", "cfmi", "official") else None
+
 # 文件 CDN(edge.forgecdn.net) 直连多半不通；本机若跑着 v2rayN/Clash 之类，走它的 HTTP 端口。
 CF_PROXY_PORTS = (10808, 10809, 7890, 2080, 1080, 8889)
 _PROXY_CACHE: dict[str, object] = {}
@@ -925,6 +966,11 @@ def cf_loader_id(loader: str | None) -> int | None:
 
 def _cf_bases() -> list[str]:
     """按可用性排序的 CurseForge API 根地址（缓存在进程内）。"""
+    pref = _CF_PREF.get("src")
+    if pref in ("mcim", "cfmi", "official"):
+        order = {"mcim": 0, "cfmi": 1, "official": 2}[pref]
+        head = CF_API_BASES[order]
+        return [head] + [b for b in CF_API_BASES if b != head]
     cached = _CF_BASE_CACHE.get("base")
     if cached:
         return [cached] + [b for b in CF_API_BASES if b != cached]
@@ -962,6 +1008,11 @@ def _cf_get(path: str, params: dict | None = None, key: str | None = None, timeo
             continue
     if cached is not None:
         return cached
+    if not cf_api_key(key):
+        raise RuntimeError(
+            "CurseForge 镜像暂时不可用。可以在「设置 → 下载与网络 → CurseForge Key」里填一个自己的 key，"
+            "让请求能直连官方接口。"
+        ) from last_err
     raise last_err if last_err else RuntimeError("curseforge api unreachable")
 
 
@@ -1336,7 +1387,7 @@ def resolve_dependencies(version: dict, history: set[str] | None = None,
 
 
 # -------------------------------------------------------------------- Mojang
-_MANIFEST_CACHE_TTL = 6 * 3600
+_MANIFEST_CACHE_TTL = 30 * 60  # 30 分钟；点「刷新」会绕过缓存
 
 
 def manifest_cache_path() -> Path:
@@ -1344,12 +1395,16 @@ def manifest_cache_path() -> Path:
     return _core.user_dir() / "cache" / "mojang_versions.json"
 
 
-def mojang_versions():
-    """Mojang 版本清单：本地缓存 6 小时，避免每次开下载页都等网络（实测偶发 60s）。"""
+def mojang_versions(force: bool = False):
+    """Mojang 版本清单：默认走 30 分钟磁盘缓存，force=True 时强制联网刷新。
+
+    清单 2 万多行，BMCL / 官方实测都要 3 秒左右，所以平时读缓存；
+    用户点「刷新」时传 force，避免新版本发布后半小时内看不到。
+    """
     import time as _t
     cache = manifest_cache_path()
     try:
-        if cache.is_file() and (_t.time() - cache.stat().st_mtime) < _MANIFEST_CACHE_TTL:
+        if not force and cache.is_file() and (_t.time() - cache.stat().st_mtime) < _MANIFEST_CACHE_TTL:
             data = json.loads(cache.read_text(encoding="utf-8"))
             if isinstance(data, list) and data:
                 return data
@@ -1402,6 +1457,21 @@ class ByteMeter:
             self.add(done - last[0])
             last[0] = done
         return cb
+
+
+def phase_pool() -> tuple[int, int]:
+    """给「一个阶段」分配 (进程数, 每进程线程数)。
+
+    版本安装是「按内容类型并发」：依赖库 / 主文件 / 资源各自一条流水线，
+    阶段之间的并发数由用户设置的「同时下载」管；阶段内部的小文件并发由
+    「下载线程」管——16 线程就是同时开 16 个 1MB 文件，而不是每进程开 16 条。
+
+    这里把线程额度拆成 2 个进程去跑（子进程能绕开 GIL，实测小文件更快），
+    总连接数仍然等于设置里的线程数。
+    """
+    total = max(2, _dl_threads())
+    procs = 2 if total >= 4 else 1
+    return procs, max(1, total // procs)
 
 
 def _proc_count() -> int:
@@ -1630,6 +1700,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
             report("libraries", total, total)
             breport(0, lib_bytes, lib_bytes, complete=True)
             return
+        report("libraries", 0, total, {"name": "准备下载"})
         breport(0, 0, lib_bytes)
 
         def _lib_bytes(delta: int) -> None:
@@ -1648,7 +1719,8 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
 
         errors = []
         failed = download_jobs_multi([dict(url=art["url"], dest=dest, sha1=art.get("sha1", ""), size=art.get("size", 0)) for art, dest in jobs], _lib_bytes, _lib_done,
-                                     on_fail=lambda dest, error: errors.append(f"{Path(dest).name}: {error}"))
+                                     on_fail=lambda dest, error: errors.append(f"{Path(dest).name}: {error}"),
+                                     procs=phase_pool()[0], threads_per=phase_pool()[1])
         if failed:
             raise RuntimeError(f"{failed} 个依赖库下载失败：{'; '.join(errors[:3])}")
         if finished[0] != total:
@@ -1660,6 +1732,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
         if not client:
             breport(1, 0, 0, complete=True)
             return
+        report("client", 0, 1, {"name": "准备下载"})
         dest = vdir / f"{vid}.jar"
         if not valid_file(dest, str(client.get("sha1") or ""), client_bytes):
             csize = int(client.get("size") or 0)
@@ -1683,6 +1756,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
         if not ai:
             breport(2, 0, 0, complete=True)
             return
+        report("assets", 0, 1, {"name": "统计资源文件"})
         if asset_bytes:
             breport(2, 0, asset_bytes)
 
@@ -1832,9 +1906,10 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
                 for it in missing if not present(it)]
         # 资源是几千个几十 KB 的小文件，瓶颈是「每个文件一次连接」的延迟，不是带宽：
         # 每个进程只开 2 条连接时实测每秒仅 3 个文件。这里按
-        # 「进程数 × 每进程 16 线程」放开，小文件排队，连接数上去速度才起得来。
+        # 「进程数 × 每进程 8 线程」放开，小文件排队，连接数上去速度才起得来；
+        # 进程额度跟另外两块平分，别让三块并发变成偷偷翻三倍。
         failed += download_jobs_multi(jobs, _asset_bytes, _asset_done,
-                                      procs=_proc_count(), threads_per=8)
+                                      procs=phase_pool()[0], threads_per=phase_pool()[1])
         return recover()
 
     with ThreadPoolExecutor(max_workers=workers) as ex:

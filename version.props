@@ -7,7 +7,7 @@
     - 晋升：带 -p:MeowBuildId=<指定构建号> 重新出包，不再自增。
   -->
   <PropertyGroup>
-    <MeowVersion Condition="'$(MeowVersion)' == ''">0.5.0</MeowVersion>
+    <MeowVersion Condition="'$(MeowVersion)' == ''">1.0.0</MeowVersion>
     <MeowChannel Condition="'$(MeowChannel)' == ''">review</MeowChannel>
   </PropertyGroup>
 </Project>

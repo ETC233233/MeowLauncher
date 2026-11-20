@@ -345,13 +345,22 @@ public static class TaskCenter
         var code = string.IsNullOrWhiteSpace(failure?.Code) ? Diagnostics.ErrorCodeFor(detail, KindOf(entry.Title)) : failure.Code;
         entry.Failure = new FailureInfo(code, failure?.At ?? DateTimeOffset.Now, stage);
         entry.Status = "失败";
-        entry.Detail = detail;
+        entry.FailureMessage = detail ?? "";
+        entry.Detail = FirstLine(detail);
         entry.IsIndeterminate = false;
         entry.Progress = 0;
         TraceFor(entry.Id)?.Finish(false);
         Notify();
         TaskFinished?.Invoke(entry);
 
+    }
+
+    /// <summary>卡片上只放第一行，多行日志留给诊断报告。</summary>
+    private static string FirstLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        var line = text.Replace("\r", "").Split('\n')[0].Trim();
+        return line.Length <= 160 ? line : line[..160] + "…";
     }
 
     /// <summary>只更新当前阶段文案，不动进度条状态（启动这类不确定时长的任务用）。</summary>

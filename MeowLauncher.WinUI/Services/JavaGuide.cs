@@ -197,7 +197,7 @@ public static class JavaGuide
         });
         detail.Children.Add(new TextBlock
         {
-            Text = $"可以让启动器下载一份（Azul Zulu，约 40~60 MB），装到系统默认位置 C:\\Program Files\\Zulu\\zulu-{major}，会弹一次管理员确认。下载完会自动继续启动。",
+            Text = $"可以让启动器下载一份（Azul Zulu，约 40~60 MB），装到系统默认位置 {System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles)}\\Zulu\\zulu-{major}，会弹一次管理员确认。下载完会自动继续启动。",
             Opacity = 0.68,
             TextWrapping = TextWrapping.Wrap,
         });

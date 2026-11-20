@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 
 namespace MeowLauncher.WinUI.Models;
 
-/// <summary>一条安装/下载任务里的单个步骤（对应 PCL 任务管理里那种一行一行的小条目）。</summary>
+/// <summary>一条安装/下载任务里的单个步骤（任务面板里一行一条的小条目）。</summary>
 public enum TaskStepState
 {
     Pending,
@@ -35,6 +35,8 @@ public sealed class TaskStep : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(Glyph));
             OnPropertyChanged(nameof(PctText));
+            OnPropertyChanged(nameof(GlyphVisibility));
+            OnPropertyChanged(nameof(SpinnerVisibility));
             OnPropertyChanged(nameof(Opacity));
         }
     }
@@ -84,15 +86,20 @@ public sealed class TaskStep : INotifyPropertyChanged
     /// <summary>有副文案才显示，避免空出一个 8px 的洞。</summary>
     public Visibility DetailVisibility => string.IsNullOrWhiteSpace(_detail) ? Visibility.Collapsed : Visibility.Visible;
 
+    /// <summary>只在有信息量时出字：百分比、失败、中断；完成与等待留空，靠左侧图形表达。</summary>
     public string PctText => State switch
     {
-        TaskStepState.Done => "完成",
-        TaskStepState.Active => _pct < 0 ? "进行中" : $"{Math.Min(99, Math.Floor(_pct)):0}%",
+        TaskStepState.Active => _pct < 0 ? "" : $"{Math.Min(99, Math.Floor(_pct)):0}%",
         TaskStepState.Failed => "失败",
         TaskStepState.Stopped => "已中止",
         TaskStepState.Skipped => "未执行",
-        _ => "等待",
+        _ => "",
     };
+
+    /// <summary>进行中改用转圈，静态图标让位。</summary>
+    public Visibility GlyphVisibility => State == TaskStepState.Active ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility SpinnerVisibility => State == TaskStepState.Active ? Visibility.Visible : Visibility.Collapsed;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

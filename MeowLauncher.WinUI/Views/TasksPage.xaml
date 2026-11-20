@@ -43,11 +43,6 @@
                                 <TextBlock Text="{x:Bind views:TaskVisuals.DisplayTitle(Title)}" FontSize="15" FontWeight="SemiBold"
                                            Foreground="{ThemeResource AppTextBrush}"
                                            TextTrimming="CharacterEllipsis" MaxLines="1" VerticalAlignment="Center" />
-                                <Border Background="{ThemeResource TintTasksSoftBrush}"
-                                        CornerRadius="{StaticResource ChipCornerRadius}" Padding="8,1" VerticalAlignment="Center"
-                                        Visibility="{x:Bind views:TaskVisuals.ActiveVisibility(Status), Mode=OneWay}">
-                                    <TextBlock Text="进行中" FontSize="11" Foreground="{ThemeResource TintTasksBrush}" />
-                                </Border>
                             </StackPanel>
                             <TextBlock Text="{x:Bind views:TaskVisuals.DotTime(TimeText)}" HorizontalAlignment="Right"
                                        VerticalAlignment="Center" FontSize="11.5"
@@ -103,13 +98,16 @@
                                 <DataTemplate x:DataType="models:TaskStep">
                                     <Grid Height="22" ColumnSpacing="8" Opacity="{x:Bind Opacity, Mode=OneWay}">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="14" />
+                                            <ColumnDefinition Width="18" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="10"
-                                                  HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                        <ProgressRing Width="18" Height="18" IsActive="True"
+                                                      HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                      Margin="-1,0,0,0"
+                                                      Foreground="{ThemeResource TintTasksBrush}"
+                                                      Visibility="{x:Bind SpinnerVisibility, Mode=OneWay}" />
                                         <TextBlock Grid.Column="1" Text="{x:Bind Title}" FontSize="12"
                                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                                    MaxLines="1" />
@@ -156,13 +154,6 @@
     Visibility="{x:Bind views:TaskVisuals.FinishedVisibility(Status), Mode=OneWay}"
     AutomationProperties.Name="移除此任务记录" Click="DismissTask_Click"><FontIcon Glyph="&#xE711;" FontSize="12"/></Button>
 </StackPanel>
-                        <Border Background="{x:Bind views:TaskVisuals.PillBackground(Status), Mode=OneWay}"
-                                CornerRadius="{StaticResource ChipCornerRadius}" Padding="9,3"
-                                HorizontalAlignment="Right"
-                                Visibility="{x:Bind views:TaskVisuals.FinishedVisibility(Status), Mode=OneWay}">
-                            <TextBlock Text="{x:Bind Status, Mode=OneWay}" FontSize="11.5"
-                                       Foreground="{x:Bind views:TaskVisuals.StatusBrush(Status), Mode=OneWay}" />
-                        </Border>
                     </StackPanel>
                     </Grid>
                 </Border>

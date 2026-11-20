@@ -123,3 +123,9 @@ tools/test_*.py
 tools/task-cancellation-test/
 # 联机组件的打包残留；组件本体在 _export/meow-room-module 子模块里
 tools/online-component/
+
+# 本机临时探针 / 密钥抓取记录（含 CurseForge Key，绝不入库）
+_tmp/
+cfkey*.txt
+# CurseForge 镜像 Worker 的部署配置，属服务端资产
+tools/meow-cfmi/

@@ -462,7 +462,8 @@ public sealed partial class TasksPage : Page
     private void CopyTaskFailure(TaskEntry entry)
     {
         if (entry.Failure is not { } failure) return;
-        Diagnostics.Copy(Diagnostics.BuildReport(failure, entry.Title, entry.Detail));
+        Diagnostics.Copy(Diagnostics.BuildReport(failure, entry.Title,
+            string.IsNullOrWhiteSpace(entry.FailureMessage) ? entry.Detail : entry.FailureMessage));
         ShowToast(InfoBarSeverity.Success, "诊断信息", $"已复制错误码 {failure.Code} 与任务上下文，粘贴到反馈里即可。");
     }
 
