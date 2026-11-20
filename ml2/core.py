@@ -59,6 +59,7 @@ def find_minecraft_dirs() -> list[Path]:
         Path.home() / "AppData/Roaming/.minecraft",
         Path.home() / ".minecraft",
     ]
+    # 磁盘上常见的 .minecraft 目录名，用于复用用户已有的游戏资源。
     for drive in "CDEFGH":
         d = Path(f"{drive}:/")
         if not d.exists():

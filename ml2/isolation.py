@@ -3,7 +3,7 @@
 判据来源有两层：
 1. 用户在设置里显式指定（perInstance[vid].isolation = follow/on/off，
    全局 isolationDefault = auto/on/off）；
-2. 没有显式指定时，回落到 PCL2 风格的自动探测（版本目录里出现游戏自写文件）。
+2. 没有显式指定时，回落到自动探测（看版本目录里是否出现游戏自写文件）。
 
 sidecar 启动时用 set_resolver() 注入读取设置的函数，core 与 net 都只问这里，
 避免以前 core 与 net 两套判据不一致（net 多查 resourcepacks）。

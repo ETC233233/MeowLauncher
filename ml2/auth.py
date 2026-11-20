@@ -260,7 +260,7 @@ def full_login(device_code: str, on_wait=None) -> dict:
 
 # ---------------------------------------------------------------- 浏览器授权码流程
 # 说明：个人 Microsoft 账户没有 Azure AD 目录时无法创建应用注册，
-# 因此额外提供「Xbox 公共客户端」的旧版授权码流程（PCL2/HMCL 同款做法）。
+# 因此额外提供「Xbox 公共客户端」的旧版授权码流程（走 login.live.com 的授权码换令牌）。
 PUBLIC_CLIENT = "00000000402b5328"
 AUTHORIZE_V1 = "https://login.live.com/oauth20_authorize.srf"
 TOKEN_V1 = "https://login.live.com/oauth20_token.srf"

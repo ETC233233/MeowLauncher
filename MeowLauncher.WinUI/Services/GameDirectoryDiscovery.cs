@@ -10,6 +10,7 @@ public static class GameDirectoryDiscovery
         var found = new HashSet<string>(GameDirectoryResolver.Resolve(preferences), StringComparer.OrdinalIgnoreCase);
         var watch = Stopwatch.StartNew();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 常见游戏目录名，用来发现用户已有的 .minecraft，避免重复下载资源。
         string[] launchers = ["pcl", "bakaxl", "plain craft launcher", "minecraft", "hmcl", "meowlauncher", "prism", "multimc"];
         void Consider(string dir)
         {

@@ -1831,10 +1831,10 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
                  "dest": root / it["hash"][:2] / it["hash"], "sha1": it["hash"], "size": it["size"]}
                 for it in missing if not present(it)]
         # 资源是几千个几十 KB 的小文件，瓶颈是「每个文件一次连接」的延迟，不是带宽：
-        # 每个进程只开 2 条连接时实测 3 文件/秒，而 PCL 能跑到几十个/秒。这里按
+        # 每个进程只开 2 条连接时实测每秒仅 3 个文件。这里按
         # 「进程数 × 每进程 16 线程」放开，小文件排队，连接数上去速度才起得来。
         failed += download_jobs_multi(jobs, _asset_bytes, _asset_done,
-                                      procs=_proc_count(), threads_per=16)
+                                      procs=_proc_count(), threads_per=8)
         return recover()
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -1863,14 +1863,14 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
 
 
 def version_is_isolated(mc_dir: Path, vid: str) -> bool:
-    """版本隔离：显式设置优先，否则 PCL2 风格的自动探测。统一走 ml2.isolation。"""
+    """版本隔离：显式设置优先，否则走自动探测。统一走 ml2.isolation。"""
     from ml2 import isolation
     return isolation.effective_isolated(mc_dir, vid)
 
 
 def ensure_version_gamedir(mc_dir: Path, vid: str,
                            on_log: Callable[[str], None] | None = None) -> bool:
-    """给加载器版本准备独立的游戏目录（PCL2 版本隔离）。
+    """给加载器版本准备独立的游戏目录（版本隔离）。
 
     MC 只从游戏目录的 mods 读 Mod，所以隔离版本必须让 versions/<vid> 能当游戏目录用，
     否则装在版本目录里的 API Mod 永远不会被加载。

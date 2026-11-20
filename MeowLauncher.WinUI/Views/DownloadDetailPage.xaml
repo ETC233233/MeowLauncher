@@ -73,7 +73,7 @@
                            FontWeight="SemiBold" Margin="2,6,0,0"
                            Foreground="{ThemeResource AppText2Brush}" />
 
-                <!-- 加载器整行列表（学 PCL）：名称 + 状态 + 右箭头；选中 = 品牌绿描边 + 浅底 -->
+                <!-- 加载器整行列表：名称 + 状态 + 右箭头；选中 = 品牌绿描边 + 浅底 -->
                 <ListView x:Name="DetailLoaderList" SelectionMode="None"
                           IsItemClickEnabled="True" ItemClick="DetailLoader_ItemClick"
                           ItemContainerStyle="{StaticResource FlatItemStyle}"
