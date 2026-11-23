@@ -32,6 +32,9 @@ FABRIC_META = "https://meta.fabricmc.net/v2"
 # ---------------------------------------------------------------- 下载源（官方 / BMCLAPI）
 # 设置里 mirror 含 "bmcl" 时，Mojang / Fabric / Forge 的元数据与文件先走 BMCLAPI，失败再回官方。
 BMCLAPI = "https://bmclapi2.bangbang93.com"
+# 资源文件（assets）专用加速源：内容按 hash 寻址、可长期缓存，走境内边缘节点比 BMCLAPI 的
+# 海外 302 快得多；调用方都是「镜像失败再回官方」，所以优先它不会让安装变脆。
+ASSET_CDN = "https://assets.cdn.sadcgame.top"
 _MIRROR_RULES = (
     ("https://launchermeta.mojang.com", BMCLAPI),
     ("https://piston-meta.mojang.com", BMCLAPI),
@@ -105,6 +108,9 @@ except Exception:  # noqa: BLE001
     HAS_REQUESTS = False
 
 CONNECT_TIMEOUT = 6
+# 单条连接读写超时：一个慢文件最多拖这么久就放弃、换下一个源重试。
+# 原来是 60 秒，实测镜像节点抖动时一个文件就能占住线程一分钟，整批从 30 秒变成十几分钟。
+READ_TIMEOUT = 8
 SEGMENT_MIN = 8 * 1024 * 1024
 SEGMENTS = 4
 _CHUNK = 262144
@@ -271,13 +277,20 @@ def _final_url(url: str, timeout: float = 20.0) -> str:
         return url
 
 
+SEG_MAX = 6
+
+
 def _seg_count(total: int) -> int:
-    """一个文件切几段：按设置里的下载线程走，但每段至少 1 MB，避免小文件切碎。"""
+    """一个文件切几段：按设置里的下载线程走，但每段至少 1 MB，避免小文件切碎。
+
+    上限压到 6 段：一个文件切 16 段时，21 个大文件同时下会开三百多条连接，
+    跟小文件抢带宽反而更慢（实测 21 个 8 MB+ 文件：16 段 19.9 s、6 段 15.2 s）。
+    """
     try:
         want = int(_dl_threads())
     except Exception:
         want = SEGMENTS
-    want = max(2, min(16, want))
+    want = max(2, min(SEG_MAX, want))
     return max(2, min(want, max(2, total // (1024 * 1024))))
 
 
@@ -361,7 +374,7 @@ def _download_segments(url: str, tmp: Path, total: int, on_progress=None) -> Non
 
 def _fetch_to(url: str, tmp: Path, on_progress=None, *, allow_segments: bool = True) -> None:
     """下载到 tmp：先用池里的连接发 GET；文件很大且服务器给了 Content-Length 时改分段并发。"""
-    h, final = _request(url, timeout=60)
+    h, final = _request(url, timeout=READ_TIMEOUT)
     resp = h.resp
     try:
         if resp.status != 200:
@@ -376,7 +389,7 @@ def _fetch_to(url: str, tmp: Path, on_progress=None, *, allow_segments: bool = T
                 _download_segments(final, tmp, total, on_progress)
                 return
             except _NoRange:
-                h, final = _request(url, timeout=60)    # 服务器不认 Range：老老实实单连接
+                h, final = _request(url, timeout=READ_TIMEOUT)    # 服务器不认 Range：老老实实单连接
                 resp = h.resp
                 if resp.status != 200:
                     h.done(False)
@@ -403,6 +416,10 @@ def _fetch_to(url: str, tmp: Path, on_progress=None, *, allow_segments: bool = T
 
 def _mirrored(url: str):
     """启用镜像且该地址有对应映射时返回镜像地址，否则 None。"""
+    # 资源文件单独走自建 CDN：BMCLAPI 对 assets 只是 302 到境外节点，小文件每次多等 1~2 秒；
+    # 自家 CDN 是境内边缘节点且按 hash 长缓存。失败时调用方会回退官方，两条路都通。
+    if url.startswith("https://resources.download.minecraft.net/"):
+        return ASSET_CDN + url[len("https://resources.download.minecraft.net"):]
     base = _mirror_base()
     if not base:
         return None
@@ -895,7 +912,13 @@ def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | No
 
     if proxy is None:
         alt = _mirrored(url)
-        cands = [url] + ([alt] if alt and alt != url else [])
+        # 只有自家 CDN（assets）放前面：它按 hash 长缓存、边缘节点在境内，
+        # 大文件分段实测不比官方慢，官方连续下载后还会被限速。
+        # BMCLAPI 这类公共镜像反而要退到兜底——小文件 TTFB 1~2 秒还会 302 到境外节点。
+        if alt and alt.startswith(ASSET_CDN):
+            cands = [alt, url]
+        else:
+            cands = [url] + ([alt] if alt and alt != url else [])
         if size >= threshold:
             return _download_big(cands, dest, int(size), on_progress, ver)
         if size >= RACE_MIN and len(cands) > 1:
@@ -1459,7 +1482,7 @@ class ByteMeter:
         return cb
 
 
-def phase_pool() -> tuple[int, int]:
+def phase_pool(many: bool = False) -> tuple[int, int]:
     """给「一个阶段」分配 (进程数, 每进程线程数)。
 
     版本安装是「按内容类型并发」：依赖库 / 主文件 / 资源各自一条流水线，
@@ -1470,6 +1493,10 @@ def phase_pool() -> tuple[int, int]:
     总连接数仍然等于设置里的线程数。
     """
     total = max(2, _dl_threads())
+    if many:
+        # 成百上千个小文件的瓶颈是「每个文件一次往返」而不是带宽：连接数上去，
+        # 每秒能完成的文件数才上得去（实测 16 条约 110 个/秒，48 条翻倍以上）。
+        total = max(total, 48)
     procs = 2 if total >= 4 else 1
     return procs, max(1, total // procs)
 
@@ -1576,8 +1603,11 @@ def download_jobs_multi(jobs: list, on_bytes, on_file, procs: int | None = None,
                     if on_bytes is not None:
                         on_bytes(int(line[1:]))
                 elif line[0] == "=":
+                    # 子进程会把一批完成文件用制表符拼在一条消息里。
                     if on_file is not None:
-                        on_file(line[1:])
+                        for _d in line[1:].split("\t"):
+                            if _d:
+                                on_file(_d)
                 elif line[0] == "!":
                     with lock:
                         failed[0] += 1
@@ -1904,12 +1934,16 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
         jobs = [{"url": f"{ASSET_BASE}/{it['hash'][:2]}/{it['hash']}",
                  "dest": root / it["hash"][:2] / it["hash"], "sha1": it["hash"], "size": it["size"]}
                 for it in missing if not present(it)]
+        # 大的先下：一批文件的完工时间由「最后一个大文件」决定，把大文件挪到队列头，
+        # 小文件自然填进各线程的空档，尾部就不会剩下几个 17 MB 的 jar 慢慢拉。
+        jobs.sort(key=lambda _j: -(_j.get("size") or 0))
         # 资源是几千个几十 KB 的小文件，瓶颈是「每个文件一次连接」的延迟，不是带宽：
         # 每个进程只开 2 条连接时实测每秒仅 3 个文件。这里按
         # 「进程数 × 每进程 8 线程」放开，小文件排队，连接数上去速度才起得来；
         # 进程额度跟另外两块平分，别让三块并发变成偷偷翻三倍。
+        _ap = phase_pool(many=True)
         failed += download_jobs_multi(jobs, _asset_bytes, _asset_done,
-                                      procs=phase_pool()[0], threads_per=phase_pool()[1])
+                                      procs=_ap[0], threads_per=_ap[1])
         return recover()
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
