@@ -300,7 +300,7 @@ def _mc_refresh_session(st: dict, acc: dict) -> str:
             sys.path.insert(0, str(root))
         import ml2.auth as auth
 
-        cid = str(acc.get("msClientId") or st.get("msClientId") or "")
+        cid = str(acc.get("msClientId") or st.get("msClientId") or auth.CLIENT_ID)
         tok = auth.refresh_msa(refresh_token, cid)
         msa = str(tok.get("access_token") or "")
         if not msa:

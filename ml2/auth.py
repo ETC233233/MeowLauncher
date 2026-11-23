@@ -21,11 +21,9 @@ import urllib.request
 
 import ml2.version as _ver
 
-# 公开的 Minecraft 启动器 client id（设备码流程可用；可用环境变量覆盖）
-CLIENT_ID = os.environ.get("MEOW_MS_CLIENT_ID") or "00000000402b5328"
-# 若返回 AADSTS700016，说明该应用 ID 未获得 XboxLive 权限，
-# 请到 Azure 门户自行注册「移动和桌面应用」并允许公共客户端流，
-# 然后用环境变量 MEOW_MS_CLIENT_ID 或 settings4.json 的 msClientId 覆盖。
+# MeowLauncher 自建 Azure 应用客户端 ID（支持所有个人 Microsoft 账户）。
+# 可用环境变量 MEOW_MS_CLIENT_ID 或 settings4.json 的 msClientId 覆盖。
+CLIENT_ID = os.environ.get("MEOW_MS_CLIENT_ID") or "7fc4e5bc-cd95-449d-aad0-5468503693b3"
 SCOPE = "XboxLive.signin offline_access"
 
 AUTHORITY = "https://login.microsoftonline.com/consumers/oauth2/v2.0"
@@ -152,21 +150,16 @@ def poll_token(device_code: str, on_wait=None, max_seconds: int = 900) -> dict:
     raise AuthError("授权超时")
 
 
-def refresh_msa(refresh_token: str, client_id: str = "", legacy: bool | None = None) -> dict:
+def refresh_msa(refresh_token: str, client_id: str = "", legacy: bool = False) -> dict:
     """用 refresh_token 换新的 MSA token。
 
     client_id 必须和当初发这个 refresh_token 的那次登录完全一致，否则微软会报
     「issued for a different client id」。
 
-    另外两端点不能混用：v1 授权码流程（oauth20_desktop.srf，公共客户端
-    00000000402b5328）签出来的 refresh_token 只能用 login.live.com 的 v1 token
-    端点续期；拿它去 login.microsoftonline.com（v2）虽然「成功」返回 access_token，
-    但 audience 不对，接着 login_with_xbox 会报 Invalid app registration。
-    所以 legacy 参数决定走哪个端点：公共客户端默认 v1，自建 Azure 应用走 v2。
+    legacy=True 时走 login.live.com v1 端点（已废弃的旧公共客户端 token 续期）；
+    默认走 login.microsoftonline.com v2 端点（自建 Azure 应用）。
     """
     cid = client_id or CLIENT_ID
-    if legacy is None:
-        legacy = cid == PUBLIC_CLIENT
     if legacy:
         return _post_form(TOKEN_V1, {
             "grant_type": "refresh_token",
@@ -258,23 +251,10 @@ def full_login(device_code: str, on_wait=None) -> dict:
         "entitlements": owned,
     }
 
-# ---------------------------------------------------------------- 浏览器授权码流程
-# 说明：个人 Microsoft 账户没有 Azure AD 目录时无法创建应用注册，
-# 因此额外提供「Xbox 公共客户端」的旧版授权码流程（走 login.live.com 的授权码换令牌）。
-PUBLIC_CLIENT = "00000000402b5328"
-AUTHORIZE_V1 = "https://login.live.com/oauth20_authorize.srf"
+# ---------------------------------------------------------------- v1 旧端点（已废弃，仅供 legacy token 续期参考）
+# 旧公共客户端（00000000402b5328）通过 login.live.com 签出的 refresh_token 只能用 v1 端点续期。
+# 新登录一律走下面的设备码或 PKCE 流程（v2 端点）。
 TOKEN_V1 = "https://login.live.com/oauth20_token.srf"
-REDIRECT_V1 = "https://login.live.com/oauth20_desktop.srf"
-
-
-def login_url(client_id: str = PUBLIC_CLIENT) -> str:
-    q = urlencode({
-        "client_id": client_id,
-        "response_type": "code",
-        "scope": "XboxLive.signin offline_access",
-        "redirect_uri": REDIRECT_V1,
-    })
-    return f"{AUTHORIZE_V1}?{q}"
 
 
 def _pick_code(text: str) -> str:
@@ -285,43 +265,6 @@ def _pick_code(text: str) -> str:
             return unquote(m.group(1))
     return text
 
-
-def exchange_code(code_or_url: str, client_id: str = PUBLIC_CLIENT) -> dict:
-    """用浏览器回调里的 code 换 MSA token（旧版端点）。"""
-    code = _pick_code(code_or_url)
-    if not code:
-        raise AuthError("没有拿到授权码")
-    data = urlencode({
-        "client_id": client_id,
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": REDIRECT_V1,
-        "scope": "XboxLive.signin offline_access",
-    }).encode()
-    req = urllib.request.Request(TOKEN_V1, data=data, headers={
-        "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")
-        raise AuthError(f"换取令牌失败：{body[:200]}")
-
-
-def full_login_with_code(code_or_url: str, client_id: str = PUBLIC_CLIENT) -> dict:
-    """授权码 → Xbox → XSTS → Minecraft，返回与 full_login 相同结构。"""
-    tok = exchange_code(code_or_url, client_id)
-    msa = tok.get("access_token", "")
-    refresh = tok.get("refresh_token", "")
-    if not msa:
-        raise AuthError("微软未返回 access_token")
-    xbl = xbox_live(msa)
-    xu = xsts(xbl["token"])
-    mc = minecraft_login(xu["token"], xu["uhs"])
-    prof = minecraft_profile(mc["access_token"])
-    owns = any(e in ("game_minecraft", "product_minecraft") for e in entitlements(mc["access_token"]))
-    return {"msa": {"access_token": msa, "refresh_token": refresh},
-            "mc": mc, "profile": prof, "owns_game": owns}
 
 # ---------- OAuth 2.0 授权码 + PKCE（自建 Azure 应用，推荐） ----------
 import base64 as _b64
