@@ -300,11 +300,17 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 : tag.Length > 0 ? LoaderName(tag)
                 : raw.Length == 0 || raw.Equals("vanilla", StringComparison.OrdinalIgnoreCase) ? "原版"
                 : "未识别";
-            // 原版实例「跟随」没有意义（等于不限加载器），第一项直接说清楚；用户仍可手选具体加载器。
             lb.Content = _category == "modpack" ? "不限加载器"
                 : name.Length == 0 ? "跟随实例"
-                : name == "原版" ? "不限加载器"
                 : $"跟随 {name}";
+
+            // 原版实例没有加载器可跟随：这一项置灰，默认落到第一个加载器，免得默认搜出一堆装不上的 Mod。
+            var followBlocked = _category is "mod" or "all" && cur is not null && tag.Length == 0;
+            lb.IsEnabled = !followBlocked;
+            if (followBlocked && LoaderBox.SelectedIndex <= 0)
+                ForceLoader(1);
+            else if (!followBlocked && _loaderForced)
+                ForceLoader(0);   // 切回带加载器的实例：把「跟随」还给他
         }
         // 选中项的文字改了，下拉框上显示的那份不会自己刷新：选中第一项时重选一次（不触发搜索）。
         Reselect(GameVersionBox);
@@ -313,6 +319,18 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     }
 
     private bool _relabeling;
+    private bool _loaderForced;
+
+    /// <summary>程序代选加载器：不触发搜索（调用方随后会重搜），但要把 _loader 同步成真实值。</summary>
+    private void ForceLoader(int index)
+    {
+        if (index < 0 || index >= LoaderBox.Items.Count) return;
+        _relabeling = true;
+        try { LoaderBox.SelectedIndex = index; }
+        finally { _relabeling = false; }
+        _loaderForced = index != 0;
+        _loader = (LoaderBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+    }
 
     private void Reselect(ComboBox box)
     {
@@ -326,9 +344,10 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     {
         var cur = CurrentInstance;
         var vanilla = cur is not null && LoaderTagOf(cur).Length == 0;
-        FilterHint.Text = vanilla && _category == "mod" && string.IsNullOrWhiteSpace(_loader)
-            ? $"{cur!.Id} 是原版或未识别加载器：结果不限加载器，装 Mod 前要先给它装加载器"
-            : "";
+        FilterHint.Text = !vanilla || _category != "mod" ? ""
+            : _loaderForced && _loader.Length > 0
+                ? $"{cur!.Id} 是原版实例，加载器已默认指到 {LoaderName(_loader)}；装 Mod 前要先给它装加载器"
+                : $"{cur!.Id} 是原版或未识别加载器：结果不限加载器，装 Mod 前要先给它装加载器";
         FilterHint.Visibility = FilterHint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -780,6 +799,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         if (!supported)
         {
             _loader = "";
+            _loaderForced = false;
             if (LoaderBox.SelectedIndex != 0) LoaderBox.SelectedIndex = 0;
         }
     }
