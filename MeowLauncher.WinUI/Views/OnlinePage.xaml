@@ -314,6 +314,7 @@
                                             BorderBrush="{ThemeResource AppStrokeBrush}"
                                             Foreground="{ThemeResource AppTextBrush}"
                                             Visibility="{x:Bind InstallVisibility}"
+                                            IsEnabled="{x:Bind ActionEnabled}"
                                             AutomationProperties.Name="{x:Bind ActionTooltip}"
                                             ToolTipService.ToolTip="{x:Bind ActionTooltip}"
                                             Tag="{x:Bind Id}" Click="RowAction_Click">

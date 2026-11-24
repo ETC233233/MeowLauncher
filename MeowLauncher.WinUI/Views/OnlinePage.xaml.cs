@@ -300,7 +300,11 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 : tag.Length > 0 ? LoaderName(tag)
                 : raw.Length == 0 || raw.Equals("vanilla", StringComparison.OrdinalIgnoreCase) ? "原版"
                 : "未识别";
-            lb.Content = _category == "modpack" ? "不限加载器" : name.Length == 0 ? "跟随实例" : $"跟随 {name}";
+            // 原版实例「跟随」没有意义（等于不限加载器），第一项直接说清楚；用户仍可手选具体加载器。
+            lb.Content = _category == "modpack" ? "不限加载器"
+                : name.Length == 0 ? "跟随实例"
+                : name == "原版" ? "不限加载器"
+                : $"跟随 {name}";
         }
         // 选中项的文字改了，下拉框上显示的那份不会自己刷新：选中第一项时重选一次（不触发搜索）。
         Reselect(GameVersionBox);
@@ -605,8 +609,13 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
         _hoverItem = null;
         _items.Clear();
+        // 原版实例装不了 Mod：列表行直接标「需加载器」并禁用，别让人点了才发现要在详情页拦。
+        var vanillaInstance = LoaderTagOf(CurrentInstance).Length == 0 && CurrentInstance is not null;
         foreach (var project in filtered)
-            _items.Add(new OnlineItem(project, IsInstalled(project)));
+            _items.Add(new OnlineItem(project, IsInstalled(project))
+            {
+                LoaderBlocked = vanillaInstance && project.ProjectType == "mod",
+            });
 
         ResultCount.Text = $"{sourceName} · {_items.Count} 项";
         if (_items.Count == 0)
