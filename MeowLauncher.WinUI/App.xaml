@@ -9,8 +9,6 @@
                 <ResourceDictionary Source="ms-appx:///Themes/AppTheme.xaml" />
                 <ResourceDictionary Source="ms-appx:///Themes/WidgetTints.xaml" />
             </ResourceDictionary.MergedDictionaries>
-        <SolidColorBrush x:Key="AccountGreenBrush" Color="#FF2FA35A" />
-        <SolidColorBrush x:Key="AccountGreenSoftBrush" Color="#252FA35A" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

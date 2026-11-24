@@ -59,6 +59,7 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         InnerFrame.Navigate(target, new TabNav(query, true, this), switching ? MeowLauncher.WinUI.Controls.Motion.Sibling(tab == "online") : MeowLauncher.WinUI.Controls.Motion.PageRefresh());
         // 在线资源的搜索框在本页顶栏（来源切换右边），交给新建的 OnlinePage 使用。
         if (InnerFrame.Content is OnlinePage online) online.AttachQueryBox(OnlineQueryBox);
+        if (InnerFrame.Content is DownloadPage download) download.AttachQueryBox(DownloadQueryBox);
     }
 
     private static bool IsPackFile(StorageFile file) =>
@@ -343,24 +344,15 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         Paint(TabOnline, _tab == "online");
         OnlineHeaderActions.Visibility = _tab == "online" ? Visibility.Visible : Visibility.Collapsed;
         ImportPackButton.Visibility = _tab == "download" ? Visibility.Visible : Visibility.Collapsed;
-        ResourceMirrorBox.SelectedIndex = McimClient.PreferOfficial ? 1 : 0;
 
         // 来源切换跟着「在线资源」走：选中时从按钮右边滑出来，切到下载版本就收起。
         var showStrip = _tab == "online";
         var stripWasHidden = SourceStrip.Visibility != Visibility.Visible;
         SourceStrip.Visibility = showStrip ? Visibility.Visible : Visibility.Collapsed;
         OnlineQueryBox.Visibility = showStrip ? Visibility.Visible : Visibility.Collapsed;
-        PaintSource(SrcModrinth, OnlinePage.PreferredSource != 1);
-        PaintSource(SrcCurseForge, OnlinePage.PreferredSource == 1);
+        DownloadQueryBox.Visibility = _tab == "download" ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSourceLabel();
         if (showStrip && stripWasHidden) MeowLauncher.WinUI.Controls.Motion.EnterX(SourceStrip, 40, -14, 220);
-
-        void PaintSource(ToggleButton button, bool on)
-        {
-            button.IsChecked = on;
-            button.Background = on ? selected : clear;
-            button.Foreground = on ? text : text2;
-            button.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
-        }
 
         void Paint(ToggleButton button, bool on)
         {
@@ -371,21 +363,94 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         }
     }
 
-    /// <summary>点 Modrinth / CurseForge：记下选择，交给当前的在线资源页重新搜。</summary>
-    private void Source_Click(object sender, RoutedEventArgs e)
+    /// <summary>把「来源 + 镜像」的组合写成按钮上的小字，并勾中菜单里对应的那一项。</summary>
+    private void UpdateSourceLabel()
     {
-        if (sender is not ToggleButton { Tag: string tag } || !int.TryParse(tag, out var index)) return;
-        OnlinePage.PreferredSource = index;
-        if (InnerFrame.Content is OnlinePage online) online.SetSource(index);
+        if (OptModrinthMcim is null) return;
+        var isCurseForge = OnlinePage.PreferredSource == 1;
+        var cf = (InnerFrame.Content as OnlinePage)?.CfSourceIndex ?? OnlinePage.PreferredCfSource;
+        var official = Services.McimClient.PreferOfficial;
+
+        OptModrinthMcim.IsChecked = !isCurseForge && !official;
+        OptModrinthOfficial.IsChecked = !isCurseForge && official;
+        OptCfMcim.IsChecked = isCurseForge && cf == 0;
+        OptCfMeow.IsChecked = isCurseForge && cf == 1;
+        OptCfOfficial.IsChecked = isCurseForge && cf == 2;
+
+        // 两个胶囊的选中态（绿底 + 粗体）由这里刷，别丢。
+        var selected = (Brush)Application.Current.Resources["AppNavSelectedBrush"];
+        var clear = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        var text = PagePalette.ThemeBrush("AppTextBrush");
+        var text2 = PagePalette.ThemeBrush("AppText2Brush");
+        PaintSource(SrcModrinth, !isCurseForge);
+        PaintSource(SrcCurseForge, isCurseForge);
+
+        void PaintSource(ToggleButton button, bool on)
+        {
+            button.IsChecked = on;
+            button.Background = on ? selected : clear;
+            button.Foreground = on ? text : text2;
+            button.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+        }
+    }
+
+    /// <summary>来源菜单：m0/m1 = Modrinth 的 MCIM/官方，c0/c1/c2 = CurseForge 的 MCIM/MeowAPI/官方。</summary>
+    private async void SourceOption_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioMenuFlyoutItem { Tag: string tag } || tag.Length < 2) return;
+        if (tag[0] == 'm')
+        {
+            Services.McimClient.SetPreferOfficial(tag == "m1");
+            SetSourceIndex(0);
+        }
+        else
+        {
+            await ApplyCfSourceAsync(tag[1] - '0');
+        }
         UpdateTabVisuals();
     }
 
-    private void ResourceMirror_Changed(object sender, SelectionChangedEventArgs e)
+    private async Task ApplyCfSourceAsync(int index)
     {
-        if (ResourceMirrorBox.SelectedIndex is not (0 or 1)) return;
-        if (McimClient.SetPreferOfficial(ResourceMirrorBox.SelectedIndex == 1) &&
-            InnerFrame.Content is OnlinePage online)
-            online.ApplySearch(OnlineQueryBox.Text);
+        // 官方直连需要 Key：没有就直接拦下，别让用户选完才发现搜不出东西。
+        if (index == 2)
+        {
+            try
+            {
+                var g = await App.Backend.GetGeneralSettingsAsync();
+                if (string.IsNullOrWhiteSpace(g.CfApiKey))
+                {
+                    await new Microsoft.UI.Xaml.Controls.ContentDialog
+                    {
+                        XamlRoot = XamlRoot,
+                        Title = "需要 CurseForge API Key",
+                        Content = "请前往「设置 › 下载与网络」填写 CurseForge API Key，再选官方源。",
+                        CloseButtonText = "知道了",
+                    }.ShowAsync();
+                    return;
+                }
+            }
+            catch { }
+        }
+        SetSourceIndex(1);
+        (InnerFrame.Content as OnlinePage)?.SetCfSource(index);
+        OnlinePage.PreferredCfSource = index;
+    }
+
+    /// <summary>点 Modrinth / CurseForge：先切过去，再把镜像/来源的单选菜单弹出来。</summary>
+    private void Source_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton { Tag: string tag } || !int.TryParse(tag, out var index)) return;
+        SetSourceIndex(index);
+        UpdateTabVisuals();
+        if (sender is FrameworkElement element)
+            FlyoutBase.ShowAttachedFlyout(element);
+    }
+
+    private void SetSourceIndex(int index)
+    {
+        OnlinePage.PreferredSource = index;
+        if (InnerFrame.Content is OnlinePage online) online.SetSource(index);
     }
 
     private void Home_Tapped(object sender, TappedRoutedEventArgs e) =>

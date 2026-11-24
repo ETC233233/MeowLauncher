@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Text;
@@ -768,7 +768,7 @@ public sealed partial class BackendClient
     }
 
     public async Task<BackendResult> InstallOnlineAsync(string source, string projectId, string versionId, string kind = "mod",
-        IProgress<string>? progress = null, string? taskId = null)
+        IProgress<string>? progress = null, string? taskId = null, string[]? skipDependencies = null)
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId))
         {
@@ -777,7 +777,9 @@ public sealed partial class BackendClient
 
         var pack = kind == "modpack";
         var result = await RunAsync(
-            $"--install-online {source} {projectId} \"{versionId}\" {kind}" + (progress is null ? "" : " --progress"),
+            $"--install-online {source} {projectId} \"{versionId}\" {kind}"
+            + (progress is null ? "" : " --progress")
+            + (skipDependencies is { Length: > 0 } ? " --skip-dependencies=" + string.Join(",", skipDependencies) : ""),
             TimeSpan.FromMinutes(pack ? 45 : 10), progress is null ? null : progress.Report, pack ? DefaultPackRoot() : "", taskId);
         return ParseActionResult(result);
     }
@@ -803,7 +805,8 @@ public sealed partial class BackendClient
 
     public async Task<BackendResult> InstallOnlineFileAsync(
         string source, string projectId, string fileId, string versionId, string kind = "mod",
-        string confirmation = "", IProgress<string>? progress = null, string? taskId = null)
+        string confirmation = "", IProgress<string>? progress = null, string? taskId = null,
+        string[]? skipDependencies = null)
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId) ||
             string.IsNullOrWhiteSpace(fileId))
@@ -811,6 +814,8 @@ public sealed partial class BackendClient
 
         var args = $"--install-online-file {source} {projectId} {fileId} \"{versionId}\" {kind}";
         if (confirmation.Length > 0) args += $" --confirmed-dependencies={confirmation}";
+        if (skipDependencies is { Length: > 0 })
+            args += " --skip-dependencies=" + string.Join(",", skipDependencies);
         if (progress is not null) args += " --progress";
         var pack = kind == "modpack";
         var result = await RunAsync(args, TimeSpan.FromMinutes(pack ? 45 : 10),
@@ -818,37 +823,300 @@ public sealed partial class BackendClient
         return ParseActionResult(result);
     }
 
+    /// <summary>前置列表的一张卡：图标 + 标题 + 来源/大小，点开看详情。</summary>
+    private static Microsoft.UI.Xaml.Controls.Button BuildDependencyCard(
+        DependencyCard card, Action<DependencyCard> onClick)
+    {
+        var icon = new Microsoft.UI.Xaml.Controls.Image
+        {
+            Width = 34,
+            Height = 34,
+            Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill,
+        };
+        if (!string.IsNullOrWhiteSpace(card.Icon) && Uri.TryCreate(card.Icon, UriKind.Absolute, out var iconUri))
+            icon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(iconUri);
+
+        var text = new Microsoft.UI.Xaml.Controls.StackPanel
+        {
+            Spacing = 2,
+            VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center,
+        };
+        text.Children.Add(new Microsoft.UI.Xaml.Controls.TextBlock
+        {
+            Text = DependencyTitle(card),
+            FontSize = 13.5,
+            TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis,
+        });
+        text.Children.Add(new Microsoft.UI.Xaml.Controls.TextBlock
+        {
+            Text = DependencySub(card),
+            FontSize = 11.5,
+            Opacity = 0.7,
+            TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis,
+        });
+
+        var glyph = new Microsoft.UI.Xaml.Controls.FontIcon
+        {
+            Glyph = "\uE76C",
+            FontSize = 11,
+            Opacity = 0.5,
+            VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center,
+        };
+
+        var grid = new Microsoft.UI.Xaml.Controls.Grid { ColumnSpacing = 10 };
+        grid.ColumnDefinitions.Add(new Microsoft.UI.Xaml.Controls.ColumnDefinition
+        {
+            Width = Microsoft.UI.Xaml.GridLength.Auto,
+        });
+        grid.ColumnDefinitions.Add(new Microsoft.UI.Xaml.Controls.ColumnDefinition
+        {
+            Width = new Microsoft.UI.Xaml.GridLength(1, Microsoft.UI.Xaml.GridUnitType.Star),
+        });
+        grid.ColumnDefinitions.Add(new Microsoft.UI.Xaml.Controls.ColumnDefinition
+        {
+            Width = Microsoft.UI.Xaml.GridLength.Auto,
+        });
+        grid.Children.Add(icon);
+        Microsoft.UI.Xaml.Controls.Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        Microsoft.UI.Xaml.Controls.Grid.SetColumn(glyph, 2);
+        grid.Children.Add(glyph);
+
+        var button = new Microsoft.UI.Xaml.Controls.Button
+        {
+            Content = grid,
+            HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
+            Padding = new Microsoft.UI.Xaml.Thickness(10, 8, 10, 8),
+            CornerRadius = new Microsoft.UI.Xaml.CornerRadius(10),
+            BorderThickness = new Microsoft.UI.Xaml.Thickness(1),
+        };
+        button.Click += (_, _) => onClick(card);
+        return button;
+    }
+
+    private static string DependencyTitle(DependencyCard card) =>
+        string.IsNullOrWhiteSpace(card.Title) ? card.Name : card.Title;
+
+    private static string DependencySub(DependencyCard card)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(card.Source)) parts.Add(card.Source);
+        if (!string.IsNullOrWhiteSpace(card.Author)) parts.Add(card.Author);
+        if (card.Installed) parts.Add("已安装");
+        var size = FileSizeText(card.Size);
+        if (size.Length > 0) parts.Add(size);
+        return string.Join(" · ", parts);
+    }
+
+    private static string FileSizeText(long size) => size <= 0
+        ? ""
+        : size >= 1024L * 1024
+            ? $"{size / 1024d / 1024d:0.#} MB"
+            : $"{size / 1024d:0} KB";
+
+    /// <summary>卡片点开后的详情：图标、标题、作者、简介、文件名与项目页入口。</summary>
+    private static void ShowDependencyDetail(
+        Microsoft.UI.Xaml.Controls.StackPanel host, DependencyCard card, Action back)
+    {
+        host.Children.Clear();
+
+        var backButton = new Microsoft.UI.Xaml.Controls.Button
+        {
+            Content = "← 返回前置列表",
+            FontSize = 12,
+            Padding = new Microsoft.UI.Xaml.Thickness(10, 4, 10, 4),
+        };
+        backButton.Click += (_, _) => back();
+        host.Children.Add(backButton);
+
+        var icon = new Microsoft.UI.Xaml.Controls.Image
+        {
+            Width = 64,
+            Height = 64,
+            Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill,
+        };
+        if (!string.IsNullOrWhiteSpace(card.Icon) && Uri.TryCreate(card.Icon, UriKind.Absolute, out var iconUri))
+            icon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(iconUri);
+
+        var titles = new Microsoft.UI.Xaml.Controls.StackPanel
+        {
+            Spacing = 3,
+            VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center,
+        };
+        titles.Children.Add(new Microsoft.UI.Xaml.Controls.TextBlock
+        {
+            Text = DependencyTitle(card),
+            FontSize = 15,
+            TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+        });
+        var sub = DependencySub(card);
+        if (sub.Length > 0)
+            titles.Children.Add(new Microsoft.UI.Xaml.Controls.TextBlock
+            {
+                Text = sub,
+                FontSize = 11.5,
+                Opacity = 0.7,
+            });
+
+        var head = new Microsoft.UI.Xaml.Controls.StackPanel
+        {
+            Orientation = Microsoft.UI.Xaml.Controls.Orientation.Horizontal,
+            Spacing = 12,
+        };
+        head.Children.Add(icon);
+        head.Children.Add(titles);
+        host.Children.Add(head);
+
+        if (!string.IsNullOrWhiteSpace(card.Summary))
+            host.Children.Add(new Microsoft.UI.Xaml.Controls.ScrollViewer
+            {
+                MaxHeight = 150,
+                Content = new Microsoft.UI.Xaml.Controls.TextBlock
+                {
+                    Text = card.Summary,
+                    FontSize = 12.5,
+                    Opacity = 0.85,
+                    TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+                },
+            });
+
+        host.Children.Add(new Microsoft.UI.Xaml.Controls.TextBlock
+        {
+            Text = $"文件：{card.Name}",
+            FontSize = 11.5,
+            Opacity = 0.7,
+            TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+        });
+
+        if (!string.IsNullOrWhiteSpace(card.Url))
+        {
+            var open = new Microsoft.UI.Xaml.Controls.Button
+            {
+                Content = "打开项目页",
+                FontSize = 12,
+                Padding = new Microsoft.UI.Xaml.Thickness(12, 5, 12, 5),
+            };
+            open.Click += async (_, _) =>
+            {
+                try { await Windows.System.Launcher.LaunchUriAsync(new Uri(card.Url)); }
+                catch { }
+            };
+            host.Children.Add(open);
+        }
+    }
+
     private static string DefaultPackRoot() =>
         GameDirectoryResolver.Resolve(App.MainWindow?.Preferences).FirstOrDefault() ?? "";
 
-    public async Task<OnlineModInstallPlan?> ConfirmOnlineModInstallAsync(
-        string source, string projectId, string fileId, string versionId, Microsoft.UI.Xaml.XamlRoot xamlRoot)
+    /// <summary>读前置计划（不弹窗）；skipDependencies 会让后台按过滤后的文件列表重算哈希。</summary>
+    public async Task<OnlineModInstallPlan?> GetOnlineModPlanAsync(
+        string source, string projectId, string fileId, string versionId,
+        IReadOnlyCollection<string>? skipDependencies = null)
     {
         var args = string.IsNullOrWhiteSpace(fileId)
             ? $"--install-online {source} {projectId} \"{versionId}\" mod"
             : $"--install-online-file {source} {projectId} {fileId} \"{versionId}\" mod";
-        var result = await RunAsync(args + " --plan-online-mod", TimeSpan.FromMinutes(2));
+        args += " --plan-online-mod";
+        if (skipDependencies is { Count: > 0 })
+            args += " --skip-dependencies=" + string.Join(",", skipDependencies);
+        var result = await RunAsync(args, TimeSpan.FromMinutes(2));
         if (!result.Success) throw new InvalidOperationException(result.Error);
         var plan = JsonSerializer.Deserialize<OnlineModInstallPlan>(result.Output.Trim(), JsonOptions);
         if (plan is not { Ok: true, Confirmation.Length: > 0, FileId.Length: > 0 })
             throw new InvalidOperationException(plan?.Message ?? "读取前置列表失败。");
-        if (plan.Dependencies is not { Length: > 0 }) return plan;
+        return plan;
+    }
 
-        var list = new Microsoft.UI.Xaml.Controls.TextBlock
+    public async Task<OnlineModInstallPlan?> ConfirmOnlineModInstallAsync(
+        string source, string projectId, string fileId, string versionId,
+        Microsoft.UI.Xaml.XamlRoot xamlRoot, IReadOnlyCollection<string>? presetSkip = null)
+    {
+        // 已经在前置链接里点选过：不再弹一次窗，按选择重算带哈希的计划。
+        if (presetSkip is not null)
         {
-            Text = $"以下前置将和 Mod 一起安装到 {versionId}。\n\n"
-                   + string.Join("\n", plan.Dependencies.Select(name => $"• {name}")),
+            var picked = await GetOnlineModPlanAsync(source, projectId, fileId, versionId, presetSkip);
+            return picked is null ? null : picked with { SkipDependencies = presetSkip.ToArray() };
+        }
+
+        var plan = await GetOnlineModPlanAsync(source, projectId, fileId, versionId);
+        if (plan!.Dependencies is not { Length: > 0 }) return plan;
+
+        var cards = plan.DependencyCards ?? Array.Empty<DependencyCard>();
+        if (cards.Length == 0)
+            cards = plan.Dependencies.Select(name => new DependencyCard(name, name, "", "", "", "未知来源", 0, 0, "")).ToArray();
+
+        var header = new Microsoft.UI.Xaml.Controls.TextBlock
+        {
+            Text = $"以下前置会随 Mod 一起安装到 {versionId}；取消勾选就不装。",
             TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
         };
+        var listHost = new Microsoft.UI.Xaml.Controls.StackPanel { Spacing = 6 };
+        var detailHost = new Microsoft.UI.Xaml.Controls.StackPanel
+        {
+            Spacing = 10,
+            Visibility = Microsoft.UI.Xaml.Visibility.Collapsed,
+        };
+        var checks = new List<(DependencyCard Card, Microsoft.UI.Xaml.Controls.CheckBox Box)>();
+        foreach (var card in cards)
+        {
+            var box = new Microsoft.UI.Xaml.Controls.CheckBox
+            {
+                IsChecked = true,
+                MinWidth = 0,
+                VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center,
+            };
+            var button = BuildDependencyCard(card, item =>
+            {
+                listHost.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                detailHost.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                ShowDependencyDetail(detailHost, item, () =>
+                {
+                    detailHost.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                    listHost.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                });
+            });
+            var row = new Microsoft.UI.Xaml.Controls.Grid { ColumnSpacing = 4 };
+            row.ColumnDefinitions.Add(new Microsoft.UI.Xaml.Controls.ColumnDefinition
+            {
+                Width = Microsoft.UI.Xaml.GridLength.Auto,
+            });
+            row.ColumnDefinitions.Add(new Microsoft.UI.Xaml.Controls.ColumnDefinition
+            {
+                Width = new Microsoft.UI.Xaml.GridLength(1, Microsoft.UI.Xaml.GridUnitType.Star),
+            });
+            row.Children.Add(box);
+            Microsoft.UI.Xaml.Controls.Grid.SetColumn(button, 1);
+            row.Children.Add(button);
+            listHost.Children.Add(row);
+            checks.Add((card, box));
+        }
+
+        var body = new Microsoft.UI.Xaml.Controls.Grid();
+        body.Children.Add(listHost);
+        body.Children.Add(detailHost);
+
         var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
         {
             XamlRoot = xamlRoot,
             Title = "安装必需前置",
-            Content = new Microsoft.UI.Xaml.Controls.ScrollViewer { MaxHeight = 300, Content = list },
-            PrimaryButtonText = "一起安装",
+            Content = new Microsoft.UI.Xaml.Controls.StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    header,
+                    new Microsoft.UI.Xaml.Controls.ScrollViewer { MaxHeight = 380, Content = body },
+                },
+            },
+            PrimaryButtonText = "确定",
             CloseButtonText = "取消",
         };
-        return await dialog.ShowAsync() == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary ? plan : null;
+        if (await dialog.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return null;
+        var skipped = checks.Where(c => c.Box.IsChecked != true).Select(c => c.Card.Name).ToArray();
+        if (skipped.Length == 0) return plan;
+        var replan = await GetOnlineModPlanAsync(source, projectId, fileId, versionId, skipped);
+        return replan is null ? null : replan with { SkipDependencies = skipped };
     }
 
     public async Task<BackendResult> InstallInstanceLoaderAsync(string id, string kind, string version,
@@ -1821,7 +2089,15 @@ public sealed partial class BackendClient
 }
 
 public sealed record OnlineModInstallPlan(bool Ok, string? Message, string FileId, string Confirmation,
-    string[]? Dependencies);
+    string[]? Dependencies, DependencyCard[]? DependencyCards)
+{
+    /// <summary>用户明确不装的前置（文件名），安装时要一起传给后台。</summary>
+    public string[] SkipDependencies { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>安装前置卡片：列表里显示标题/来源，点开看简介。</summary>
+public sealed record DependencyCard(string Name, string Title, string Author, string Summary,
+    string Icon, string Source, long Downloads, long Size, string Url, bool Installed = false);
 
 public sealed record BackendResult(bool Ok, string Message)
 {

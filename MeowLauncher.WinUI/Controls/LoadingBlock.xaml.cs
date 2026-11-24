@@ -57,9 +57,7 @@ public sealed partial class LoadingBlock : UserControl
 
     private void UpdateWait()
     {
-        var s = (int)(DateTime.UtcNow - _since).TotalSeconds;
-        if (s < 3) return;
-        WaitText.Text = s < 10 ? $"已等待 {s} 秒" : $"已等待 {s} 秒，仍在处理，请再稍候";
-        WaitText.Visibility = Visibility.Visible;
+        // 等待秒数已经去掉：转圈本身足够表达「还在处理」，不再报数。
+        WaitText.Visibility = Visibility.Collapsed;
     }
 }

@@ -24,12 +24,12 @@
             <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
             <Setter Property="FontSize" Value="11.5" />
         </Style>
+
     </Page.Resources>
 
     <Grid RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -69,56 +69,86 @@
                                Visibility="Collapsed" TextWrapping="Wrap" />
                 </StackPanel>
 
+                <!-- 安装目录：紧跟实例名称 -->
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="2*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8B7;" FontSize="18" VerticalAlignment="Center"
+                              Foreground="{ThemeResource AppText2Brush}" />
+                    <TextBlock x:Name="InstallDirLabel" Grid.Column="1" Text="安装目录"
+                               FontSize="{StaticResource FontSizeBody}" VerticalAlignment="Center" />
+                    <ComboBox x:Name="DetailDir" Grid.Column="2" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                              PlaceholderText="请先添加游戏目录" AutomationProperties.LabeledBy="{Binding ElementName=InstallDirLabel}"
+                              SelectionChanged="DetailDir_SelectionChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+
+                <!-- 下载源：这次安装走哪条线路，与「获取」页共用同一份设置 -->
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="2*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE896;" FontSize="18" VerticalAlignment="Center"
+                              Foreground="{ThemeResource AppText2Brush}" />
+                    <TextBlock x:Name="SourceLabel" Grid.Column="1" Text="下载源"
+                               FontSize="{StaticResource FontSizeBody}" VerticalAlignment="Center" />
+                    <ComboBox x:Name="DetailSource" Grid.Column="2" HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              AutomationProperties.LabeledBy="{Binding ElementName=SourceLabel}"
+                              SelectionChanged="DetailSource_SelectionChanged">
+                        <ComboBoxItem Content="智能分配" Tag="auto" />
+                        <ComboBoxItem Content="Mojang 官方" Tag="official" />
+                        <ComboBoxItem Content="BMCLAPI" Tag="bmclapi" />
+                        <ComboBoxItem Content="MeowAPI（自建）" Tag="meow" />
+                    </ComboBox>
+                </Grid>
+
                 <TextBlock Text="Mod 加载器" FontSize="{StaticResource FontSizeCaption}"
                            FontWeight="SemiBold" Margin="2,6,0,0"
                            Foreground="{ThemeResource AppText2Brush}" />
 
                 <!-- 加载器整行列表：名称 + 状态 + 右箭头；选中 = 品牌绿描边 + 浅底 -->
+                <!-- 加载器两列：可添加的才留在列表里，已安装的自动隐藏 -->
                 <ListView x:Name="DetailLoaderList" SelectionMode="None"
                           IsItemClickEnabled="True" ItemClick="DetailLoader_ItemClick"
                           ItemContainerStyle="{StaticResource FlatItemStyle}"
                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
                           ScrollViewer.VerticalScrollMode="Disabled">
+                    <ListView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsWrapGrid Orientation="Horizontal" ItemWidth="114" ItemHeight="114" />
+                        </ItemsPanelTemplate>
+                    </ListView.ItemsPanel>
                     <ListView.ItemTemplate>
                         <DataTemplate>
-                            <Grid Height="56" Margin="0,0,0,6" Opacity="{Binding RowOpacity}">
-                                <Border Background="{ThemeResource AppCardBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
-                                        CornerRadius="{StaticResource CardCornerRadius}" />
+                            <Grid Height="108" Margin="0,0,6,6" HorizontalAlignment="Stretch" Opacity="{Binding RowOpacity}">
                                 <Border Background="{ThemeResource AppBrandSoftBrush}"
-                                        BorderBrush="{ThemeResource AppBrandBrush}" BorderThickness="2"
+                                        BorderBrush="{ThemeResource AppBrandBrush}" BorderThickness="1"
                                         CornerRadius="{StaticResource CardCornerRadius}"
                                         Visibility="{Binding SelectedVisibility}" />
-                                <Grid Padding="18,0,16,0" ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="32" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Image Source="{Binding Icon}" Width="28" Height="28" Stretch="Uniform"
-                                           VerticalAlignment="Center" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
-                                                   Foreground="{ThemeResource AppTextBrush}" />
-                                        <TextBlock Text="{Binding Status}" FontSize="{StaticResource FontSizeCaption}"
-                                                   Foreground="{ThemeResource AppText3Brush}"
-                                                   TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14"
-                                                VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" Spacing="6"
-                                                    Visibility="{Binding InstalledVisibility}">
-                                            <FontIcon Glyph="&#xE73E;" FontSize="13"
-                                                      Foreground="{ThemeResource AppGoodBrush}" />
-                                            <TextBlock Text="已安装" FontSize="{StaticResource FontSizeCaption}"
-                                                       Foreground="{ThemeResource AppGoodBrush}"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <FontIcon Glyph="&#xE76C;" FontSize="11"
-                                                  Foreground="{ThemeResource AppText3Brush}"
-                                                  Visibility="{Binding ChevronVisibility}" />
-                                    </StackPanel>
-                                </Grid>
+                                <StackPanel Padding="4" VerticalAlignment="Center" Spacing="6">
+                                    <Viewbox MaxWidth="52" MaxHeight="52" HorizontalAlignment="Center">
+                                        <Image Source="{Binding Icon}" Stretch="Uniform" />
+                                    </Viewbox>
+                                    <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource AppTextBrush}"
+                                               HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding StatusText}" FontSize="{StaticResource FontSizeCaption}"
+                                               Foreground="{ThemeResource AppWarnBrush}"
+                                               HorizontalAlignment="Center"
+                                               Visibility="{Binding StatusVisibility}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -171,33 +201,8 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="1" Background="{ThemeResource AppCardBrush}"
-                BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
-                CornerRadius="{StaticResource CardCornerRadius}">
-            <Grid Padding="18,10" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="2*" />
-                </Grid.ColumnDefinitions>
-                <FontIcon Glyph="&#xE8B7;" FontSize="18" VerticalAlignment="Center"
-                          Foreground="{ThemeResource AppText2Brush}" />
-                <TextBlock x:Name="InstallDirLabel" Grid.Column="1" Text="安装目录"
-                           FontSize="{StaticResource FontSizeBody}" VerticalAlignment="Center" />
-                <ComboBox x:Name="DetailDir" Grid.Column="2" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                          PlaceholderText="请先添加游戏目录" AutomationProperties.LabeledBy="{Binding ElementName=InstallDirLabel}"
-                          SelectionChanged="DetailDir_SelectionChanged">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding}" />
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
-            </Grid>
-        </Border>
-
         <!-- 底部固定：要装什么 + 开始下载 -->
-        <Border Grid.Row="2" Background="{ThemeResource AppCardBrush}"
+        <Border Grid.Row="1" Background="{ThemeResource AppCardBrush}"
                 BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
                 CornerRadius="{StaticResource CardCornerRadius}">
             <Grid Padding="18,12" ColumnSpacing="16">

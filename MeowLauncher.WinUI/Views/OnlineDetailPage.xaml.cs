@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
@@ -33,16 +33,38 @@ public sealed partial class OnlineDetailPage : Page
         public string TypeText => File.TypeText;
         public Brush TypeBrush => File.TypeBrush;
 
-        public string Meta => string.Join("  ·  ", new[]
+        public string Meta
         {
-            File.Version,
-            File.Date,
-            File.SizeText,
-            File.GameShort,
-            File.Loader,
-            File.RequiredText,
-            File.Installed ? "已安装 · " + File.InstalledInstance : "",
-        }.Where(part => !string.IsNullOrWhiteSpace(part)));
+            get
+            {
+                // 一行只放「从文件名和筛选条件里推不出来」的信息：
+                // CurseForge 的 version 常常就是发布日期原串（2026-10-17T03:13:29.870Z），
+                // 和后面的日期重复；已经出现在文件名里的版本号也不再写一遍。
+                var version = File.Version ?? "";
+                if (LooksIsoStamp(version) ||
+                    (version.Length > 0 && (File.FileName ?? "").Contains(version, StringComparison.OrdinalIgnoreCase)))
+                    version = "";
+                return string.Join("  ·  ", new[]
+                {
+                    version,
+                    File.Date,
+                    File.SizeText,
+                    GameOnly(),
+                    File.Loader,
+                    File.RequiredText,
+                    File.Installed ? "已安装 · " + File.InstalledInstance : "",
+                }.Where(part => !string.IsNullOrWhiteSpace(part)));
+            }
+        }
+
+        /// <summary>游戏版本去掉 CurseForge 的 Client / Server 端标，它们不是版本号。</summary>
+        private string GameOnly() => string.Join(", ", (File.GameShort ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !part.Equals("Client", StringComparison.OrdinalIgnoreCase)
+                        && !part.Equals("Server", StringComparison.OrdinalIgnoreCase)));
+
+        private static bool LooksIsoStamp(string value) =>
+            value.Length >= 16 && value[4] == '-' && value[7] == '-' && value[10] == 'T';
 
         public Visibility SelectedVisibility => _selected ? Visibility.Visible : Visibility.Collapsed;
         public bool Selected { get => _selected; set { _selected = value; Raise(nameof(SelectedVisibility)); } }
@@ -61,6 +83,8 @@ public sealed partial class OnlineDetailPage : Page
     private bool _noFiles;
     private bool _loadingFiles;
     private bool _wasInstallingPack;
+    private string[] _skipDeps = [];
+    private bool _depsReviewed;
     private string _installedInstanceId = "";
     private string _installedRoot = "";
     private TaskEntry? InstallingPack => _project?.IsModpack == true && _args is { } args
@@ -218,6 +242,34 @@ public sealed partial class OnlineDetailPage : Page
         FilesBusy.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>底部「N 个前置」：点开看是哪些前置，勾选决定这次装不装。</summary>
+    private async void DepsLink_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (_busy || _selected is null || _args is null || _project is null) return;
+        var a = _args;
+        var p = _project;
+        _busy = true;
+        UpdateBottom();
+        try
+        {
+            var plan = await App.Backend.ConfirmOnlineModInstallAsync(
+                a.Source, p.Id, _selected.File.Id, a.VersionId, XamlRoot);
+            if (plan is null) return;
+            _skipDeps = plan.SkipDependencies;
+            _depsReviewed = true;
+            App.Trace($"OnlineDetail: deps picked, skip={_skipDeps.Length}");
+        }
+        catch (Exception ex)
+        {
+            App.Trace("OnlineDetail: deps pick failed " + ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+            UpdateBottom();
+        }
+    }
+
     private void File_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (!_busy && e.ClickedItem is FileRow row) Select(row);
@@ -288,10 +340,9 @@ public sealed partial class OnlineDetailPage : Page
         DetailSummary.Text = summary;
 
         var required = _selected?.File.Required ?? 0;
-        DetailDeps.Text = required > 0 && !_installed && !dp && p.InstallKind == "mod"
-            ? $"安装时会检查 {required} 个必需前置"
-            : "";
-        DetailDeps.Visibility = DetailDeps.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var showDeps = required > 0 && !_installed && !dp && !p.IsModpack && p.InstallKind == "mod";
+        DepsLink.Text = showDeps ? $"· {required} 个前置" : "";
+        DepsLink.Visibility = showDeps ? Visibility.Visible : Visibility.Collapsed;
 
         var installingPack = InstallingPack is not null;
         DetailInstall.IsEnabled = installingPack || canInstall || (_project?.IsModpack == true && _installed && !_busy);
@@ -361,7 +412,8 @@ public sealed partial class OnlineDetailPage : Page
             if (!dpInstall && p.InstallKind == "mod")
             {
                 SetNote("正在检查必需前置…", busy: true);
-                plan = await App.Backend.ConfirmOnlineModInstallAsync(a.Source, p.Id, file?.Id ?? "", target, XamlRoot);
+                plan = await App.Backend.ConfirmOnlineModInstallAsync(a.Source, p.Id, file?.Id ?? "", target, XamlRoot,
+                    _depsReviewed ? _skipDeps : null);
                 SetNote("", busy: false);
                 if (plan is null) return;
             }
@@ -374,7 +426,8 @@ public sealed partial class OnlineDetailPage : Page
             if (p.IsModpack) task.ResourceKey = $"pack:{a.Source}:{p.Id}";
             var packProgress = p.IsModpack ? new Progress<string>(stage => TaskCenter.Report(task, stage)) : null;
             var result = plan is not null
-                ? await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, plan.FileId, target, p.InstallKind, plan.Confirmation, taskId: task.Id)
+                ? await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, plan.FileId, target, p.InstallKind,
+                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies)
                 : dpInstall
                 ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file?.Id ?? "", target, SelectedSave() ?? "", task.Id)
                 : file is null

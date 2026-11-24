@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Services;
@@ -196,7 +196,6 @@ public sealed partial class SettingsPage : Page
             "opacity" => OpacitySlider,
             "fontscale" => FontScaleSlider,
             "network" => DownloadSourceBox,
-            "mcim" => ResourceMirrorBox,
             "proxy" => ProxyModeBox,
             "afterlaunch" => AfterLaunchBox,
             "threads" => DownloadThreadsBox,
@@ -279,7 +278,6 @@ public sealed partial class SettingsPage : Page
         if (CardFor(_section) is { } outgoing) Motion.AttachLayout(outgoing, false);
         foreach (var panel in SectionMotionPanels(_section)) Motion.AttachVisibility(panel, false);
         _section = key;
-        if (key == "network") ResourceMirrorBox.SelectedIndex = McimClient.PreferOfficial ? 1 : 0;
         foreach (var name in SectionNames)
         {
             if (CardFor(name) is { } card)
@@ -571,8 +569,8 @@ public sealed partial class SettingsPage : Page
         _suppress = true;
         MemoryBox.Value = Math.Clamp(launch.Mem > 0 ? launch.Mem : 4096, 1024, 65536);
         MemAutoSwitch.IsOn = launch.MemAuto;
-        MemoryModeText.Text = launch.MemAuto ? "自动估算" : "固定值";
         MemoryBox.IsEnabled = !launch.MemAuto;
+        MemoryLimitRow.Visibility = launch.MemAuto ? Visibility.Collapsed : Visibility.Visible;
         JvmBox.Text = launch.Jvm;
         _suppress = false;
         LaunchStatusText.Text = "";
@@ -1058,7 +1056,7 @@ public sealed partial class SettingsPage : Page
 
     private void LaunchField_Toggled(object sender, RoutedEventArgs e)
     {
-        if (MemoryModeText != null) MemoryModeText.Text = MemAutoSwitch.IsOn ? "自动估算" : "固定值";
+        MemoryLimitRow.Visibility = MemAutoSwitch.IsOn ? Visibility.Collapsed : Visibility.Visible;
         if (_suppress || !_ready) return;
         MemoryBox.IsEnabled = !MemAutoSwitch.IsOn;
         ArmLaunchSave();
@@ -1098,6 +1096,7 @@ public sealed partial class SettingsPage : Page
         MemoryBox.Value = 4096;
         MemAutoSwitch.IsOn = false;
         MemoryBox.IsEnabled = true;
+        MemoryLimitRow.Visibility = Visibility.Visible;
         JvmBox.Text = "";
         _suppress = false;
         await SaveLaunchAsync();
@@ -1115,12 +1114,6 @@ public sealed partial class SettingsPage : Page
     }
 
     private void DownloadSource_Changed(object sender, SelectionChangedEventArgs e) => NetworkEdited();
-
-    private void ResourceMirror_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (ResourceMirrorBox.SelectedIndex is not (0 or 1)) return;
-        if (McimClient.SetPreferOfficial(ResourceMirrorBox.SelectedIndex == 1)) MarkSaved();
-    }
 
     private void NetworkThreads_Changed(NumberBox sender, NumberBoxValueChangedEventArgs e) => NetworkEdited();
 

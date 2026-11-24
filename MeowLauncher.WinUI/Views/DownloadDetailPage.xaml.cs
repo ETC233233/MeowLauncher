@@ -45,15 +45,15 @@ public sealed partial class DownloadDetailPage : Page
         public string Name { get; }
         public Microsoft.UI.Xaml.Media.ImageSource Icon { get; }
         public bool Visible { get; set; }
-        // 已安装就一定写「已安装」（版本号拿不到时只写这两个字），不再退回「可以添加 · N 个版本」。
-        public string Status => _failed
-            ? _base
-            : _extra ?? (_installed ? (_installedNote.Length > 0 ? $"已安装 · {_installedNote}" : "已安装") : _base);
-        public Visibility ChevronVisibility => _installed ? Visibility.Collapsed : Visibility.Visible;
+        // 状态行只承担「失败要点一下重试」这一件事：正常行不写任何说明，
+        // 已安装的行直接不进列表，能留下就代表可以添加。
+        public string StatusText => _failed ? _base : "";
+        public Visibility StatusVisibility => _failed ? Visibility.Visible : Visibility.Collapsed;
+        // 已安装的行照样能点：装同名实例会被实例名重复挡住，改个名字就能再装一个不同实例。
         public bool Enabled => _enabled;
         public double RowOpacity => _enabled ? 1.0 : 0.55;
         public Visibility SelectedVisibility => _selected ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility InstalledVisibility => _installed ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility ChevronVisibility => Visibility.Visible;
         public override string ToString() => Name;
 
         public bool Selected { get => _selected; set { _selected = value; Raise(nameof(SelectedVisibility)); } }
@@ -63,14 +63,17 @@ public sealed partial class DownloadDetailPage : Page
             set
             {
                 _installed = value;
-                Raise(nameof(InstalledVisibility));
+                Raise(nameof(StatusText));
+                Raise(nameof(StatusVisibility));
+                Raise(nameof(Enabled));
+                Raise(nameof(RowOpacity));
                 Raise(nameof(ChevronVisibility));
-                Raise(nameof(Status));
+                Raise(nameof(SelectedVisibility));
             }
         }
 
         /// <summary>已安装的具体加载器版本（如 0.15.11），显示在状态行里。</summary>
-        public string InstalledNote { get => _installedNote; set { _installedNote = value; Raise(nameof(Status)); } }
+        public string InstalledNote { get => _installedNote; set { _installedNote = value; Raise(nameof(StatusText)); } }
 
         /// <summary>查询失败（超时/网络）：状态栏改成「版本查询超时，请重试」，不再显示「已安装」。</summary>
         public bool Failed
@@ -80,7 +83,8 @@ public sealed partial class DownloadDetailPage : Page
             {
                 if (_failed == value) return;
                 _failed = value;
-                Raise(nameof(Status));
+                Raise(nameof(StatusText));
+                Raise(nameof(StatusVisibility));
             }
         }
 
@@ -88,7 +92,8 @@ public sealed partial class DownloadDetailPage : Page
         {
             _base = status;
             _enabled = enabled;
-            Raise(nameof(Status));
+            Raise(nameof(StatusText));
+            Raise(nameof(StatusVisibility));
             Raise(nameof(Enabled));
             Raise(nameof(RowOpacity));
         }
@@ -97,7 +102,7 @@ public sealed partial class DownloadDetailPage : Page
         {
             if (_extra == extra) return;
             _extra = extra;
-            Raise(nameof(Status));
+            Raise(nameof(StatusText));
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -140,6 +145,8 @@ public sealed partial class DownloadDetailPage : Page
     private string _selKind = "vanilla";
     private string _suggestedName = "";
     private bool _settingName;
+    private bool _sourceReady;
+    private GeneralSettings? _general;
 
     public DownloadDetailPage()
     {
@@ -166,6 +173,7 @@ public sealed partial class DownloadDetailPage : Page
         var dirs = GameDirectoryResolver.Resolve(App.MainWindow?.Preferences ?? AppPreferencesStore.Load());
         DetailDir.ItemsSource = dirs;
         DetailDir.SelectedIndex = dirs.Count > 0 ? 0 : -1;
+        _ = LoadSourceAsync();
         if (args.Target is { } target)
         {
             if (!dirs.Contains(target.Root)) dirs.Add(target.Root);
@@ -221,6 +229,57 @@ public sealed partial class DownloadDetailPage : Page
 
     private string SelectedInstallDir => DetailDir.SelectedItem as string ?? "";
 
+    /// <summary>下载源跟「获取」页共用一份设置：这里只是同一开关的另一个入口。</summary>
+    private async Task LoadSourceAsync()
+    {
+        try
+        {
+            var g = await App.Backend.GetGeneralSettingsAsync();
+            _general = g;
+            _sourceReady = false;
+            DetailSource.SelectedIndex = SourceIndexOf(g.Mirror);
+            _sourceReady = true;
+        }
+        catch
+        {
+            _sourceReady = true;
+        }
+    }
+
+    private static int SourceIndexOf(string? mirror)
+    {
+        var value = mirror?.Trim() ?? "";
+        if (DownloadPage.IsAutoMirror(value)) return 0;
+        if (value.Equals(DownloadPage.OfficialMirror, StringComparison.OrdinalIgnoreCase)) return 1;
+        if (value.Contains("bmcl", StringComparison.OrdinalIgnoreCase)) return 2;
+        if (value.Equals(DownloadPage.MeowMirror, StringComparison.OrdinalIgnoreCase)) return 3;
+        return 0;
+    }
+
+    private async void DetailSource_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_sourceReady || _general is null) return;
+        if (DetailSource.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        var g = _general;
+        var mirror = tag switch
+        {
+            "official" => DownloadPage.OfficialMirror,
+            "bmclapi" => DownloadPage.BmclApiUrl,
+            "meow" => DownloadPage.MeowMirror,
+            _ => DownloadPage.AutoMirror,
+        };
+        if (string.Equals(mirror, g.Mirror, StringComparison.OrdinalIgnoreCase)) return;
+
+        var result = await App.Backend.SetGeneralSettingsAsync(g.DownloadSource, mirror, g.DlThreads, g.CfApiKey, g.JavaPath);
+        if (result.Ok) _general = g with { Mirror = mirror };
+        else
+        {
+            _sourceReady = false;
+            DetailSource.SelectedIndex = SourceIndexOf(g.Mirror);
+            _sourceReady = true;
+        }
+    }
+
     private async void DetailDir_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_version is { } version && _loaderRows.Count > 0)
@@ -253,6 +312,7 @@ public sealed partial class DownloadDetailPage : Page
                 row.InstalledNote = installed?.LoaderVersion?.Trim() ?? "";
                 row.Installed = installed is not null;
             }
+            RefreshLoaderList();
         }
         catch
         {
@@ -356,7 +416,7 @@ public sealed partial class DownloadDetailPage : Page
         else if (info.Versions.Count > 0)
         {
             row.Failed = false;
-            row.SetBase($"可以添加 · {info.Versions.Count} 个版本", true);
+            row.SetBase("", true);
             row.Visible = true;
         }
         else
@@ -544,7 +604,8 @@ public sealed partial class DownloadDetailPage : Page
         }
         else
         {
-            DetailPrereqVersion.ItemsSource = versions;
+            // 后端按时间升序返回，下拉里改成最新在前
+            DetailPrereqVersion.ItemsSource = versions.AsEnumerable().Reverse().ToList();
             DetailPrereqVersion.SelectedIndex = 0;
             DetailPrereqVersion.IsEnabled = true;
         }
@@ -577,7 +638,12 @@ public sealed partial class DownloadDetailPage : Page
             _settingName = false;
         }
         _suggestedName = proposed;
-        if (!ValidateInstanceName()) { DetailInstall.IsEnabled = false; return; }
+        if (!ValidateInstanceName())
+        {
+            DetailSummary.Text = "安装不满足要求，请检查上述内容的问题";
+            DetailInstall.IsEnabled = false;
+            return;
+        }
         if (kind == "vanilla")
         {
             DetailSummary.Text = _args?.Target is { } t ? $"{t.Id} · 保留实例内容，仅修改加载器" : $"将安装 {_version.Id}（原版）";

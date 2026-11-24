@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace MeowLauncher.WinUI.Controls;
 
@@ -28,7 +29,8 @@ public sealed partial class PageSearchBox : UserControl
         set
         {
             _isFilter = value;
-            Box.QueryIcon = value ? new FontIcon { Glyph = "\uE71C", FontSize = 14 } : new SymbolIcon(Symbol.Find);
+            // 放大镜始终是「提交搜索」；漏斗由单独的 FilterButton 承担筛选/排序入口。
+            Box.QueryIcon = new SymbolIcon(Symbol.Find);
         }
     }
 
@@ -53,6 +55,22 @@ public sealed partial class PageSearchBox : UserControl
     }
 
     public bool FocusInput() => Box.Focus(FocusState.Programmatic);
+
+    /// <summary>
+    /// 在搜索框右侧挂一个「筛选与排序」漏斗（点击弹出面板）。只有真的提供筛选/排序的页面才调用它；
+    /// 没调用的页面不会显示这个图标，避免点开一个空面板。
+    /// </summary>
+    public void AttachFilterPanel(FrameworkElement panel)
+    {
+        if (panel is null) return;
+        FilterButton.Flyout = new Flyout
+        {
+            Content = panel,
+            Placement = FlyoutPlacementMode.BottomEdgeAlignedRight,
+        };
+        FilterButton.Visibility = Visibility.Visible;
+        Box.Margin = new Thickness(0, 0, 40, 0);
+    }
 
     private void Box_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {

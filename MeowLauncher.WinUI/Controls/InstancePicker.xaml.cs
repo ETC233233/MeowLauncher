@@ -1,4 +1,4 @@
-﻿using MeowLauncher.WinUI.Models;
+using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -27,7 +27,13 @@ public sealed partial class InstancePicker : UserControl
     public InstancePicker()
     {
         InitializeComponent();
-        Loaded += (_, _) => Reload();
+        Loaded += (_, _) =>
+        {
+            Reload();
+            InstanceSort.Changed -= OnSortChanged;
+            InstanceSort.Changed += OnSortChanged;
+        };
+        Unloaded += (_, _) => InstanceSort.Changed -= OnSortChanged;
     }
 
     public void Reload()
@@ -36,10 +42,8 @@ public sealed partial class InstancePicker : UserControl
         var usable = snapshot?.Versions.Where(v => v.Valid && !v.Hidden).ToList() ?? [];
         var current = snapshot?.Current;
 
-        _all = usable
-            .OrderByDescending(v => InstanceSelection.Same(v, current))
-            .ThenByDescending(v => v.LastPlayed)
-            .ThenBy(v => v.Id, StringComparer.OrdinalIgnoreCase)
+        // 排序跟实例管理页同步（使用时间 / 名称 / 创建时间）；选中的那条靠滚动定位，不顶到最前面。
+        _all = InstanceSort.Apply(usable)
             .Select(v =>
             {
                 var parts = new List<string> { v.GameVersion, v.LoaderDisplay, v.AgoText };
@@ -68,7 +72,19 @@ public sealed partial class InstancePicker : UserControl
             }).ToList();
         List.ItemsSource = rows;
         EmptyText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ScrollToCurrent(rows);
     }
+
+    /// <summary>打开列表时把当前实例滚进视野（它就是「大概位置」），不改变排序。</summary>
+    private void ScrollToCurrent(List<InstanceRow> rows)
+    {
+        var focus = rows.FirstOrDefault(r => r.IsCurrent);
+        if (focus is null) return;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => List.ScrollIntoView(focus, ScrollIntoViewAlignment.Leading));
+    }
+
+    private void OnSortChanged(object? sender, EventArgs e) => Reload();
 
     private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) => Apply();
 

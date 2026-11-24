@@ -11,8 +11,6 @@
       样式全部写在本页，不依赖别处的页面级资源（之前有页面因为找不到资源在加载时崩过）。
     -->
     <Page.Resources>
-        <SolidColorBrush x:Key="RoomGreenBrush" Color="#FF2FA35A" />
-        <SolidColorBrush x:Key="RoomGreenSoftBrush" Color="#252FA35A" />
         <SolidColorBrush x:Key="RoomWarnSoftBrush" Color="#33F2A93B" />
         <SolidColorBrush x:Key="RoomDangerBrush" Color="#FFD9534F" />
 

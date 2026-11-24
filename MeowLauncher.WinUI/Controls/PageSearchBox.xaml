@@ -5,10 +5,21 @@
 
     <!-- 页内搜索框：所有列表页共用这一个控件。它只管「这一页的列表」；跨页跳转归顶栏全局搜索（Ctrl+Shift+K）。
          本页筛选用 IsFilter=True：漏斗图标 + 「在本页筛选：…」占位，避免看着像第二个全局搜索。 -->
-    <AutoSuggestBox x:Name="Box" Height="36" QueryIcon="Find" VerticalAlignment="Center"
-                    Background="{ThemeResource AppChipBrush}"
-                    BorderBrush="{ThemeResource AppStrokeBrush}"
-                    BorderThickness="1"
-                    TextChanged="Box_TextChanged"
-                    QuerySubmitted="Box_QuerySubmitted" />
+    <Grid>
+        <AutoSuggestBox x:Name="Box" Height="36" QueryIcon="Find" VerticalAlignment="Center"
+                        Background="{ThemeResource AppChipBrush}"
+                        BorderBrush="{ThemeResource AppStrokeBrush}"
+                        BorderThickness="1"
+                        TextChanged="Box_TextChanged"
+                        QuerySubmitted="Box_QuerySubmitted" />
+
+        <!-- 漏斗是「筛选与排序」的入口，只有提供面板的页面才显示（AttachFilterPanel）。没有面板的页面不出现这个图标。 -->
+        <Button x:Name="FilterButton" Width="32" Height="32" Padding="0" CornerRadius="9"
+                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,2,0"
+                Background="Transparent" BorderThickness="0"
+                Foreground="{ThemeResource AppText2Brush}" Visibility="Collapsed"
+                AutomationProperties.Name="筛选与排序" ToolTipService.ToolTip="筛选与排序">
+            <FontIcon Glyph="&#xE71C;" FontSize="14" />
+        </Button>
+    </Grid>
 </UserControl>

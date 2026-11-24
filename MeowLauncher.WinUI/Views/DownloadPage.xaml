@@ -26,12 +26,30 @@
             <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
             <Setter Property="FontSize" Value="11.5" />
         </Style>
+
+        <!-- 更新日志：分组标题 / 小节名 / 条目 -->
+        <Style x:Key="NoteSecStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{ThemeResource AppTextBrush}" />
+            <Setter Property="Margin" Value="0,12,0,0" />
+        </Style>
+        <Style x:Key="NoteSubStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText2Brush}" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+        </Style>
+        <Style x:Key="NoteEntryStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+            <Setter Property="Foreground" Value="{ThemeResource AppText3Brush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,3,0,0" />
+        </Style>
     </Page.Resources>
 
     <Grid x:Name="PageRoot" Padding="{StaticResource PagePadding}" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition x:Name="HeaderRow" Height="52" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -41,41 +59,10 @@
                        Foreground="{ThemeResource AppTextBrush}" VerticalAlignment="Center" />
         </Grid>
 
-        <!-- 工具栏：全局搜索 + 下载源 + 刷新 -->
-        <Grid x:Name="ToolbarHost" Grid.Row="1" ColumnSpacing="10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MaxWidth="360" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <!-- 搜索框在「获取」宿主顶栏（与下载版本 / 在线资源胶囊同一排），本页不自带工具栏。
+             下载源下拉在右栏版本列表标题行右侧（见下方 ListTitle 那一行）。 -->
 
-            <controls:PageSearchBox x:Name="QueryBox" Grid.Column="0" VerticalAlignment="Center"
-                                    IsFilter="True" PlaceholderText="在本页筛选：版本号，例如 1.21 或 24w14a"
-                                    QueryChanged="QueryBox_QueryChanged" />
-
-            <TextBlock Grid.Column="2" Text="下载源" VerticalAlignment="Center"
-                       FontSize="{StaticResource FontSizeCaption}"
-                       Foreground="{ThemeResource AppText3Brush}" />
-            <ComboBox x:Name="SourceBox" Grid.Column="3" Width="150" Height="34" VerticalAlignment="Center"
-                      AutomationProperties.Name="下载源"
-                      SelectionChanged="SourceBox_SelectionChanged">
-                <ComboBoxItem Content="智能分配" Tag="auto" />
-                <ComboBoxItem Content="Mojang 官方" Tag="official" />
-                <ComboBoxItem Content="BMCLAPI" Tag="bmclapi" />
-                <ComboBoxItem Content="MeowAPI（自建）" Tag="meow" />
-                <ComboBoxItem Content="自定义镜像" Tag="custom" />
-            </ComboBox>
-            <Button x:Name="RefreshButton" Grid.Column="4" Width="34" Height="34" Padding="0"
-                    Style="{StaticResource QuietButtonStyle}" CornerRadius="6"
-                    AutomationProperties.Name="刷新 Mojang 版本清单"
-                    ToolTipService.ToolTip="刷新版本清单" Click="Refresh_Click">
-                <FontIcon Glyph="&#xE72C;" FontSize="13" Foreground="{ThemeResource AppText2Brush}" />
-            </Button>
-        </Grid>
-
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="1">
             <!-- 两栏：左 大版本导航，右 版本列表 -->
             <Grid x:Name="BrowseGrid" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -132,6 +119,10 @@
                                   IsItemClickEnabled="True" ItemClick="Nav_ItemClick"
                                   ItemContainerStyle="{StaticResource FlatItemStyle}"
                                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <!-- 换分类/切换选中时列表整批替换，默认的收缩/位移动画看着突兀，关掉 -->
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
                             <ListView.Resources>
                                 <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="{ThemeResource AppChipHoverColor}" />
                                 <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="{ThemeResource AppChipHoverColor}" />
@@ -183,12 +174,21 @@
                         BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
                         CornerRadius="{StaticResource CardCornerRadius}">
                     <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="52" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto">
+                        <StackPanel>
 
-                        <Grid Padding="20,0,20,0" ColumnSpacing="10">
+                        <!-- 下载源暂不在界面上露出，留一个隐藏载体给 code-behind 用 -->
+                        <ComboBox x:Name="SourceBox" Visibility="Collapsed" SelectedIndex="0"
+                                  SelectionChanged="SourceBox_SelectionChanged">
+                            <ComboBoxItem Content="智能分配" Tag="auto" />
+                            <ComboBoxItem Content="Mojang 官方" Tag="official" />
+                            <ComboBoxItem Content="BMCLAPI" Tag="bmclapi" />
+                            <ComboBoxItem Content="MeowAPI（自建）" Tag="meow" />
+                            <ComboBoxItem Content="自定义镜像" Tag="custom" />
+                        </ComboBox>
+
+                        <!-- 没有宣传图也没有更新内容的分组（远古版、搜索结果）就退回原来的标题行 -->
+                        <Grid x:Name="ListHeader" Padding="20,16,20,6" ColumnSpacing="10" Visibility="Collapsed">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -200,12 +200,44 @@
                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                        Foreground="{ThemeResource AppText3Brush}" />
                         </Grid>
-                        <Border VerticalAlignment="Bottom" Height="1" Background="{ThemeResource AppStrokeBrush}" Opacity="0.6" />
 
-                        <ListView x:Name="VersionList" Grid.Row="1" SelectionMode="None" Padding="8,4"
+                        <!-- 该版本的宣传图：图铺满，底部半渐变，标题压在图上（博客头图那种） -->
+                        <Grid x:Name="CoverCard" Margin="0,0,0,8" Height="210"
+                              Visibility="Collapsed">
+                            <Border CornerRadius="12,12,0,0">
+                                <Border.Background>
+                                    <ImageBrush x:Name="CoverBrush" Stretch="UniformToFill" />
+                                </Border.Background>
+                            </Border>
+                            <Border CornerRadius="12,12,0,0">
+                                <Border.Background>
+                                    <!-- 往卡片底色（#0F1216 系）过渡，结尾不用纯黑，避免图底和卡片之间一条硬边 -->
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#000B0D10" Offset="0.1" />
+                                        <GradientStop Color="#4D0B0D10" Offset="0.45" />
+                                        <GradientStop Color="#B30B0D10" Offset="0.8" />
+                                        <GradientStop Color="#D90B0D10" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <StackPanel VerticalAlignment="Bottom" Padding="16,0,16,14" Spacing="3">
+                                <TextBlock x:Name="CoverTitle" FontSize="22" FontWeight="SemiBold"
+                                           Foreground="White" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="CoverSub" FontSize="{StaticResource FontSizeCaption}"
+                                           Foreground="#D9FFFFFF" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+
+                        <ListView x:Name="VersionList" SelectionMode="None" Padding="8,4"
+                                  ScrollViewer.VerticalScrollMode="Disabled"
+                                  ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                   IsItemClickEnabled="True" ItemClick="Version_RowClick"
                                   ItemContainerStyle="{StaticResource FlatItemStyle}"
                                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <!-- 换分组时列表整批替换，WinUI 默认的收缩/位移动画看着突兀，直接关掉 -->
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
                             <ListView.Resources>
                                 <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="{ThemeResource AppChipHoverColor}" />
                                 <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="{ThemeResource AppChipHoverColor}" />
@@ -241,14 +273,6 @@
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14"
                                                     VerticalAlignment="Center">
-                                            <StackPanel Orientation="Horizontal" Spacing="6"
-                                                        Visibility="{Binding InstalledVisibility}">
-                                                <FontIcon Glyph="&#xE73E;" FontSize="13"
-                                                          Foreground="{ThemeResource AppGoodBrush}" />
-                                                <TextBlock Text="已安装" FontSize="{StaticResource FontSizeCaption}"
-                                                           Foreground="{ThemeResource AppGoodBrush}"
-                                                           VerticalAlignment="Center" />
-                                            </StackPanel>
                                             <FontIcon Glyph="&#xE76C;" FontSize="11"
                                                       Foreground="{ThemeResource AppText3Brush}" />
                                         </StackPanel>
@@ -256,6 +280,34 @@
                                 </DataTemplate>
                             </ListView.ItemTemplate>
                         </ListView>
+
+                            <!-- 读更新日志时的占位：有缓存直接出，没缓存才闪这几条，避免空白等待 -->
+                            <StackPanel x:Name="NotesLoading" Visibility="Collapsed" Margin="20,14,20,4" Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <ProgressRing IsActive="True" Width="14" Height="14"
+                                                  Foreground="{ThemeResource AppText3Brush}" />
+                                    <TextBlock Text="正在读取更新内容…" FontSize="{StaticResource FontSizeCaption}"
+                                               Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Border Height="10" CornerRadius="5" Background="{ThemeResource AppChipBrush}" />
+                                <Border Height="10" CornerRadius="5" Background="{ThemeResource AppChipBrush}" Width="280" HorizontalAlignment="Left" />
+                                <Border Height="10" CornerRadius="5" Background="{ThemeResource AppChipBrush}" Width="210" HorizontalAlignment="Left" />
+                            </StackPanel>
+
+                            <!-- 大版本更新内容：中文 Minecraft Wiki 的 新内容 / 更改 / 修复 -->
+                            <StackPanel x:Name="NotesHost" Margin="20,10,20,20" Spacing="2" Visibility="Collapsed" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                        <!-- 切版本组时整栏先盖一层，等头图和更新内容都就绪再一次性露出 -->
+                        <Grid x:Name="RightLoading" Visibility="Collapsed" Background="{ThemeResource AppCardBrush}">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                                <ProgressRing IsActive="True" Width="26" Height="26"
+                                              Foreground="{ThemeResource AppBrandBrush}" />
+                                <TextBlock Text="正在加载版本信息…" FontSize="{StaticResource FontSizeCaption}"
+                                           Foreground="{ThemeResource AppText3Brush}" />
+                            </StackPanel>
+                        </Grid>
                     </Grid>
                 </Border>
             </Grid>

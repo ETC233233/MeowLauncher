@@ -1,4 +1,4 @@
-﻿<ResourceDictionary
+<ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
@@ -197,8 +197,14 @@
          否则壁纸偏红时「安装」会变成像删除的暗红按钮。 -->
     <SolidColorBrush x:Key="AppBrandBrush" Color="#FF2FA35A" />
     <SolidColorBrush x:Key="AppBrandTextBrush" Color="#FFFFFFFF" />
-    <!-- 品牌绿浅底：选中行 / 选中项的填充。固定色，和 AppBrandBrush 成对用。 -->
+    <!-- 品牌色浅底：选中行 / 选中项的填充，初始为默认品牌绿；换主题色时由 ThemeColorService 一起改写。 -->
     <SolidColorBrush x:Key="AppBrandSoftBrush" Color="#2E2FA35A" />
+    <!-- 账户 / 联机 / 在线设置页用的品牌色令牌（原来各页自己写一份，换主题色时跟不上），统一放这里由 ThemeColorService 改写。 -->
+    <SolidColorBrush x:Key="AccountGreenBrush" Color="#FF2FA35A" />
+    <SolidColorBrush x:Key="AccountGreenSoftBrush" Color="#252FA35A" />
+    <SolidColorBrush x:Key="RoomGreenBrush" Color="#FF2FA35A" />
+    <SolidColorBrush x:Key="RoomGreenSoftBrush" Color="#252FA35A" />
+    <SolidColorBrush x:Key="SetupGreenBrush" Color="#FF2FA35A" />
     <LinearGradientBrush x:Key="AppLaunchBrush" StartPoint="0,0" EndPoint="1,0">
         <GradientStop Color="#FF43C477" Offset="0" />
         <GradientStop Color="#FF248B4B" Offset="1" />

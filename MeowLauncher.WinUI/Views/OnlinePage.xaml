@@ -99,9 +99,7 @@
                           SelectedIndex="0" SelectionChanged="SourceBox_SelectionChanged"
                           AutomationProperties.Name="在线资源来源">
                     <ComboBoxItem Content="Modrinth" />
-                    <ComboBoxItem Content="MCIM（CurseForge 镜像）" />
-                    <ComboBoxItem Content="Meow-CFMI（自建代理）" />
-                    <ComboBoxItem Content="CurseForge 直连（需 Key）" />
+                    <ComboBoxItem Content="CurseForge" />
                 </ComboBox>
             </Grid>
         </Border>
@@ -185,16 +183,31 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="筛选器" FontSize="11.5" Margin="2,0,2,0" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource AppText3Brush}" />
                             <ComboBox x:Name="GameVersionBox" Height="32" Width="140" CornerRadius="10"
                                       VerticalAlignment="Center" SelectionChanged="Filter_SelectionChanged"
                                       ToolTipService.ToolTip="游戏版本（「跟随」= 当前实例的版本）"
                                       AutomationProperties.Name="游戏版本筛选" />
                             <StackPanel x:Name="LoaderGroup" Orientation="Horizontal" Spacing="8">
-                                <ComboBox x:Name="LoaderBox" Height="32" Width="140" CornerRadius="10"
+                                <ComboBox x:Name="LoaderBox" Height="32" Width="164" CornerRadius="10"
                                           VerticalAlignment="Center" SelectionChanged="Filter_SelectionChanged"
                                           ToolTipService.ToolTip="加载器（「跟随」= 当前实例的加载器）"
                                           AutomationProperties.Name="加载器筛选" />
                             </StackPanel>
+                            <ComboBox x:Name="TypeBox" Height="32" Width="112" CornerRadius="10"
+                                      VerticalAlignment="Center" SelectionChanged="Type_SelectionChanged"
+                                      ToolTipService.ToolTip="内容类型"
+                                      AutomationProperties.Name="内容类型筛选">
+                                <ComboBoxItem Content="全部类型" Tag="all" />
+                                <ComboBoxItem Content="Mod" Tag="mod" />
+                                <ComboBoxItem Content="整合包" Tag="modpack" />
+                                <ComboBoxItem Content="资源包" Tag="resourcepack" />
+                                <ComboBoxItem Content="光影" Tag="shader" />
+                                <ComboBoxItem Content="数据包" Tag="datapack" />
+                            </ComboBox>
+                            <TextBlock Text="排序" FontSize="11.5" Margin="6,0,2,0" VerticalAlignment="Center"
+                                       Foreground="{ThemeResource AppText3Brush}" />
                             <ComboBox x:Name="SortBox" Height="32" Width="104" CornerRadius="10"
                                       ToolTipService.ToolTip="排序"
                                       VerticalAlignment="Center" SelectionChanged="Sort_SelectionChanged"
@@ -204,6 +217,15 @@
                                 <ComboBoxItem Content="最近更新" Tag="updated" />
                                 <ComboBoxItem Content="最新发布" Tag="newest" />
                             </ComboBox>
+                            <ComboBox x:Name="CfSourceBox" Height="32" Width="116" CornerRadius="10"
+                                      VerticalAlignment="Center" Visibility="Collapsed"
+                                      SelectedIndex="0" SelectionChanged="CfSource_SelectionChanged"
+                                      ToolTipService.ToolTip="CurseForge 来源"
+                                      AutomationProperties.Name="CurseForge 来源">
+                                <ComboBoxItem Content="MCIM" Tag="mcim" />
+                                <ComboBoxItem Content="MeowAPI" Tag="cfmi" />
+                                <ComboBoxItem x:Name="CfOfficialItem" Content="官方" Tag="official" />
+                            </ComboBox>
                         </StackPanel>
                         <TextBlock x:Name="FilterHint" Grid.Column="1" Text="" FontSize="11.5" Visibility="Collapsed"
                                    Foreground="{ThemeResource AppWarnBrush}" VerticalAlignment="Center"
@@ -212,12 +234,15 @@
                 </Border>
 
                 <Grid Grid.Row="1">
-            <!-- 整页只有这一张卡；行本身是平铺的，不再卡片套卡片 -->
-            <Border Style="{StaticResource WidgetCardStyle}" Padding="0">
-                <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+            <!-- 整页只有这一张卡；行本身是平铺的，不再卡片套卡片 -->
+            <Border Grid.Row="0" Style="{StaticResource WidgetCardStyle}" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                 <ListView x:Name="ResultsList" SelectionMode="None" Padding="6,4"
                           IsItemClickEnabled="True" ItemClick="ResultsList_ItemClick" Background="Transparent"
@@ -318,13 +343,25 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                    <Button x:Name="LoadMoreButton" Grid.Row="1" Content="加载更多"
-                            FontFamily="Microsoft YaHei UI" Language="zh-CN"
-                            Height="32" Margin="10,6,10,10" HorizontalAlignment="Stretch"
-                            Visibility="Collapsed" Click="LoadMore_Click"
-                            AutomationProperties.Name="加载更多结果" />
                 </Grid>
             </Border>
+
+            <!-- 翻页条：结果列表之外，不与卡片混在一起 -->
+            <StackPanel x:Name="PageBar" Grid.Row="1" Orientation="Horizontal" Spacing="10"
+                        HorizontalAlignment="Center" Margin="0,8,0,2" Visibility="Collapsed">
+                <Button x:Name="PrevPageButton" Content="上一页" Height="30" Padding="14,0"
+                        CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
+                        FontSize="11.5" Foreground="{ThemeResource AppText2Brush}"
+                        Background="{ThemeResource AppChipBrush}"
+                        AutomationProperties.Name="上一页" Click="PrevPage_Click" />
+                <TextBlock x:Name="PageLabel" Text="第 1 页" FontSize="11.5" VerticalAlignment="Center"
+                           Foreground="{ThemeResource AppText2Brush}" />
+                <Button x:Name="NextPageButton" Content="下一页" Height="30" Padding="14,0"
+                        CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
+                        FontSize="11.5" Foreground="{ThemeResource AppText2Brush}"
+                        Background="{ThemeResource AppChipBrush}"
+                        AutomationProperties.Name="下一页" Click="NextPage_Click" />
+            </StackPanel>
 
             <controls:LoadingBlock x:Name="LoadingPanel" Text="正在搜索 Modrinth…" Tint="{ThemeResource TintMediaBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
 

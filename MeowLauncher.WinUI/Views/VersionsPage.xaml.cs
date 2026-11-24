@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Models;
@@ -80,6 +80,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         InitializeComponent();
         Loaded += VersionsPage_Loaded;
         Loaded += (_, _) => ApplyCompact(App.MainWindow?.IsCompact ?? false);
+        AttachListFilterPanel();
         ExtraPanel.Changed += ExtraPanel_Changed;
         if (App.MainWindow is { } shell) shell.CompactChanged += (_, _) => ApplyCompact(shell.IsCompact);
         Unloaded += (_, _) =>
@@ -313,6 +314,44 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         ApplyFilter(keepSelection: true);
     }
 
+    /// <summary>排序 / 筛选面板挂到搜索框右侧的漏斗上。排序选择与首页那个小的实例选择列表共享（InstanceSort）。</summary>
+    private void AttachListFilterPanel()
+    {
+        if (ListFilterPanel.Parent is Panel host) host.Children.Remove(ListFilterPanel);
+        QueryBox.AttachFilterPanel(ListFilterPanel);
+        SyncSortBox();
+    }
+
+    private void SyncSortBox()
+    {
+        var index = InstanceSort.Mode switch
+        {
+            InstanceSortMode.Name => 1,
+            InstanceSortMode.Created => 2,
+            _ => 0,
+        };
+        if (SortBox.SelectedIndex != index) SortBox.SelectedIndex = index;
+    }
+
+    private void SortBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var mode = ((SortBox.SelectedItem as ComboBoxItem)?.Tag as string) switch
+        {
+            "name" => InstanceSortMode.Name,
+            "created" => InstanceSortMode.Created,
+            _ => InstanceSortMode.Recent,
+        };
+        if (InstanceSort.Mode == mode) return;
+        InstanceSort.Set(mode);
+        ApplyFilter(keepSelection: true);
+    }
+
+    private void ListFilter_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        ApplyFilter(keepSelection: true);
+    }
+
     private void QueryBox_QueryChanged(object? sender, string text)
     {
         _query = (text ?? string.Empty).Trim();
@@ -333,10 +372,22 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         // 页内搜索框（QueryBox）按实例名等过滤，再叠加目录与隐藏状态筛选。
         _groups.Clear();
         var total = 0;
+        var filtering = OnlyRunningCheck.IsChecked == true
+                        || OnlyModdedCheck.IsChecked == true
+                        || OnlyLoaderCheck.IsChecked == true;
         foreach (var dir in _dirs)
         {
             if (!_versionsByDir.TryGetValue(dir, out var source)) continue;
             var visible = source.Where(v => v.Valid && !v.Hidden);
+            if (OnlyRunningCheck.IsChecked == true)
+                visible = visible.Where(v => GameSessions.IsRunning(v.Id, v.Root));
+            if (OnlyModdedCheck.IsChecked == true)
+                visible = visible.Where(v => v.HasMods);
+            if (OnlyLoaderCheck.IsChecked == true)
+            {
+                visible = visible.Where(v => !string.IsNullOrWhiteSpace(v.Loader)
+                    && !v.Loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase));
+            }
             if (_query.Length > 0)
             {
                 visible = visible.Where(v =>
@@ -344,8 +395,11 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                     (v.Loader?.Contains(_query, StringComparison.OrdinalIgnoreCase) ?? false));
             }
             var visibleList = visible.ToList();
-            var rows = OrderFor(dir, visibleList).ToList();
-            if (rows.Count == 0 && _query.Length > 0) continue;
+            // 「使用时间」沿用目录里手动拖过的顺序；名称 / 创建时间纯粹按字段排。
+            var rows = InstanceSort.Mode == InstanceSortMode.Recent
+                ? OrderFor(dir, visibleList).ToList()
+                : InstanceSort.Apply(visibleList).ToList();
+            if (rows.Count == 0 && (_query.Length > 0 || filtering)) continue;
             var group = new VersionGroup(dir,
                 _query.Length > 0 || !_collapsedDirs.Contains(dir), rows);
             _groups.Add(group);
@@ -355,7 +409,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         SetHoveredRow(null);
         VersionList.ItemsSource = _groups.ToArray();
 
-        if (total == 0 && (_groups.Count == 0 || _query.Length > 0))
+        if (total == 0 && (_groups.Count == 0 || _query.Length > 0 || filtering))
         {
             var hasVersionsFolder = _dirs.Any(GameDirectoryResolver.HasVersions);
             EmptyOpenDirButton.Visibility = _dirs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -377,6 +431,13 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
                 ListEmpty.Glyph = "\uE81E";
                 ListEmpty.Title = "还没有本地实例";
                 ListEmpty.Hint = "去下载页装一个版本，或添加另一个游戏目录。";
+            }
+            else if (filtering)
+            {
+                ListEmpty.Glyph = "\uE71C";
+                ListEmpty.Title = "没有符合筛选条件的实例";
+                ListEmpty.Hint = "在搜索框右边的漏斗里少勾几条，或换个排序试试。";
+                EmptyDownloadButton.Visibility = Visibility.Collapsed;
             }
             else
             {

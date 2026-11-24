@@ -32,12 +32,6 @@
             <!-- 在线资源装到哪个实例：和实例页同一个切换器，放右上角；下载版本页用不到，隐藏 -->
             <StackPanel x:Name="OnlineHeaderActions" Grid.Column="1" Orientation="Horizontal" Spacing="8"
                         VerticalAlignment="Center" Visibility="Collapsed">
-                <ComboBox x:Name="ResourceMirrorBox" VerticalAlignment="Center"
-                          AutomationProperties.Name="在线资源镜像优先级"
-                          SelectionChanged="ResourceMirror_Changed">
-                    <ComboBoxItem Content="MCIM 优先" />
-                    <ComboBoxItem Content="官方优先" />
-                </ComboBox>
                 <controls:InstanceSwitcher x:Name="OnlineSwitcher" VerticalAlignment="Center" />
             </StackPanel>
         </Grid>
@@ -85,20 +79,40 @@
                     Background="{ThemeResource AppChipBrush}">
                 <StackPanel Orientation="Horizontal" Spacing="2">
                     <ToggleButton x:Name="SrcModrinth" Style="{StaticResource SegTabToggleStyle}" Tag="0" Click="Source_Click"
-                                  AutomationProperties.Name="数据源：Modrinth" ToolTipService.ToolTip="从 Modrinth 搜索"
+                                  AutomationProperties.Name="数据源：Modrinth" ToolTipService.ToolTip="从 Modrinth 搜索，点一下选镜像"
                                   Padding="12,4" CornerRadius="{StaticResource ChipCornerRadius}"
                                   BorderThickness="0" VerticalAlignment="Center">
                         <TextBlock Text="Modrinth" FontSize="{StaticResource FontSizeBody}" />
+                        <FlyoutBase.AttachedFlyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                <RadioMenuFlyoutItem x:Name="OptModrinthMcim" Text="MCIM 镜像" GroupName="modrinthSource"
+                                                     Tag="m0" Click="SourceOption_Click" />
+                                <RadioMenuFlyoutItem x:Name="OptModrinthOfficial" Text="官方" GroupName="modrinthSource"
+                                                     Tag="m1" Click="SourceOption_Click" />
+                            </MenuFlyout>
+                        </FlyoutBase.AttachedFlyout>
                     </ToggleButton>
                     <ToggleButton x:Name="SrcCurseForge" Style="{StaticResource SegTabToggleStyle}" Tag="1" Click="Source_Click"
-                                  AutomationProperties.Name="数据源：MCIM / Meow-CFMI" ToolTipService.ToolTip="从 MCIM / Meow-CFMI 镜像搜索"
+                                  AutomationProperties.Name="数据源：CurseForge" ToolTipService.ToolTip="从 CurseForge 搜索，点一下选来源"
                                   Padding="12,4" CornerRadius="{StaticResource ChipCornerRadius}"
                                   BorderThickness="0" VerticalAlignment="Center">
-                        <TextBlock Text="MCIM / Meow-CFMI" FontSize="{StaticResource FontSizeBody}" />
+                        <TextBlock Text="CurseForge" FontSize="{StaticResource FontSizeBody}" />
+                        <FlyoutBase.AttachedFlyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                <RadioMenuFlyoutItem x:Name="OptCfMcim" Text="MCIM 镜像" GroupName="curseForgeSource"
+                                                     Tag="c0" Click="SourceOption_Click" />
+                                <RadioMenuFlyoutItem x:Name="OptCfMeow" Text="MeowAPI" GroupName="curseForgeSource"
+                                                     Tag="c1" Click="SourceOption_Click" />
+                                <RadioMenuFlyoutItem x:Name="OptCfOfficial" Text="官方（需 API Key）" GroupName="curseForgeSource"
+                                                     Tag="c2" Click="SourceOption_Click" />
+                            </MenuFlyout>
+                        </FlyoutBase.AttachedFlyout>
                     </ToggleButton>
                 </StackPanel>
             </Border>
         </StackPanel>
+        <controls:PageSearchBox x:Name="DownloadQueryBox" Grid.Column="1" VerticalAlignment="Center"
+                                IsFilter="True" PlaceholderText="在本页筛选：版本号，例如 1.21 或 24w14a" />
         <controls:PageSearchBox x:Name="OnlineQueryBox" Grid.Column="1" VerticalAlignment="Center"
                                 Visibility="Collapsed" PlaceholderText="搜索 Mod、整合包、资源包、光影…" />
         </Grid>

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.RegularExpressions;
+using MeowLauncher.WinUI.Controls;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
@@ -456,18 +457,42 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
 
     // ------------------------------------------------------------------ 搜索 / 过滤
 
-    private void QueryBox_QueryChanged(object? sender, string text)
+    private PageSearchBox? _filterBox;
+    private bool _syncingFilter;
+
+    /// <summary>「获取」宿主把顶栏筛选框交进来；本页不再自带搜索框。</summary>
+    public void AttachQueryBox(PageSearchBox box)
     {
+        if (!ReferenceEquals(_filterBox, box))
+        {
+            if (_filterBox is not null) _filterBox.QueryChanged -= OnFilterChanged;
+            _filterBox = box;
+            box.QueryChanged += OnFilterChanged;
+        }
+        SyncFilterBox();
+    }
+
+    private void SyncFilterBox()
+    {
+        if (_filterBox is null) return;
+        _syncingFilter = true;
+        _filterBox.Text = _query;
+        _syncingFilter = false;
+    }
+
+    private void OnFilterChanged(object? sender, string text)
+    {
+        if (_syncingFilter) return;
         _query = text;
         ApplyFilter(resetList: true, resetNav: true);
     }
 
-    public bool TryFocusSearch() => QueryBox.FocusInput();
+    public bool TryFocusSearch() => _filterBox?.FocusInput() ?? false;
 
     public void ApplySearch(string query)
     {
         _query = query ?? "";
-        QueryBox.Text = _query;
+        SyncFilterBox();
         ApplyFilter(resetList: true, resetNav: true);
     }
 
@@ -545,6 +570,9 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             });
             ListTitle.Text = "搜索结果";
             ListCount.Text = $"{items.Count} 个版本包含「{q}」";
+            RightLoading.Visibility = Visibility.Collapsed;
+            _ = LoadCoverAsync("");
+            _ = LoadNotesAsync("");
         }
         else
         {
@@ -565,6 +593,26 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             items = sel.Items;
             ListTitle.Text = sel.Heading;
             ListCount.Text = $"{items.Count} 个版本";
+            // 只有正式版（26.3 这种）查更新内容；封面：正式版用组名，快照取组内最新版本，远古用 Beta/Alpha/Classic 整组页
+            var formal = System.Text.RegularExpressions.Regex.IsMatch(sel.Title, @"^\d+\.\d+$");
+            var coverVer = formal
+                ? sel.Title
+                : sel.Cat == "ancient"
+                    ? (sel.Key.EndsWith(":beta", StringComparison.Ordinal) ? "Beta"
+                        : sel.Key.EndsWith(":alpha", StringComparison.Ordinal) ? "Alpha" : "Classic")
+                    : (sel.Items.Count > 0 ? sel.Items[0].Id : "");
+            if (!formal)
+            {
+                _notesFor = null;
+                NotesHost.Children.Clear();
+                NotesHost.Visibility = Visibility.Collapsed;
+            }
+
+            var seq = ++_infoSeq;
+            var coverTask = LoadCoverAsync(coverVer, sel.Heading);
+            var notesTask = formal ? LoadNotesAsync(coverVer) : Task.CompletedTask;
+            RightLoading.Visibility = coverVer.Length > 0 || formal ? Visibility.Visible : Visibility.Collapsed;
+            _ = HideRightLoadingAsync(seq, coverTask, notesTask);
         }
 
         SyncRows(_navItems, nav);
@@ -581,6 +629,123 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         }
 
         SetState(PageState.List);
+    }
+
+    private string? _coverFor;
+    private int _infoSeq;
+
+    /// <summary>整栏加载层：等封面和更新内容都完成（或确认没有）后一次性收起，避免切组时一部分一部分地冒出来。</summary>
+    private async Task HideRightLoadingAsync(int seq, Task a, Task b)
+    {
+        try { await Task.WhenAll(a, b); } catch { }
+        if (seq != _infoSeq) return;
+        RightLoading.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>右栏标题下那张宣传图：只跟选中的大版本走，取不到就整块收起。</summary>
+    private async Task LoadCoverAsync(string versionId, string heading = "")
+    {
+        if (versionId == _coverFor) return;
+        _coverFor = versionId;
+        if (string.IsNullOrEmpty(versionId))
+        {
+            CoverBrush.ImageSource = null;
+            CoverCard.Visibility = Visibility.Collapsed;
+            UpdateListHeader();
+            return;
+        }
+
+        // 本地缓存优先：维基的图跟着版本走，命中就不用等后端冷启动
+        var cached = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "MeowLauncher", "version-notes", "cover-" + versionId + ".jpg");
+        string? path = System.IO.File.Exists(cached) ? cached : null;
+
+        if (path is null)
+        {
+            try { path = await App.Backend.GetVersionCoverAsync(versionId); }
+            catch { }
+            if (_coverFor != versionId) return;
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+        {
+            CoverBrush.ImageSource = null;
+            CoverCard.Visibility = Visibility.Collapsed;
+            UpdateListHeader();
+            return;
+        }
+
+        CoverTitle.Text = heading;
+        CoverSub.Text = "Minecraft Java 版";
+        CoverBrush.ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(path));
+        CoverCard.Visibility = Visibility.Visible;
+        UpdateListHeader();
+    }
+
+    /// <summary>头图和更新内容都空着的时候，把原来的标题行亮出来，免得右栏一片空。</summary>
+    private void UpdateListHeader()
+    {
+        var hasContent = CoverCard.Visibility == Visibility.Visible || NotesHost.Visibility == Visibility.Visible;
+        ListHeader.Visibility = hasContent ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private string? _notesFor;
+
+    /// <summary>右栏头图下面的更新日志：取中文 Minecraft Wiki 的新内容 / 更改 / 修复，取不到就整块收起。</summary>
+    private async Task LoadNotesAsync(string versionId)
+    {
+        if (versionId == _notesFor) return;
+        _notesFor = versionId;
+        NotesHost.Children.Clear();
+        NotesHost.Visibility = Visibility.Collapsed;
+        NotesLoading.Visibility = Visibility.Collapsed;
+        UpdateListHeader();
+        if (string.IsNullOrEmpty(versionId)) return;
+
+        // 本地有缓存就直接出，不闪加载条；第一次联网才显示占位
+        var cached = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "MeowLauncher", "version-notes",
+            Regex.Replace(versionId, "[^0-9A-Za-z._-]", "_") + ".json");
+        if (!System.IO.File.Exists(cached)) NotesLoading.Visibility = Visibility.Visible;
+
+        VersionNotes? notes = null;
+        try { notes = await App.Backend.GetVersionNotesAsync(versionId); }
+        catch { }
+        finally { NotesLoading.Visibility = Visibility.Collapsed; }
+        if (_notesFor != versionId) return;
+        if (notes?.Sections is null || notes.Sections.Count == 0) return;
+
+        foreach (var sec in notes.Sections)
+        {
+            AddNoteText(sec.Title, "NoteSecStyle");
+            foreach (var sub in sec.Subs)
+            {
+                if (!string.IsNullOrWhiteSpace(sub.Name)) AddNoteText(sub.Name, "NoteSubStyle");
+                var shown = 0;
+                foreach (var entry in sub.Entries)
+                {
+                    if (shown >= 10) break;
+                    shown++;
+                    var body = entry.Points.Count > 0
+                        ? entry.Name + "：" + string.Join("；", entry.Points)
+                        : entry.Name;
+                    AddNoteText(body, "NoteEntryStyle");
+                }
+                if (sub.Entries.Count > shown) AddNoteText($"另有 {sub.Entries.Count - shown} 项…", "NoteEntryStyle");
+            }
+        }
+        NotesHost.Visibility = NotesHost.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateListHeader();
+    }
+
+    private void AddNoteText(string text, string styleKey)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var tb = new TextBlock { Text = text };
+        if (Resources.TryGetValue(styleKey, out var st) && st is Style s) tb.Style = s;
+        NotesHost.Children.Add(tb);
     }
 
     /// <summary>原地对齐集合：多删、缺插、错位移动，已存在的实例原样保留（不重建控件）。</summary>

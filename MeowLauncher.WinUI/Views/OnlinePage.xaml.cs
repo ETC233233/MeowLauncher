@@ -39,8 +39,14 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             new PointerEventHandler(ResultsList_PointerMoved), handledEventsToo: true);
         ResultsList.AddHandler(UIElement.PointerExitedEvent,
             new PointerEventHandler(ResultsList_PointerExited), handledEventsToo: true);
+        // 列表换内容时容器会被回收复用，旧行的悬停底色会跟着跑到新行上，这里清一次。
+        ResultsList.ContainerContentChanging += (_, args) =>
+        {
+            if (args.ItemContainer is ListViewItem item) item.Background = null;
+        };
         // 数据源由「获取」顶部的「在线资源」按钮切换，这里沿用上次选的源。
         SourceBox.SelectedIndex = PreferredSource is 0 or 1 ? PreferredSource : 0;
+        if (PreferredCfSource is 1 or 2) CfSourceBox.SelectedIndex = PreferredCfSource;
         UpdateSourceCategories();
         Loaded += (_, _) =>
         {
@@ -340,20 +346,38 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         await SearchAsync(_query);
     }
 
-    private async void LoadMore_Click(object sender, RoutedEventArgs e)
+    /// <summary>每页条数：整合包更重，一页少放些。</summary>
+    private int PageSize => _category == "all" ? 20 : 60;
+
+    private async void PrevPage_Click(object sender, RoutedEventArgs e)
     {
-        if (_loadingMore) return;
+        if (_loadingMore || _offset < PageSize) return;
         _loadingMore = true;
-        LoadMoreButton.IsEnabled = false;
+        PrevPageButton.IsEnabled = false;
         try
         {
-            _offset += _category == "all" ? 20 : 60;
-            await SearchAsync(_query, append: true);
+            _offset -= PageSize;
+            await SearchAsync(_query);
         }
         finally
         {
             _loadingMore = false;
-            LoadMoreButton.IsEnabled = true;
+        }
+    }
+
+    private async void NextPage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loadingMore) return;
+        _loadingMore = true;
+        NextPageButton.IsEnabled = false;
+        try
+        {
+            _offset += PageSize;
+            await SearchAsync(_query);
+        }
+        finally
+        {
+            _loadingMore = false;
         }
     }
 
@@ -405,8 +429,11 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         _ = SearchAsync(query ?? string.Empty);
     }
 
-    /// <summary>当前数据源（0 = Modrinth，1 = CurseForge）。切换入口在「获取」顶部「在线资源」按钮右侧，切走再回来保持不变。</summary>
+    /// <summary>当前数据源（0 = Modrinth，1 = CurseForge）。切换入口在「获取」顶部的下载源按钮，切走再回来保持不变。</summary>
     public static int PreferredSource { get; set; } = -1;
+
+    /// <summary>CurseForge 来源（0 MCIM 社区镜像 / 1 MeowAPI / 2 官方），同样由「获取」页的下载源菜单写入。</summary>
+    public static int PreferredCfSource { get; set; }
 
     internal static int ResourceSourceIndex(string source) =>
         source is "priority:curseforge,modrinth" or "only:curseforge" ? 1 : 0;
@@ -416,6 +443,51 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     {
         if (index is not (0 or 1) || SourceBox.SelectedIndex == index) return;
         SourceBox.SelectedIndex = index;
+    }
+
+    private bool _cfKeyPresent;
+    private int _lastCfSource;
+    private bool _cfReverting;
+
+    /// <summary>读一次设置里的 CurseForge Key，决定「官方」这一项是否置灰。</summary>
+    private async Task RefreshCfKeyAsync()
+    {
+        try
+        {
+            var g = await App.Backend.GetGeneralSettingsAsync();
+            _cfKeyPresent = !string.IsNullOrWhiteSpace(g.CfApiKey);
+        }
+        catch { }
+        if (CfOfficialItem is not null) CfOfficialItem.Opacity = _cfKeyPresent ? 1 : 0.45;
+    }
+
+    private async void CfSource_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CfSourceBox is null) return;
+        if (_cfReverting) { _cfReverting = false; return; }
+
+        if (CfSourceBox.SelectedIndex == 2 && !_cfKeyPresent)
+        {
+            await RefreshCfKeyAsync();
+            if (!_cfKeyPresent)
+            {
+                await new Microsoft.UI.Xaml.Controls.ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title = "需要 CurseForge API Key",
+                    Content = "请前往「设置 › 下载与网络」填写 CurseForge API Key，再选官方源。",
+                    CloseButtonText = "知道了",
+                }.ShowAsync();
+                _cfReverting = true;
+                CfSourceBox.SelectedIndex = _lastCfSource is 0 or 1 ? _lastCfSource : 0;
+                return;
+            }
+        }
+
+        _lastCfSource = CfSourceBox.SelectedIndex;
+        if (!_ready || SourceBox.SelectedIndex < 1) return;
+        _offset = 0;
+        await SearchAsync(_query);
     }
 
     private async void SourceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -430,17 +502,27 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         await SearchAsync(_query);
     }
 
-    /// <summary>0 Modrinth；1 MCIM 镜像；2 Meow-CFMI 自建代理；3 CurseForge 直连（需 Key）。</summary>
+    /// <summary>CurseForge 来源：0 MCIM 社区镜像；1 MeowAPI 自建代理；2 官方直连（需要设置里填 Key）。</summary>
     private static string CfSourceFor(int index) => index switch
     {
-        2 => "cfmi",
-        3 => "official",
+        1 => "cfmi",
+        2 => "official",
         _ => "mcim",
+    };
+
+    private static string CfSourceLabel(int index) => index switch
+    {
+        1 => "MeowAPI",
+        2 => "CurseForge 官方",
+        _ => "MCIM",
     };
 
     private void UpdateSourceCategories()
     {
         var isCurseForge = SourceBox.SelectedIndex >= 1;
+        // 来源改由「获取」顶部的 CurseForge 按钮弹菜单选，这个下拉只留作代码载体。
+        CfSourceBox.Visibility = Visibility.Collapsed;
+        if (isCurseForge) _ = RefreshCfKeyAsync();
         CatAll.Visibility = isCurseForge ? Visibility.Collapsed : Visibility.Visible;
         if (isCurseForge && _category == "all") _category = "mod";
         UpdateCategoryVisuals();
@@ -452,14 +534,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         _query = query;
         if (ActiveQueryBox.Text.Trim() != query) ActiveQueryBox.Text = query;   // 同步外部带进来的关键词；不触发再次搜索
         var useCurseForge = SourceBox.SelectedIndex >= 1;
-        var cfSource = CfSourceFor(SourceBox.SelectedIndex);
-        var sourceName = SourceBox.SelectedIndex switch
-        {
-            1 => "MCIM",
-            2 => "Meow-CFMI",
-            3 => "CurseForge 直连",
-            _ => "Modrinth",
-        };
+        var cfSource = CfSourceFor(CfSourceBox.SelectedIndex);
+        var sourceName = useCurseForge ? CfSourceLabel(CfSourceBox.SelectedIndex) : "Modrinth";
 
         // 两家现在都支持游戏版本/加载器/排序；CurseForge 没有"相关度"，回落成热门。
         UpdateFilterHint();
@@ -471,7 +547,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         try
         {
             // 分类已经交给服务端：Modrinth 用 facets、CurseForge 用 classId，本地只做兜底过滤。
-            var limit = _category == "all" ? 20 : 60;
+            var limit = PageSize;
             var searchTask = useCurseForge
                 ? CurseForgeClient.SearchAsync(query, limit, _category,
                     NullIfEmpty(EffectiveGameVersion()), NullIfEmpty(EffectiveLoader()), _sort, _offset, cfSource)
@@ -490,7 +566,12 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             await RefreshInstalledAsync();
             if (request != _requestId) return;
             ApplyResults(sourceName, query);
-            LoadMoreButton.Visibility = results.Count >= limit ? Visibility.Visible : Visibility.Collapsed;
+            PageLabel.Text = $"第 {_offset / limit + 1} 页";
+            PrevPageButton.IsEnabled = _offset > 0;
+            PrevPageButton.Visibility = _offset > 0 ? Visibility.Visible : Visibility.Collapsed;
+            NextPageButton.IsEnabled = results.Count >= limit;
+            NextPageButton.Visibility = results.Count >= limit ? Visibility.Visible : Visibility.Collapsed;
+            PageBar.Visibility = results.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex)
         {
@@ -591,6 +672,47 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         ApplyResults(SourceBox.SelectedIndex >= 1 ? "CurseForge" : "Modrinth", _query);
     }
 
+    private bool _typeSyncing;
+
+    /// <summary>顶部「类型」下拉：和左栏分类是同一个状态，互相点亮。</summary>
+    private async void Type_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_typeSyncing || TypeBox?.SelectedItem is not ComboBoxItem { Tag: string category }) return;
+        // CurseForge 没有「全部类型」，落到 Mod。
+        if (category == "all" && SourceBox.SelectedIndex >= 1) category = "mod";
+        if (category == _category) { SyncTypeBox(); return; }
+        await SwitchCategoryAsync(category);
+    }
+
+    private void SyncTypeBox()
+    {
+        if (TypeBox is null) return;
+        var index = _category switch
+        {
+            "mod" => 1,
+            "modpack" => 2,
+            "resourcepack" => 3,
+            "shader" => 4,
+            "datapack" => 5,
+            _ => 0,
+        };
+        if (TypeBox.SelectedIndex == index) return;
+        _typeSyncing = true;
+        TypeBox.SelectedIndex = index;
+        _typeSyncing = false;
+    }
+
+    /// <summary>由「获取」页的来源菜单调用：0 MCIM 社区镜像 / 1 MeowAPI / 2 官方。</summary>
+    public void SetCfSource(int index)
+    {
+        if (index is not (0 or 1 or 2) || CfSourceBox is null) return;
+        PreferredCfSource = index;
+        if (CfSourceBox.SelectedIndex == index) return;
+        CfSourceBox.SelectedIndex = index;
+    }
+
+    public int CfSourceIndex => CfSourceBox?.SelectedIndex ?? 0;
+
     private async void Category_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string category }) return;
@@ -631,6 +753,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 ? Microsoft.UI.Text.FontWeights.SemiBold
                 : Microsoft.UI.Text.FontWeights.Normal;
         }
+        SyncTypeBox();
     }
 
     private async void CategoryShortcut_Click(object sender, RoutedEventArgs e)
@@ -674,7 +797,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     private void ShowEmpty(string glyph, string title, string hint, bool retry)
     {
         CategoryShortcuts.Visibility = Visibility.Collapsed;
-        LoadMoreButton.Visibility = Visibility.Collapsed;
+        PageBar.Visibility = Visibility.Collapsed;
         EmptyPanel.Glyph = glyph;
         EmptyPanel.Title = title;
         EmptyPanel.Hint = hint;
@@ -769,7 +892,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.ForProject(project, current));
             ResultCount.Text = $"正在安装 {project.Title}…";
             var result = plan is not null
-                ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind, plan.Confirmation, taskId: task.Id)
+                ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind,
+                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies)
                 : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind, taskId: task.Id);
             if (result.Ok)
             {
@@ -860,6 +984,12 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     private void SetHoverItem(ListViewItem? item)
     {
         if (ReferenceEquals(item, _hoverItem)) return;
+        if (item is null)
+        {
+            // 指针不在任何行上：把可能残留在回收容器上的悬停底色一并清掉。
+            for (var i = 0; i < _items.Count; i++)
+                if (ResultsList.ContainerFromIndex(i) is ListViewItem stale) stale.Background = null;
+        }
         if (_hoverItem is not null) _hoverItem.Background = null;
         _hoverItem = item;
         if (_hoverItem is not null && Resources.TryGetValue("RowHoverBrush", out var value) && value is Brush brush)

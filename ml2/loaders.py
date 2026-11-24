@@ -167,6 +167,17 @@ def _run_installer(jar: Path, mc_dir: Path, java_exe: str, on_log, tail: list[st
 
 def _run_installer_once(jar: Path, mc_dir: Path, java_exe: str, on_log, mirror: str | None) -> int:
     flags = 0x08000000 if os.name == "nt" else 0
+    # Forge/NeoForge 安装器会先检查目标目录里的 launcher_profiles.json，缺了就直接
+    # "There is no minecraft launcher profile ... you need to run the launcher first!"
+    # 退出码 1。我们装到临时 stage 目录，本来就没有这个文件，所以先补一个最小的。
+    profile = mc_dir / "launcher_profiles.json"
+    if not profile.is_file():
+        try:
+            mc_dir.mkdir(parents=True, exist_ok=True)
+            profile.write_text('{"profiles":{},"settings":{"language":"zh_CN"},"version":3}',
+                               encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            on_log(f"[提示] 写 launcher_profiles.json 失败（{exc}），安装器可能拒绝安装")
     cmd = [java_exe, "-jar", str(jar), "--installClient", str(mc_dir)]
     if mirror:
         cmd += ["--mirror", mirror]

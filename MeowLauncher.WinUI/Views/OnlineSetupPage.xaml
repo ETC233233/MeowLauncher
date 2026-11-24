@@ -9,7 +9,6 @@
       样式全部写在本页，不依赖别处的页面级资源。
     -->
     <Page.Resources>
-        <SolidColorBrush x:Key="SetupGreenBrush" Color="#FF2FA35A" />
         <Style x:Key="SetupPillStyle" TargetType="Button">
             <Setter Property="Height" Value="36" />
             <Setter Property="Padding" Value="20,0" />

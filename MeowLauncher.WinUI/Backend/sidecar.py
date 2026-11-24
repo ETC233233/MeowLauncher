@@ -25,6 +25,8 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
+import urllib.parse
+import urllib.request
 from urllib.error import HTTPError, URLError
 
 _EMIT_LOCK = threading.Lock()
@@ -4645,8 +4647,53 @@ def _install_online_pack(source: str, project_id: str, file_id: str = "", on_log
     return result
 
 
+def _dep_card(item: dict, curseforge: bool, key: str | None, net) -> dict:
+    """前置卡片：标题 / 作者 / 简介 / 图标 / 大小，供前端列表和小窗预览用。"""
+    if curseforge:
+        name = str(item.get("fileName") or "")
+        mod_id = int(item.get("modId") or 0)
+        try:
+            info = net.cf_mod(mod_id, key=key) or {}
+        except Exception:
+            info = {}
+        authors = info.get("authors") or []
+        logo = (info.get("logo") or {}).get("thumbnailUrl") or ""
+        return {
+            "name": name,
+            "title": str(info.get("name") or name.rsplit(".", 1)[0]),
+            "author": str((authors[0] or {}).get("name") or "") if authors else "",
+            "summary": str(info.get("summary") or ""),
+            "icon": str(logo),
+            "source": "CurseForge",
+            "downloads": int(info.get("downloadCount") or 0),
+            "size": int(item.get("fileLength") or 0),
+            "url": f"https://www.curseforge.com/projects/{mod_id}" if mod_id else "",
+        }
+    pid = str(item.get("project_id") or "")
+    files = sorted(item.get("files") or [],
+                   key=lambda f: (not f.get("primary"), f.get("filename") or ""))
+    name = str(files[0].get("filename") or "") if files else ""
+    size = int(files[0].get("size") or 0) if files else 0
+    try:
+        info = net.modrinth_project(pid) or {}
+    except Exception:
+        info = {}
+    return {
+        "name": name,
+        "title": str(info.get("title") or name.rsplit(".", 1)[0]),
+        "author": "",
+        "summary": str(info.get("description") or ""),
+        "icon": str(info.get("icon_url") or ""),
+        "source": "Modrinth",
+        "downloads": int(info.get("downloads") or 0),
+        "size": size,
+        "url": f"https://modrinth.com/project/{pid}" if pid else "",
+    }
+
+
 def _install_online_mod(source: str, project_id: str, file_id: str, context,
-                        *, plan_only: bool, confirmation: str) -> dict:
+                        *, plan_only: bool, confirmation: str,
+                        skip_deps: tuple[str, ...] = ()) -> dict:
     st, net, mc, target, base, mc_version, loader = context
     dest = _online_dest("mod", net, mc, base, target)
     curseforge = source == "curseforge"
@@ -4727,14 +4774,20 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
         return item
 
     main_file = visit(project_id, file_id, main=True)
+    skip = {str(name).strip().casefold() for name in skip_deps if str(name).strip()}
+    if skip:
+        dependencies = [item for item in dependencies if filename(item).casefold() not in skip]
     names = [filename(item) for item in dependencies]
     main_name = filename(main_file)
     transaction = [source, str(dest.resolve()), target, project_id,
                    [(str(item.get("id") or ""), filename(item)) for item in [*dependencies, main_file]]]
     plan = hashlib.sha256(json.dumps(transaction).encode("utf-8")).hexdigest()
     if plan_only:
+        cards = [_dep_card(item, curseforge, key, net) for item in dependencies]
+        for card, item in zip(cards, dependencies):
+            card["installed"] = (dest / filename(item)).is_file()
         return {"ok": True, "fileId": str(main_file.get("id") or ""),
-                "dependencies": names, "confirmation": plan}
+                "dependencies": names, "dependencyCards": cards, "confirmation": plan}
     if (confirmation or names) and confirmation != plan:
         raise RuntimeError("安装内容有变化，请重新点安装并确认前置。")
     if len(set(name.casefold() for name in [*names, main_name])) != len(names) + 1:
@@ -4765,7 +4818,8 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
 
 
 def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod",
-                   *, plan_only: bool = False, confirmation: str = "", on_log=None) -> dict:
+                   *, plan_only: bool = False, confirmation: str = "",
+                   skip_deps: tuple[str, ...] = (), on_log=None) -> dict:
     """安装在线资源：mod / 资源包 / 光影 / 数据包 / 整合包，按类型落到对应目录。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4776,7 +4830,8 @@ def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod
         raise RuntimeError("没有指定项目。")
     if kind == "mod":
         return _install_online_mod(source, project_id, "", _online_context(vid),
-                                   plan_only=plan_only, confirmation=confirmation)
+                                   plan_only=plan_only, confirmation=confirmation,
+                                   skip_deps=skip_deps)
 
     if kind == "modpack":
         return _install_online_pack(source, project_id, on_log=on_log)
@@ -4911,7 +4966,8 @@ def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod")
 
 
 def install_online_file(source: str, project_id: str, file_id: str, vid: str = "", kind: str = "mod",
-                        *, plan_only: bool = False, confirmation: str = "", on_log=None) -> dict:
+                        *, plan_only: bool = False, confirmation: str = "",
+                        skip_deps: tuple[str, ...] = (), on_log=None) -> dict:
     """安装用户从 online_files 中选中的具体文件。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4923,7 +4979,8 @@ def install_online_file(source: str, project_id: str, file_id: str, vid: str = "
         raise RuntimeError("没有指定项目或文件。")
     if kind == "mod":
         return _install_online_mod(source, project_id, file_id, _online_context(vid),
-                                   plan_only=plan_only, confirmation=confirmation)
+                                   plan_only=plan_only, confirmation=confirmation,
+                                   skip_deps=skip_deps)
     if kind == "modpack":
         return _install_online_pack(source, project_id, file_id, on_log=on_log)
 
@@ -5349,6 +5406,193 @@ def _exception_code(exc: Exception) -> str:
     return ""
 
 
+_WIKI_UA = "MeowLauncher/1.0 (WinUI sidecar; +https://github.com/ETC233233/MeowLauncher)"
+_WIKI_KEYS = ("新内容", "更改", "修复")
+
+
+_LINK_TPL = ("blocklink", "itemlink", "entitylink", "biomelink", "effectlink",
+             "enchantmentlink", "blockSprite", "itemSprite", "slot")
+
+
+def _link_template(match: "re.Match[str]") -> str:
+    """{{BlockLink|Poplar Log|杨木}} → 杨木：显示名优先，取最后一个位置参数。"""
+    body = (match.group(1) or "").strip()
+    if not body:
+        return ""
+    parts = [p.strip() for p in body.split("|")]
+    if parts[0].strip().lower() not in _LINK_TPL:
+        return ""
+    values = [p for p in parts[1:] if p and "=" not in p]
+    return values[-1] if values else ""
+
+
+def _strip_wiki(text: str) -> str:
+    """wikitext 行内标记 → 纯文本：模板、链接、引用、'''粗体''' 全剥掉。"""
+    s = text
+    s = re.sub(r"<ref[^>]*/>", "", s)
+    s = re.sub(r"<ref[^>]*>.*?</ref>", "", s, flags=re.S)
+    s = re.sub(r"\{\{([^{}]*)\}\}", _link_template, s)
+    for _ in range(3):
+        s = re.sub(r"\{\{[^{}]*\}\}", "", s)
+    s = re.sub(r"\[\[(?:[^\]|]*\|)?([^\]]+)\]\]", r"\1", s)
+    s = re.sub(r"\[https?://\S+\s+([^\]]+)\]", r"\1", s)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = s.replace("'''", "").replace("''", "")
+    s = s.replace("&nbsp;", " ")
+    s = re.sub(r"\s+", " ", s)
+    return s.strip(" \u3000·,，。;；")
+
+
+def _wiki_api(params: str) -> dict:
+    request = urllib.request.Request("https://zh.minecraft.wiki/api.php?" + params,
+                                     headers={"User-Agent": _WIKI_UA})
+    with urllib.request.urlopen(request, timeout=12) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _wiki_file_image(title: str) -> str:
+    """File:26.3.jpg 这类文件页的原图地址；没有这个文件就返回空串。"""
+    try:
+        payload = _wiki_api("action=query&titles=" + urllib.parse.quote(title)
+                            + "&prop=imageinfo&iiprop=url&format=json&variant=zh-cn")
+    except Exception:
+        return ""
+    for page in (payload.get("query", {}).get("pages") or {}).values():
+        for info in page.get("imageinfo") or []:
+            if info.get("url"):
+                return info["url"]
+    return ""
+
+
+def _wiki_page_image(vid: str) -> str:
+    try:
+        payload = _wiki_api("action=query&titles=" + urllib.parse.quote("Java版" + vid)
+                            + "&prop=pageimages&piprop=original&format=json&variant=zh-cn")
+    except Exception:
+        return ""
+    for page in (payload.get("query", {}).get("pages") or {}).values():
+        source = ((page.get("original") or {}).get("source")
+                  or (page.get("thumbnail") or {}).get("source") or "")
+        if source:
+            return source
+    return ""
+
+
+def _wiki_cover(vid: str, cache_dir: Path) -> str:
+    """版本页顶部的宣传图（优先维基 File:<版本>.jpg），下到本地缓存后返回绝对路径；取不到返回空串。"""
+    stem = re.sub(r"[^0-9A-Za-z._-]", "_", vid)
+    target = cache_dir / ("cover-" + stem + ".jpg")
+    if target.exists() and target.stat().st_size > 8192:
+        return str(target.resolve())
+    try:
+        source = _wiki_file_image("File:" + vid + ".jpg") or _wiki_page_image(vid)
+        if not source:
+            return ""
+        image = urllib.request.Request(source, headers={"User-Agent": _WIKI_UA})
+        with urllib.request.urlopen(image, timeout=20) as response:
+            data = response.read()
+        if len(data) < 4096:
+            return ""
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        return str(target.resolve())
+    except Exception:
+        return ""
+
+
+def version_notes(vid: str, refresh: bool = False) -> dict:
+    """从中文 Minecraft Wiki 抓某个版本的更新日志条目（新内容/更改/修复）。
+
+    结果缓存到 %APPDATA%/MeowLauncher/version-notes/<ver>.json，3 天内不再联网；
+    联网失败时回退旧缓存并标 stale，两边都没有才报错。
+    """
+    vid = (vid or "").strip()
+    if not vid:
+        return {"ok": False, "error": "缺少版本号"}
+    cache_dir = Path(os.environ.get("APPDATA") or str(Path.home())) / "MeowLauncher" / "version-notes"
+    cache = cache_dir / (re.sub(r"[^0-9A-Za-z._-]", "_", vid) + ".json")
+    if cache.exists() and not refresh:
+        try:
+            if time.time() - cache.stat().st_mtime < 3 * 86400:
+                cached = json.loads(cache.read_text(encoding="utf-8"))
+                cached["cached"] = True
+                if not cached.get("cover"):
+                    cached["cover"] = _wiki_cover(vid, cache_dir)
+                return cached
+        except Exception:
+            pass
+
+    try:
+        url = ("https://zh.minecraft.wiki/api.php?action=parse&page="
+               + urllib.parse.quote("Java版" + vid)
+               + "&prop=wikitext&format=json&variant=zh-cn")
+        request = urllib.request.Request(url, headers={"User-Agent": _WIKI_UA})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        raw = payload["parse"]["wikitext"]["*"]
+    except Exception as exc:
+        if cache.exists():
+            try:
+                stale = json.loads(cache.read_text(encoding="utf-8"))
+                stale["stale"] = True
+                return stale
+            except Exception:
+                pass
+        return {"ok": False, "error": "取更新日志失败：" + type(exc).__name__}
+
+    sections: list[dict] = []
+    current: dict | None = None
+    sub: dict | None = None
+    entry: dict | None = None
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if re.match(r"^==\s*[^=]", stripped):
+            title = _strip_wiki(stripped.strip("=").strip())
+            current = {"title": title, "subs": [], "items": []} if title in _WIKI_KEYS else None
+            sub = entry = None
+            if current is not None:
+                sections.append(current)
+            continue
+        if current is None:
+            continue
+        if stripped.startswith("==="):
+            name = _strip_wiki(stripped.strip("=").strip())
+            sub = {"name": name, "entries": []}
+            current["subs"].append(sub)
+            entry = None
+            continue
+        if stripped.startswith("'''") and not stripped.startswith("*"):
+            name = _strip_wiki(stripped).strip(" 　·")
+            if len(name) < 1:
+                entry = None
+                continue
+            entry = {"name": name[:40], "points": []}
+            if sub is not None and len(sub["entries"]) < 16:
+                sub["entries"].append(entry)
+            elif len(current["items"]) < 40:
+                current["items"].append(name[:60])
+            continue
+        if stripped.startswith("*"):
+            point = _strip_wiki(stripped.lstrip("*").strip()).strip(" 　·")
+            if entry is None or len(point) < 2 or len(entry["points"]) >= 5:
+                continue
+            entry["points"].append(point[:140])
+            continue
+        entry = None
+
+    sections = [s for s in sections if s["subs"] or s["items"]]
+    for s in sections:
+        s["subs"] = [x for x in s["subs"] if x["entries"]]
+    result = {"ok": True, "version": vid, "sections": sections,
+              "cover": _wiki_cover(vid, cache_dir)}
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return result
+
+
 def main(argv: list[str]) -> int:
     _install_isolation_resolver()
     failure_stage = ""
@@ -5371,6 +5615,21 @@ def main(argv: list[str]) -> int:
         return result
 
     try:
+        if "--version-cover" in argv:
+            ci = argv.index("--version-cover")
+            cover_vid = argv[ci + 1] if ci + 1 < len(argv) else ""
+            cover_dir = (Path(os.environ.get("APPDATA") or str(Path.home()))
+                         / "MeowLauncher" / "version-notes")
+            cover_path = _wiki_cover(cover_vid, cover_dir) if cover_vid else ""
+            print(json.dumps({"ok": bool(cover_path), "version": cover_vid, "cover": cover_path},
+                             ensure_ascii=False, separators=(",", ":")))
+            return 0
+        if "--version-notes" in argv:
+            vi = argv.index("--version-notes")
+            notes_vid = argv[vi + 1] if vi + 1 < len(argv) else ""
+            print(json.dumps(version_notes(notes_vid, refresh="--refresh" in argv),
+                             ensure_ascii=False, separators=(",", ":")))
+            return 0
         if "--snapshot" in argv:
             with_status = "--with-status" in argv
             print(json.dumps(make_snapshot(with_status=with_status), ensure_ascii=False,
@@ -5663,10 +5922,14 @@ def main(argv: list[str]) -> int:
             kind = argv[idx + 5] if idx + 5 < len(argv) else "mod"
             confirmation = next((arg.partition("=")[2] for arg in argv
                                  if arg.startswith("--confirmed-dependencies=")), "")
+            skip = tuple(part.strip() for part in next(
+                (arg.partition("=")[2] for arg in argv if arg.startswith("--skip-dependencies=")), ""
+            ).split(",") if part.strip())
             track_phase("安装在线资源")
             print(json.dumps(action_result(install_online_file(source, project_id, file_id, vid, kind,
                                                  plan_only="--plan-online-mod" in argv,
-                                                 confirmation=confirmation, on_log=emit_import)),
+                                                 confirmation=confirmation, skip_deps=skip,
+                                                 on_log=emit_import)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--install-online" in argv:
@@ -5675,9 +5938,13 @@ def main(argv: list[str]) -> int:
             project_id = argv[idx + 2] if idx + 2 < len(argv) else ""
             vid = argv[idx + 3] if idx + 3 < len(argv) else ""
             kind = argv[idx + 4] if idx + 4 < len(argv) else "mod"
+            skip = tuple(part.strip() for part in next(
+                (arg.partition("=")[2] for arg in argv if arg.startswith("--skip-dependencies=")), ""
+            ).split(",") if part.strip())
             track_phase("安装在线资源")
             print(json.dumps(action_result(install_online(source, project_id, vid, kind,
-                                           plan_only="--plan-online-mod" in argv, on_log=emit_import)),
+                                           plan_only="--plan-online-mod" in argv,
+                                           skip_deps=skip, on_log=emit_import)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--loader-versions" in argv:

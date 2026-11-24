@@ -16,7 +16,6 @@ public static class SettingsCatalog
         new("opacity", "appearance", "界面不透明度", "50–100%", "", "不透明度 透明度 透明"),
         new("fontscale", "appearance", "字体缩放", "85–125%", "", "字体 字号 缩放 大小"),
         new("network", "network", "资源搜索源", "Modrinth / CurseForge", "", "下载源 资源 搜索源 modrinth curseforge"),
-        new("mcim", "network", "在线资源镜像优先级", "MCIM 优先 / 官方优先", "", "mcim 镜像 资源 加速 modrinth curseforge"),
         new("afterlaunch", "java", "启动游戏后", "留在前台 / 最小化到任务栏", "", "启动后 启动游戏 最小化 收起来 minimize"),
         new("proxy", "network", "网络代理", "跟随系统 / 不使用 / 自定义", "", "代理 proxy 网络 翻墙 socks http 端口"),
         new("mirror", "network", "下载镜像", "留空使用官方", "", "镜像 下载 mirror 加速 国内 bmclapi"),

@@ -68,6 +68,29 @@ public static class ThemeColorService
         MutateBrush("AppAccentBrush", color);
         MutateBrush("AppAccentSoftBrush", WithAlpha(color, dark ? (byte)0x25 : (byte)0x1F));
         MutateBrush("AppAccentTextBrush", ink);
+        // 品牌色也跟着主题色走：选中行/分类胶囊/「安装」按钮都用它，换主题色时要一起变。
+        MutateBrush("AppBrandBrush", color);
+        MutateBrush("AppBrandTextBrush", ink);
+        MutateBrush("AppBrandSoftBrush", WithAlpha(color, dark ? (byte)0x2E : (byte)0x24));
+
+        // 其余散落在页面/主题字典里的「品牌绿」也一并跟着走（账户页、联机页、在线设置页、首页小组件底色、开关与分段选中态）。
+        var soft = WithAlpha(color, dark ? (byte)0x25 : (byte)0x1F);
+        MutateBrushDeep("AccountGreenBrush", color);
+        MutateBrushDeep("AccountGreenSoftBrush", soft);
+        MutateBrushDeep("SetupGreenBrush", color);
+        MutateBrushDeep("RoomGreenBrush", color);
+        MutateBrushDeep("RoomGreenSoftBrush", soft);
+        MutateBrushDeep("WidgetTintBrush", WithAlpha(color, dark ? (byte)0x2E : (byte)0x24));
+        MutateBrushDeep("TintRecentBrush", color);
+        MutateBrushDeep("TintRecentSoftBrush", WithAlpha(color, dark ? (byte)0x2E : (byte)0x24));
+        MutateBrushDeep("TintRecentStrokeBrush", WithAlpha(color, (byte)0x66));
+        MutateBrushDeep("SegmentSelectedBrush", WithAlpha(color, dark ? (byte)0x29 : (byte)0x22));
+        MutateBrushDeep("ToggleSwitchFillOn", color);
+        MutateBrushDeep("ToggleSwitchFillOnPointerOver", Shade(color, 1.08));
+        MutateBrushDeep("ToggleSwitchFillOnPressed", Shade(color, 0.85));
+        MutateBrushDeep("ToggleSwitchStrokeOn", color);
+        MutateBrushDeep("ToggleSwitchStrokeOnPointerOver", Shade(color, 1.08));
+        MutateBrushDeep("ToggleSwitchStrokeOnPressed", Shade(color, 0.85));
         // 启动按钮固定品牌绿：早期跟随壁纸取色，壁纸偏红时「启动」会变成像删除的危险色。
         var brand = Color.FromArgb(255, 0x2F, 0xA3, 0x5A);
         MutateStops("AppLaunchBrush", brand, Shade(brand, 0.84));
@@ -182,6 +205,29 @@ public static class ThemeColorService
     {
         if (Find(key) is SolidColorBrush brush) brush.Color = color;
         else Application.Current.Resources[key] = new SolidColorBrush(color);
+    }
+
+    /// <summary>同 MutateBrush，但连 ThemeDictionaries 里的同名画刷一起改（深/浅色各一份，切主题不会跳回旧色）。</summary>
+    private static void MutateBrushDeep(string key, Color color)
+    {
+        var hits = 0;
+        foreach (var dictionary in AllDictionaries(Application.Current.Resources))
+        {
+            if (!dictionary.TryGetValue(key, out var value) || value is not SolidColorBrush brush) continue;
+            brush.Color = color;
+            hits++;
+        }
+        if (hits == 0 && Find(key) is SolidColorBrush direct) direct.Color = color;
+    }
+
+    private static IEnumerable<ResourceDictionary> AllDictionaries(ResourceDictionary root)
+    {
+        yield return root;
+        foreach (var merged in root.MergedDictionaries)
+            foreach (var nested in AllDictionaries(merged)) yield return nested;
+        foreach (var theme in root.ThemeDictionaries.Values)
+            if (theme is ResourceDictionary dictionary)
+                foreach (var nested in AllDictionaries(dictionary)) yield return nested;
     }
 
     private static void MutateStops(string key, params Color[] colors)
