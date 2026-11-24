@@ -1663,6 +1663,8 @@ public sealed partial class BackendClient
 
         var stderr = process.StandardError.ReadToEndAsync();
         var stdoutBuilder = new StringBuilder();
+        var logBuilder = IsLoggedOperation(arguments) ? new StringBuilder() : null;
+        var logClock = System.Diagnostics.Stopwatch.StartNew();
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(taskCancellation);
         cts.CancelAfter(timeout);
@@ -1674,6 +1676,7 @@ public sealed partial class BackendClient
                 var stdout = process.StandardOutput.ReadToEndAsync();
                 await process.WaitForExitAsync(cts.Token);
                 stdoutBuilder.Append(await stdout);
+                logBuilder?.Append(stdoutBuilder);
             }
             else
             {
@@ -1684,6 +1687,7 @@ public sealed partial class BackendClient
                     if (line is null) break;
                     var trimmed = line.Trim();
                     if (trimmed.Length == 0) continue;
+                    logBuilder?.AppendLine(trimmed);
                     var stage = TryReadStage(trimmed);
                     if (stage is not null)
                     {
@@ -1699,12 +1703,17 @@ public sealed partial class BackendClient
         {
             try { process.Kill(entireProcessTree: true); } catch { }
             UnregisterOperation(operationId);
+            if (logBuilder is not null)
+                WriteOperationLog(arguments, gameDir, logBuilder.ToString().Trim(),
+                    taskCancellation.IsCancellationRequested ? "已取消" : "超时", -1, logClock.Elapsed);
             return new RunResult(false, "", taskCancellation.IsCancellationRequested ? "本次操作已取消。" : "后台引擎响应超时。");
         }
 
         var output = stdoutBuilder.ToString().Trim();
         var error = (await stderr).Trim();
         UnregisterOperation(operationId);
+        if (logBuilder is not null)
+            WriteOperationLog(arguments, gameDir, logBuilder.ToString().Trim(), error, process.ExitCode, logClock.Elapsed);
 
         if (process.ExitCode != 0)
         {
@@ -1712,6 +1721,41 @@ public sealed partial class BackendClient
         }
 
         return new RunResult(true, output, error);
+    }
+
+    /// <summary>下载/安装类操作用日志留档：sidecar 的输出只进内存，任务结束后查不到走的哪个源。</summary>
+    private static bool IsLoggedOperation(string arguments)
+    {
+        var op = arguments.TrimStart().Split(' ', 2)[0];
+        return op is "--install" or "--install-version" or "--repair-version" or "--verify-version"
+            or "--update-mod" or "--add-loader" or "--mod-install";
+    }
+
+    private static void WriteOperationLog(string arguments, string gameDir, string output, string error, int exitCode, TimeSpan elapsed)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeowLauncher", "logs");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, $"install-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+            var sb = new StringBuilder();
+            sb.AppendLine($"# {DateTime.Now:yyyy-MM-dd HH:mm:ss}  {arguments}");
+            sb.AppendLine($"# dir: {(string.IsNullOrWhiteSpace(gameDir) ? "(默认)" : gameDir)}");
+            sb.AppendLine($"# exit: {exitCode}");
+            sb.AppendLine($"# elapsed: {elapsed.TotalSeconds:F2}s");
+            sb.AppendLine(output);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                sb.AppendLine("--- stderr ---");
+                sb.AppendLine(error);
+            }
+            File.WriteAllText(path, sb.ToString());
+        }
+        catch
+        {
+            // 日志写失败不能影响安装本身
+        }
     }
 
     /// <summary>sidecar 的异常走 stdout 的 {"ok":false,"message":...}，stderr 常为空；不能只报退出码。</summary>

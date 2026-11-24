@@ -10,12 +10,20 @@ from pathlib import Path, PurePosixPath
 _verified = {}
 
 
-def valid_file(path: Path, sha1: str = "", size: int = 0) -> bool:
+def valid_file(path: Path, sha1: str = "", size: int = 0, quick: bool = False) -> bool:
+    """校验文件。quick=True 时只要大小对得上就认为存在（安装前的盘点用）。
+
+    全量读 sha1 在 5000 个资源上要几秒到十几秒，安装/补全时这个开销纯属白等；
+    损坏检测交给 --verify-version（repair/health 走默认 quick=False）。
+    本次真正下载的文件仍然逐字节校验（下载校验在 net._download.verify 里）。
+    """
     path = Path(path)
     try:
         stat = path.stat()
         if not path.is_file() or (size > 0 and stat.st_size != size):
             return False
+        if quick and size > 0:
+            return True
         if sha1:
             key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, sha1.lower())
             if key not in _verified:

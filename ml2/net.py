@@ -35,6 +35,14 @@ BMCLAPI = "https://bmclapi2.bangbang93.com"
 # 资源文件（assets）专用加速源：内容按 hash 寻址、可长期缓存，走境内边缘节点比 BMCLAPI 的
 # 海外 302 快得多；调用方都是「镜像失败再回官方」，所以优先它不会让安装变脆。
 ASSET_CDN = "https://assets.cdn.sadcgame.top"
+# 备用加速源（腾讯 EdgeOne）。实测单文件 TTFB 比主源还快，但 5149 个对象并发抓取时
+# 全量安装 102~104 秒，明显慢于主源的 37 秒，所以只在主源探测不通时兜底。
+ASSET_CDN_ALT = "https://assets.cdn2.sadcgame.top"
+
+
+def _is_asset_cdn(url: str) -> bool:
+    """判断地址是不是「自家加速源」（主源或备用源）。"""
+    return bool(url) and (url.startswith(ASSET_CDN) or url.startswith(ASSET_CDN_ALT))
 # 压测旁路：MEOW_ASSET_SRC=official 时不走自建 CDN（用于对比不同网络下官方源与 CDN 谁快）。
 _ASSET_SRC_OFFICIAL = os.environ.get("MEOW_ASSET_SRC", "").strip().lower() == "official"
 _MIRROR_RULES = (
@@ -464,7 +472,7 @@ def _load_pref() -> bool:
         ts = float(raw.get("ts", 0))
         if time.time() - ts > _PREF_TTL:
             return False
-        got = {k: v for k, v in raw.items() if k in _SRC_PREF_ROLES and v in ("official", "mirror")}
+        got = {k: v for k, v in raw.items() if k in _SRC_PREF_ROLES and v in ("official", "mirror", "primary", "backup")}
         if not got:
             return False
         _SRC_PREF = got
@@ -527,6 +535,39 @@ def _probe_pair(official: str, mirror: str) -> str:
     return _probe_many([("x", official, mirror)]).get("x", "official")
 
 
+def _probe_assets(official: str, primary: str, backup: str) -> str:
+    """三个候选（官方 / 主加速源 / 备用加速源）同时测速，返回角色名。
+
+    主源默认优先：官方要快 8% 以上才退回官方。备用源只在主源完全探测不到时启用
+    ——边速赢不代表并发批量抓取快（EO 单文件 90ms vs 105ms，全量安装却 104s vs 37s）。
+    全部探测失败时退回主源。
+    """
+    rates: dict[str, float] = {}
+    lock = threading.Lock()
+
+    def run(name: str, u: str) -> None:
+        try:
+            r = _probe_rate(u)
+        except Exception:
+            r = 0.0
+        with lock:
+            rates[name] = r
+
+    ts = [threading.Thread(target=run, args=(n, u), daemon=True)
+          for n, u in (("official", official), ("primary", primary), ("backup", backup))]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=2.2)
+    o, p, b = rates.get("official", 0.0), rates.get("primary", 0.0), rates.get("backup", 0.0)
+    best = "primary"
+    if p <= 0 and b > 0:
+        best = "backup"
+    elif p > 0 and o > p * 1.08:
+        best = "official"
+    return best
+
+
 def auto_select_sources(force: bool = False) -> None:
     """给三种资源各选一个源：可能先问官方，也可能先问镜像。"""
     if not force and _load_pref():
@@ -576,9 +617,12 @@ def _mirrored(url: str):
             # 固定走自建 CDN，不再实测：用户手动选了这条渠道。
             return ASSET_CDN + tail
         if mode == "auto":
-            # 智能分配：启动时没测过（要等拿到 assetIndex 才有样本），默认走自建 CDN。
-            if _SRC_PREF.get("assets") == "official":
+            # 智能分配：启动时没测过（要等拿到 assetIndex 才有样本），默认走主加速源。
+            _pick = _SRC_PREF.get("assets")
+            if _pick == "official":
                 return None
+            if _pick == "backup":
+                return ASSET_CDN_ALT + tail
             return ASSET_CDN + tail
         # 用户选了具体镜像：资源文件也跟着走同一个镜像，保证渠道是「纯」的。
         base = _mirror_base()
@@ -811,7 +855,7 @@ def _stream_to(url: str, dest: Path, on_progress: Callable[[int, int], None] | N
     # 映射到 /v1/packages/... 后只有 7 KB/s，583 KB 要 14~126 秒。所以非自家 CDN 的
     # 镜像先赛一手谁先吐数据（最多多花 3 秒），不再盲信镜像。
     # 自家 CDN 按 hash 长缓存、边缘在境内，保持直接优先。
-    if alt and not alt.startswith(ASSET_CDN):
+    if alt and not _is_asset_cdn(alt):
         try:
             best = _race_source([url, alt], timeout=3.0)
             spare = alt if best == url else url
@@ -1102,7 +1146,8 @@ def _download_big(urls: list[str], dest: Path, size: int,
 
 
 def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | None = None, *,
-              sha1: str = "", size: int = 0, force_segments: bool = False):
+              sha1: str = "", size: int = 0, force_segments: bool = False,
+              official_only: bool = False):
     # 校验放在落盘前，镜像文件损坏时可直接回退，不会先覆盖原文件。
     def verify(path: Path) -> None:
         if size > 0 and path.stat().st_size != size:
@@ -1115,6 +1160,10 @@ def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | No
     parts = urllib.parse.urlsplit(url)
     proxy = None if urllib.request.proxy_bypass(parts.netloc) else urllib.request.getproxies().get(parts.scheme)
     ver = verify if sha1 or size > 0 else None
+    if official_only:
+        # 资源索引这类「必须和官方一致」的清单：BMCLAPI 的索引内容可能落后（实测 26.3 的
+        # 34.json 有 86 个语言文件 hash 与官方不同），而且它压根没有 /assets/<id>.json 路径。
+        return _stream_to_raw(url, dest, on_progress, proxy, verify=ver)
     threshold = 1024 * 1024 if force_segments else SEGMENT_MIN
     if resource_mirror := mcim.file_mirror(url):
         if proxy is None and size >= threshold:
@@ -1126,7 +1175,7 @@ def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | No
         # 只有自家 CDN（assets）放前面：它按 hash 长缓存、边缘节点在境内，
         # 大文件分段实测不比官方慢，官方连续下载后还会被限速。
         # BMCLAPI 这类公共镜像反而要退到兜底——小文件 TTFB 1~2 秒还会 302 到境外节点。
-        if alt and alt.startswith(ASSET_CDN):
+        if alt and _is_asset_cdn(alt):
             cands = [alt, url]
         else:
             cands = [url] + ([alt] if alt and alt != url else [])
@@ -1152,7 +1201,10 @@ _CF_KEY_CACHE: dict[str, str] = {}
 # Meow-CFMI 的地址可用环境变量 MEOW_CFMI 覆盖，方便换部署。
 import os as _os
 MEOW_CFMI = (_os.environ.get("MEOW_CFMI") or "https://cf-api.sadcgame.top/v1").rstrip("/")
-CF_API_BASES = (mcim.BASE + "/curseforge/v1", MEOW_CFMI, mcim.CURSEFORGE_API)
+# 同一个代理挂一层腾讯 EdgeOne：实测搜索接口 1088ms → 128ms（命中缓存 89ms 首字节）。
+MEOW_CFMI_EO = (_os.environ.get("MEOW_CFMI_EO") or "https://cf-api.cdn2.sadcgame.top/v1").rstrip("/")
+MEOW_CFMI_ORDER = {"mcim": 0, "cfmi": 2, "official": 3}
+CF_API_BASES = (mcim.BASE + "/curseforge/v1", MEOW_CFMI_EO, MEOW_CFMI, mcim.CURSEFORGE_API)
 _CF_BASE_CACHE: dict[str, str] = {}
 _CF_PREF: dict[str, str | None] = {"src": None}
 
@@ -1202,7 +1254,7 @@ def _cf_bases() -> list[str]:
     """按可用性排序的 CurseForge API 根地址（缓存在进程内）。"""
     pref = _CF_PREF.get("src")
     if pref in ("mcim", "cfmi", "official"):
-        order = {"mcim": 0, "cfmi": 1, "official": 2}[pref]
+        order = MEOW_CFMI_ORDER[pref]
         head = CF_API_BASES[order]
         return [head] + [b for b in CF_API_BASES if b != head]
     cached = _CF_BASE_CACHE.get("base")
@@ -1897,7 +1949,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     if ai:
         idx_path = mc_dir / "assets" / "indexes" / f"{ai['id']}.json"
         try:
-            index_valid = valid_file(idx_path, str(ai.get("sha1") or ""), int(ai.get("size") or 0)) and isinstance(json.loads(idx_path.read_text(encoding="utf-8")).get("objects"), dict)
+            index_valid = valid_file(idx_path, str(ai.get("sha1") or ""), int(ai.get("size") or 0), quick=True) and isinstance(json.loads(idx_path.read_text(encoding="utf-8")).get("objects"), dict)
         except (OSError, ValueError, AttributeError):
             index_valid = False
         _index_ready = bool(index_valid)
@@ -1914,7 +1966,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     selected = _selected
     total = len(selected)
     jobs = [(art, dest) for _, art, dest, _ in selected
-            if not valid_file(dest, str(art.get("sha1") or ""), int(art.get("size") or 0))]
+            if not valid_file(dest, str(art.get("sha1") or ""), int(art.get("size") or 0), quick=True)]
 
     lib_bytes = sum(int(art.get("size") or 0) for art, _ in jobs)
     client = (version_json.get("downloads") or {}).get("client")
@@ -1990,7 +2042,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
             return
         report("client", 0, 1, {"name": "准备下载"})
         dest = vdir / f"{vid}.jar"
-        if not valid_file(dest, str(client.get("sha1") or ""), client_bytes):
+        if not valid_file(dest, str(client.get("sha1") or ""), client_bytes, quick=True):
             csize = int(client.get("size") or 0)
             fcb = meter.file_cb()
             tick = [0.0]
@@ -2004,7 +2056,14 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
                     report("client", 0, 1, f"{vid}.jar", done, tot or csize)
                     breport(1, done, tot or csize, f"{vid}.jar")
 
-            _download(client["url"], dest, client_cb, size=client_bytes, sha1=str(client.get("sha1") or ""))
+            try:
+                _download(client["url"], dest, client_cb, size=client_bytes, sha1=str(client.get("sha1") or ""))
+            except Exception:
+                # 2026-11-25 实测 piston-data 上的客户端 jar 会 404（blob does not exist），
+                # 换 BMCLAPI 直取同一个版本文件。它给的是同一份 jar，sha1 校验仍然生效。
+                log("[安装] 官方客户端 jar 下载失败，改走 BMCLAPI")
+                _download(f"{BMCLAPI}/version/{vid}/client", dest, client_cb,
+                          size=client_bytes, sha1=str(client.get("sha1") or ""))
         client_got[0] = client_bytes
         breport(1, client_bytes, client_bytes, complete=True)
 
@@ -2019,7 +2078,8 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
             log(f"[安装] 下载资源索引 {ai['id']}")
             _download(ai["url"], idx_path,
                       lambda d, t: report("index", d, t, f"indexes/{ai['id']}.json"),
-                      sha1=str(ai.get("sha1") or ""), size=int(ai.get("size") or 0))
+                      sha1=str(ai.get("sha1") or ""), size=int(ai.get("size") or 0),
+                      official_only=True)
             log(f"[安装] 资源索引 {ai['id']} 完成")
             _miss = assets_missing(mc_dir, ai["id"])
             log(f"[安装] 需要补 {len(_miss)} 个资源文件，开始统计大小")
@@ -2087,7 +2147,7 @@ def assets_missing(mc_dir: Path, index_id: str) -> list[dict]:
             raise RuntimeError("资源索引包含无效的对象哈希，请重新获取索引。")
         if h in hashes: continue
         hashes.add(h)
-        if not valid_file(root / h[:2] / h, h, int(info.get("size") or 0)):
+        if not valid_file(root / h[:2] / h, h, int(info.get("size") or 0), quick=True):
             missing.append({"name": name, "hash": h, "size": int(info.get("size") or 0)})
     return missing
 
@@ -2117,8 +2177,9 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
                 _sample = (_pool or missing)[0] if not _pool else min(
                     _pool, key=lambda _it: int(_it.get("size") or 0))
                 _h = _sample["hash"]
-                _SRC_PREF["assets"] = _probe_pair(f"{ASSET_BASE}/{_h[:2]}/{_h}",
-                                                  f"{ASSET_CDN}/{_h[:2]}/{_h}")
+                _SRC_PREF["assets"] = _probe_assets(f"{ASSET_BASE}/{_h[:2]}/{_h}",
+                                                    f"{ASSET_CDN}/{_h[:2]}/{_h}",
+                                                    f"{ASSET_CDN_ALT}/{_h[:2]}/{_h}")
                 _save_pref()
             except Exception:
                 pass
@@ -2137,7 +2198,7 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
     def present(item: dict) -> bool:
         dest = root / item["hash"][:2] / item["hash"]
         try:
-            return valid_file(dest, item["hash"], item["size"])
+            return valid_file(dest, item["hash"], item["size"], quick=True)
         except OSError:
             return False
 
