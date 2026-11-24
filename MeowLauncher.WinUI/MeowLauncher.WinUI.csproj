@@ -66,9 +66,9 @@
     <Content Include="..\ml2\**\*.py" Link="Backend\ml2\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="Backend\sidecar.py">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+  <Content Include="Backend\sidecar.py">
+    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+  </Content>
   </ItemGroup>
 
   <!-- 联机组件（联机模块 + RoomAgent + EasyTier）不再随启动器编译 / 分发：首次进入联机页时从云端下载（见 Services/OnlineComponent.cs）。

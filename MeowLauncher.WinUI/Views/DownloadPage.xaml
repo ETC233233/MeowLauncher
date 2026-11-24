@@ -58,11 +58,14 @@
             <TextBlock Grid.Column="2" Text="下载源" VerticalAlignment="Center"
                        FontSize="{StaticResource FontSizeCaption}"
                        Foreground="{ThemeResource AppText3Brush}" />
-            <ComboBox x:Name="SourceBox" Grid.Column="3" Width="132" Height="34" VerticalAlignment="Center"
+            <ComboBox x:Name="SourceBox" Grid.Column="3" Width="150" Height="34" VerticalAlignment="Center"
                       AutomationProperties.Name="下载源"
                       SelectionChanged="SourceBox_SelectionChanged">
-                <ComboBoxItem Content="官方" Tag="" />
+                <ComboBoxItem Content="智能分配" Tag="auto" />
+                <ComboBoxItem Content="Mojang 官方" Tag="official" />
                 <ComboBoxItem Content="BMCLAPI" Tag="bmclapi" />
+                <ComboBoxItem Content="MeowAPI（自建）" Tag="meow" />
+                <ComboBoxItem Content="自定义镜像" Tag="custom" />
             </ComboBox>
             <Button x:Name="RefreshButton" Grid.Column="4" Width="34" Height="34" Padding="0"
                     Style="{StaticResource QuietButtonStyle}" CornerRadius="6"

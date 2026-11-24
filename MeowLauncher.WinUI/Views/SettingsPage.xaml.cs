@@ -199,7 +199,6 @@ public sealed partial class SettingsPage : Page
             "mcim" => ResourceMirrorBox,
             "proxy" => ProxyModeBox,
             "afterlaunch" => AfterLaunchBox,
-            "mirror" => GameDownloadSourceBox,
             "threads" => DownloadThreadsBox,
             "memory" => MemoryBox,
             "javamanage" => ManageJavaButton,
@@ -596,13 +595,7 @@ public sealed partial class SettingsPage : Page
         DownloadSourceBox.SelectedIndex = OnlinePage.ResourceSourceIndex(_savedResourceSource);
         LoadProxyFromPreferences();
         LoadAfterLaunch();
-        var sourceIndex = DownloadPage.GameMirrorIndex(general.Mirror);
         _savedGameMirror = general.Mirror;
-        MirrorBox.Text = sourceIndex == 2 ? general.Mirror : "";
-        GameDownloadSourceBox.SelectedIndex = sourceIndex;
-        GameMirrorRow.Visibility = sourceIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
-        GameMirrorNotice.Visibility = DownloadPage.IsGitHubMirror(general.Mirror)
-            ? Visibility.Visible : Visibility.Collapsed;
         _cfApiKey = general.CfApiKey ?? "";
         CfKeyBox.Password = _cfApiKey;
         DownloadThreadsBox.Value = Math.Clamp(general.DlThreads, 1, 32);
@@ -1129,16 +1122,6 @@ public sealed partial class SettingsPage : Page
         if (McimClient.SetPreferOfficial(ResourceMirrorBox.SelectedIndex == 1)) MarkSaved();
     }
 
-    private void GameDownloadSource_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppress || !_ready) return;
-        GameMirrorRow.Visibility = GameDownloadSourceBox.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
-        GameMirrorNotice.Visibility = Visibility.Collapsed;
-        NetworkEdited();
-    }
-
-    private void GameMirror_Changed(object sender, TextChangedEventArgs e) => NetworkEdited();
-
     private void NetworkThreads_Changed(NumberBox sender, NumberBoxValueChangedEventArgs e) => NetworkEdited();
 
     private void DownloadParallel_Changed(NumberBox sender, NumberBoxValueChangedEventArgs e)
@@ -1239,18 +1222,7 @@ public sealed partial class SettingsPage : Page
         var selectedIndex = OnlinePage.ResourceSourceIndex(source);
         if (savedIndex == selectedIndex) source = _savedResourceSource;
         var threads = double.IsNaN(DownloadThreadsBox.Value) ? 16 : (int)Math.Round(DownloadThreadsBox.Value);
-        var mirror = GameDownloadSourceBox.SelectedIndex switch
-        {
-            1 => DownloadPage.BmclApiUrl,
-            2 => MirrorBox.Text.Trim(),
-            _ => "",
-        };
-        var invalidCustomMirror = GameDownloadSourceBox.SelectedIndex == 2
-            && (!Uri.TryCreate(mirror, UriKind.Absolute, out var address)
-                || address.Scheme is not ("http" or "https")
-                || string.IsNullOrEmpty(address.Host)
-                || DownloadPage.IsGitHubMirror(mirror));
-        if (invalidCustomMirror) mirror = _savedGameMirror;
+        var mirror = _savedGameMirror;
         _cfApiKey = CfKeyBox.Password.Trim();
         var result = await App.Backend.SetGeneralSettingsAsync(source, mirror, threads,
             _cfApiKey, _legacyGlobalJavaPath);
@@ -1266,9 +1238,8 @@ public sealed partial class SettingsPage : Page
         {
             OnlinePage.PreferredSource = selectedIndex;
         }
-        NetworkStatusText.Text = invalidCustomMirror
-            ? "请输入有效的游戏镜像地址。GitHub 加速地址请填在 GitHub 镜像。" : "";
-        if (!invalidCustomMirror) MarkSaved();
+        NetworkStatusText.Text = "";
+        MarkSaved();
     }
 
     private async void Unhide_Click(object sender, RoutedEventArgs e)

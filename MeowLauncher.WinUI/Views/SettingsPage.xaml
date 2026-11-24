@@ -635,39 +635,7 @@
                                                TextAlignment="Left" VerticalAlignment="Center" Margin="8,0" />
                                 </Grid>
 
-                            <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="38">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="游戏下载源" Style="{StaticResource RowLabelStyle}" />
-                                    <ComboBox Style="{StaticResource SettingsComboStyle}" x:Name="GameDownloadSourceBox" Grid.Column="2"
-                                              AutomationProperties.Name="游戏下载源"
-                                              SelectionChanged="GameDownloadSource_Changed">
-                                        <ComboBoxItem Content="Mojang 官方" />
-                                        <ComboBoxItem Content="BMCLAPI" />
-                                        <ComboBoxItem Content="自定义镜像" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-                            <Border x:Name="GameMirrorRow" Style="{StaticResource SettingsRowCardStyle}" Visibility="Collapsed">
-                                <Grid ColumnSpacing="14" MinHeight="38">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="游戏镜像地址" Style="{StaticResource RowLabelStyle}" />
-                                    <TextBox Grid.Column="1" x:Name="MirrorBox" Height="32" Width="520"
-                                             HorizontalAlignment="Right" VerticalAlignment="Center"
-                                             AutomationProperties.Name="游戏镜像地址" PlaceholderText="https://"
-                                             TextChanged="GameMirror_Changed" />
-                                </Grid>
-                            </Border>
-                            <TextBlock x:Name="GameMirrorNotice" Visibility="Collapsed" TextWrapping="Wrap"
-                                       Foreground="{ThemeResource AppWarnBrush}" FontSize="{StaticResource FontSizeCaption}"
-                                       Text="原游戏下载地址属于 GitHub 加速，已使用 Mojang 官方源。可在下方单独设置 GitHub 镜像。" />
+
                         </StackPanel>
                         <StackPanel Spacing="4">
                             <TextBlock Text="在线资源" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />

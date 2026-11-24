@@ -5716,9 +5716,24 @@ def main(argv: list[str]) -> int:
                 pi = argv.index("--prereq-project")
                 if pi + 1 < len(argv):
                     prereq_project = argv[pi + 1]
-            skip = {"--progress", "--prereq", "--name", name_value,
-                    "--prereq-version", prereq_value, "--prereq-project", prereq_project}
-            rest = [a for a in argv[idx + 1:] if a not in skip]
+            # 只按「选项名 + 它的值」成对剔除，不能按值过滤：
+            # 实例名可能正好等于版本号（例如 26.3），按值过滤会把 vid 一起吃掉，
+            # 结果 vid 变成后面的加载器名，报「找不到 Mojang 版本 vanilla」。
+            _flag_opts = {"--progress", "--prereq"}
+            _valued_opts = {"--name", "--prereq-version", "--prereq-project"}
+            rest = []
+            _i = 0
+            _tail = argv[idx + 1:]
+            while _i < len(_tail):
+                _a = _tail[_i]
+                if _a in _flag_opts:
+                    _i += 1
+                    continue
+                if _a in _valued_opts:
+                    _i += 2
+                    continue
+                rest.append(_a)
+                _i += 1
             vid = rest[0] if len(rest) > 0 else ""
             loader = rest[1] if len(rest) > 1 else "vanilla"
             loader_version = rest[2] if len(rest) > 2 else ""

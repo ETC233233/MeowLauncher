@@ -94,15 +94,31 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
     private bool _sourceReady;
     private GeneralSettings? _general;
     internal const string BmclApiUrl = "https://bmclapi2.bangbang93.com";
+    internal const string AutoMirror = "auto";
+    internal const string OfficialMirror = "official";
+    internal const string MeowMirror = "meow";
 
     internal static bool IsGitHubMirror(string? mirror) =>
         Uri.TryCreate(mirror?.Trim(), UriKind.Absolute, out var uri)
         && uri.Host.ToLowerInvariant() is "gh-proxy.com" or "gh-proxy.org";
 
+    // 设置里没写渠道（或写的就是 auto）时，走智能分配。
+    internal static bool IsAutoMirror(string? mirror)
+    {
+        var value = mirror?.Trim() ?? "";
+        return value.Length == 0 || value.Equals(AutoMirror, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 设置里存的是渠道名（auto / official / meow）或具体镜像地址。
+    // 智能分配是独立开关，不占下拉位置，所以下拉只有四个具体渠道。
     internal static int GameMirrorIndex(string? mirror)
     {
-        if (string.IsNullOrWhiteSpace(mirror) || IsGitHubMirror(mirror)) return 0;
-        return mirror.Contains("bmcl", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+        var value = mirror?.Trim() ?? "";
+        if (IsAutoMirror(value) || IsGitHubMirror(value)) return 0;
+        if (value.Equals(OfficialMirror, StringComparison.OrdinalIgnoreCase)) return 0;
+        if (value.Contains("bmcl", StringComparison.OrdinalIgnoreCase)) return 1;
+        if (value.Equals(MeowMirror, StringComparison.OrdinalIgnoreCase)) return 2;
+        return 3;
     }
 
     public DownloadPage()
@@ -214,11 +230,9 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         }
         catch
         {
-            // 同步失败只是标记没刷新，下次进页面会重新读。
+            // 读不到状态就当作都未安装，不阻塞列表。
         }
     }
-
-    // ------------------------------------------------------------------ 下载源
 
     private async Task LoadSourceAsync()
     {
@@ -228,9 +242,7 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
             if (!g.Ok) return;
             _general = g;
             _sourceReady = false;
-            var index = GameMirrorIndex(g.Mirror);
-            SourceBox.SelectedIndex = index == 2 ? -1 : index;
-            SourceBox.PlaceholderText = "自定义镜像";
+            SelectSourceFor(SourceBox, g.Mirror);
         }
         catch
         {
@@ -242,30 +254,84 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         }
     }
 
+    // 下载页是安装源的唯一入口：智能分配 + 四个具体渠道。
+    private static void SelectSourceFor(ComboBox box, string? mirror)
+    {
+        box.SelectedIndex = IsAutoMirror(mirror) ? 0 : GameMirrorIndex(mirror) + 1;
+    }
+
+    private static string DescribeSource(string? mirror)
+    {
+        if (IsAutoMirror(mirror)) return "联网时实测官方与镜像的速度，清单、库、资源文件各选更快的那一个。";
+        return GameMirrorIndex(mirror) switch
+        {
+            0 => "之后的下载全部走 Mojang 官方源。",
+            1 => "之后的下载优先走 BMCLAPI，失败再回官方。",
+            2 => "资源文件走自建 CDN，其余走 Mojang 官方源。",
+            _ => "之后的下载走你填写的自定义镜像。",
+        };
+    }
+
+    private async Task<string?> PromptCustomMirrorAsync(string current)
+    {
+        var box = new TextBox { Text = current ?? "", PlaceholderText = "https://", Height = 34 };
+        var dialog = new ContentDialog
+        {
+            Title = "自定义下载镜像",
+            Content = box,
+            PrimaryButtonText = "使用这个镜像",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot,
+        };
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary ? box.Text.Trim() : null;
+    }
+
     private async void SourceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_sourceReady || _general is null) return;
         if (SourceBox.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
-        var mirror = tag == "bmclapi" ? BmclApiUrl : "";
-        if (string.Equals(mirror, _general.Mirror, StringComparison.OrdinalIgnoreCase)) return;
+        var current = _general.Mirror ?? "";
+        string mirror;
+        switch (tag)
+        {
+            case "auto": mirror = AutoMirror; break;
+            case "official": mirror = OfficialMirror; break;
+            case "bmclapi": mirror = BmclApiUrl; break;
+            case "meow": mirror = MeowMirror; break;
+            case "custom":
+                var typed = await PromptCustomMirrorAsync(IsAutoMirror(current) ? "" : current);
+                if (string.IsNullOrWhiteSpace(typed))
+                {
+                    _sourceReady = false;
+                    SelectSourceFor(SourceBox, current);
+                    _sourceReady = true;
+                    return;
+                }
+                mirror = typed;
+                break;
+            default:
+                return;
+        }
+        if (string.Equals(mirror, current, StringComparison.OrdinalIgnoreCase)) return;
 
         var g = _general;
         var result = await App.Backend.SetGeneralSettingsAsync(g.DownloadSource, mirror, g.DlThreads, g.CfApiKey, g.JavaPath);
         if (result.Ok)
         {
             _general = g with { Mirror = mirror };
-            ShowStatus(InfoBarSeverity.Success, "下载源已切换",
-                mirror.Length == 0 ? "之后的下载走官方源。" : "之后的下载优先走 BMCLAPI，失败再回官方。");
+            ShowStatus(InfoBarSeverity.Success, "下载源已切换", DescribeSource(mirror));
         }
         else
         {
             _sourceReady = false;
-            var index = GameMirrorIndex(_general.Mirror);
-            SourceBox.SelectedIndex = index == 2 ? -1 : index;
+            SelectSourceFor(SourceBox, g.Mirror);
             _sourceReady = true;
             ShowStatus(InfoBarSeverity.Error, "没能切换下载源", result.Message ?? "保存失败，请重试一次。");
         }
     }
+
 
     // ------------------------------------------------------------------ 分组（左栏）
 

@@ -60,7 +60,7 @@ _MIRROR_HOSTS = (
     "https://libraries.minecraft.net",
     "https://resources.download.minecraft.net",
 )
-_MIRROR_CACHE: list = [None, None]  # [settings 文件 mtime, 生效的镜像基址（None=不走镜像）]
+_MIRROR_CACHE: list = [None, None, ""]  # [settings 文件 mtime, 生效的镜像基址（None=不走镜像）, 设置里的原始值]
 
 
 def _mirror_base():
@@ -75,8 +75,13 @@ def _mirror_base():
             raw = str(data.get("mirror") or "").strip()
             low = raw.lower()
             host = urllib.parse.urlsplit(raw).hostname
+            _MIRROR_CACHE[2] = raw
             if host in {"gh-proxy.com", "gh-proxy.org"}:
                 _MIRROR_CACHE[1] = None
+            elif low == "auto":
+                # 智能分配：先拿 BMCLAPI 当候选，每一类资源到底走官方还是镜像，
+                # 由 auto_select_sources() 在启动联网时实测后按角色决定。
+                _MIRROR_CACHE[1] = BMCLAPI
             elif "bmcl" in low:
                 _MIRROR_CACHE[1] = BMCLAPI
             elif low.startswith("http://") or low.startswith("https://"):
@@ -91,6 +96,25 @@ def _mirror_base():
 
 def _mirror_enabled() -> bool:
     return bool(_mirror_base())
+
+
+def _download_mode() -> str:
+    """设置里的下载渠道。
+
+    auto     智能分配：启动联网时实测各类资源，各选更快的源（缺省值）
+    official 全部走 Mojang 官方
+    meow     资源文件走自建 CDN，清单、库、客户端走官方
+    mirror   BMCLAPI 或自定义镜像（按地址判断）
+    """
+    _mirror_base()  # 顺便刷新 _MIRROR_CACHE[2]
+    raw = str(_MIRROR_CACHE[2] or "").strip().lower()
+    if not raw or raw == "auto":
+        return "auto"
+    if raw == "official":
+        return "official"
+    if raw == "meow":
+        return "meow"
+    return "mirror"
 
 
 # ---------------------------------------------------------------- 下载引擎
@@ -416,16 +440,153 @@ def _fetch_to(url: str, tmp: Path, on_progress=None, *, allow_segments: bool = T
         raise
 
 
+# ---------------------------------------------------------------- 源智能选择
+# 联网时按当前网络实测一次：元数据 / 依赖库 / 资源对象各自该走官方还是镜像。
+# 结果缓存 30 分钟，避免每次启动重测；任何探测失败都退回官方，不影响可用性。
+_SRC_PREF: dict[str, str] = {}
+_SRC_PREF_TS = 0.0
+_PREF_TTL = 1800.0
+_PREF_LOCK = threading.Lock()
+_pref_ready = False
+_pref_busy = False
+_SRC_PREF_ROLES = ("meta", "maven", "assets")
+
+
+def _pref_file() -> Path:
+    base = os.environ.get("APPDATA") or str(Path.home())
+    return Path(base) / "MeowLauncher" / "src_pref.json"
+
+
+def _load_pref() -> bool:
+    global _SRC_PREF, _SRC_PREF_TS
+    try:
+        raw = json.loads(_pref_file().read_text("utf-8"))
+        ts = float(raw.get("ts", 0))
+        if time.time() - ts > _PREF_TTL:
+            return False
+        got = {k: v for k, v in raw.items() if k in _SRC_PREF_ROLES and v in ("official", "mirror")}
+        if not got:
+            return False
+        _SRC_PREF = got
+        _SRC_PREF_TS = ts
+        return True
+    except Exception:
+        return False
+
+
+def _save_pref() -> None:
+    global _SRC_PREF_TS
+    _SRC_PREF_TS = time.time()
+    try:
+        p = _pref_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"ts": _SRC_PREF_TS, **_SRC_PREF}), "utf-8")
+    except OSError:
+        pass
+
+
+def _probe_many(pairs: list[tuple[str, str, str]]) -> dict[str, str]:
+    """几组「官方 / 镜像」同时开测，选快的那个。
+
+    pairs 是 (角色, 官方地址, 镜像地址)。镜像要快 8% 以上才换，避免抖动来回切；
+    探测失败按 0 处理，也就是退回官方。
+    """
+    rates: dict[tuple[int, str], float] = {}
+    lock = threading.Lock()
+
+    def run(key: tuple[int, str], u: str) -> None:
+        try:
+            r = _probe_rate(u)
+        except Exception:
+            r = 0.0
+        with lock:
+            rates[key] = r
+
+    ts = []
+    for i, (_, official, mirror) in enumerate(pairs):
+        ts.append(threading.Thread(target=run, args=((i, "o"), official), daemon=True))
+        ts.append(threading.Thread(target=run, args=((i, "m"), mirror), daemon=True))
+    for t in ts:
+        t.start()
+    for t in ts:
+        # 探测只用于排优先级：超过 2 秒还没结果的源，本来就该排到后面去。
+        t.join(timeout=2.2)
+    out: dict[str, str] = {}
+    for i, (name, _, _) in enumerate(pairs):
+        o, m = rates.get((i, "o"), 0.0), rates.get((i, "m"), 0.0)
+        if m <= 0:
+            out[name] = "official"
+        elif o <= 0:
+            out[name] = "mirror"
+        else:
+            out[name] = "mirror" if m > o * 1.08 else "official"
+    return out
+
+
+def _probe_pair(official: str, mirror: str) -> str:
+    return _probe_many([("x", official, mirror)]).get("x", "official")
+
+
+def auto_select_sources(force: bool = False) -> None:
+    """给三种资源各选一个源：可能先问官方，也可能先问镜像。"""
+    if not force and _load_pref():
+        return
+    if not _mirror_base():
+        _SRC_PREF.update({"meta": "official", "maven": "official"})
+        _save_pref()
+        return
+    # 样本要够大才量得准：几十 KB 的 jar 在一秒内就下完，测出的其实是握手耗时。
+    # manifest 279 KB、lwjgl 700 KB 量级，能看出持续吞吐的差别。
+    lib = "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3.jar"
+    _SRC_PREF.update(_probe_many([
+        ("meta", MOJANG_MANIFEST, BMCLAPI + "/mc/game/version_manifest_v2.json"),
+        ("maven", "https://libraries.minecraft.net/" + lib, BMCLAPI + "/maven/" + lib),
+    ]))
+    _save_pref()
+
+
+def _ensure_pref() -> None:
+    """首次联网时懒加载：先看磁盘缓存，缓存过期才真的测速。"""
+    global _pref_ready, _pref_busy
+    if _pref_ready or _pref_busy:
+        return
+    _pref_busy = True
+    try:
+        auto_select_sources()
+    except Exception:
+        pass
+    finally:
+        _pref_ready = True
+        _pref_busy = False
+
+
 def _mirrored(url: str):
     """启用镜像且该地址有对应映射时返回镜像地址，否则 None。"""
     # 资源文件单独走自建 CDN：BMCLAPI 对 assets 只是 302 到境外节点，小文件每次多等 1~2 秒；
     # 自家 CDN 是境内边缘节点且按 hash 长缓存。失败时调用方会回退官方，两条路都通。
+    _ensure_pref()
     if url.startswith("https://resources.download.minecraft.net/"):
         if _ASSET_SRC_OFFICIAL:
             return None
-        return ASSET_CDN + url[len("https://resources.download.minecraft.net"):]
+        tail = url[len("https://resources.download.minecraft.net"):]
+        mode = _download_mode()
+        if mode == "official":
+            return None
+        if mode == "meow":
+            # 固定走自建 CDN，不再实测：用户手动选了这条渠道。
+            return ASSET_CDN + tail
+        if mode == "auto":
+            # 智能分配：启动时没测过（要等拿到 assetIndex 才有样本），默认走自建 CDN。
+            if _SRC_PREF.get("assets") == "official":
+                return None
+            return ASSET_CDN + tail
+        # 用户选了具体镜像：资源文件也跟着走同一个镜像，保证渠道是「纯」的。
+        base = _mirror_base()
+        return (base + "/assets" + tail) if base else None
     base = _mirror_base()
     if not base:
+        return None
+    if _SRC_PREF.get("maven" if url.startswith("https://libraries.minecraft.net/") else "meta") == "official":
         return None
     rules = _MIRROR_RULES if base == BMCLAPI else tuple((src, base) for src in _MIRROR_HOSTS)
     for src, dst in rules:
@@ -646,7 +807,21 @@ def _stream_to(url: str, dest: Path, on_progress: Callable[[int, int], None] | N
         except (OSError, RuntimeError, http.client.HTTPException):
             return _stream_to_raw(second, dest, on_progress, proxy, verify=verify)
     alt = _mirrored(url)
-    if alt:
+    # BMCLAPI 这类公共镜像对某些路径会「200 但极慢」：实测 piston-meta 的 resource index
+    # 映射到 /v1/packages/... 后只有 7 KB/s，583 KB 要 14~126 秒。所以非自家 CDN 的
+    # 镜像先赛一手谁先吐数据（最多多花 3 秒），不再盲信镜像。
+    # 自家 CDN 按 hash 长缓存、边缘在境内，保持直接优先。
+    if alt and not alt.startswith(ASSET_CDN):
+        try:
+            best = _race_source([url, alt], timeout=3.0)
+            spare = alt if best == url else url
+            try:
+                return _stream_to_raw(best, dest, on_progress, proxy, verify=verify)
+            except (OSError, RuntimeError, http.client.HTTPException):
+                return _stream_to_raw(spare, dest, on_progress, proxy, verify=verify)
+        except Exception:
+            pass
+    elif alt:
         try:
             return _stream_to_raw(alt, dest, on_progress, proxy, verify=verify)
         except Exception:
@@ -826,7 +1001,7 @@ def _download_segments_multi(urls: list[str], tmp: Path, total: int, on_progress
         raise RuntimeError("分段下载后文件大小不对")
 
 
-def _probe_rate(url: str, window: float = 0.35, limit: int = 1024 * 1024) -> float:
+def _probe_rate(url: str, window: float = 0.4, limit: int = 2 * 1024 * 1024) -> float:
     """下载 window 秒，返回实测字节/秒。
 
     首字节快不等于持续快：bmclapi 有时 302 到一个喷得很快的镜像、有时落到慢的，只用
@@ -838,15 +1013,21 @@ def _probe_rate(url: str, window: float = 0.35, limit: int = 1024 * 1024) -> flo
     try:
         u = _final_url(url)
         scheme, host, port, path = _split(u)
-        conn = _connect(scheme, host, port, 20)
+        conn = _connect(scheme, host, port, 3)
         try:
             conn.request("GET", path, headers={"User-Agent": UA, "Accept": "*/*",
                                                "Range": f"bytes=0-{limit - 1}"})
             resp = conn.getresponse()
             if resp.status not in (200, 206):
                 return 0.0
+            # 计时从「开始收数据」算起：建连 + 握手常常就要一秒，把它算进窗口的话
+            # 循环进来时窗口已经过去，一个字节都读不到，速率会被算成 0。
+            t0 = time.time()
+            # read() 会一直等到凑满 _CHUNK 字节才返回；慢速链路上单次调用就能超过窗口，
+            # 于是一个字节都没记到、速率被算成 0。read1() 只返回当前可用的数据。
+            read = getattr(resp, "read1", None) or resp.read
             while time.time() - t0 < window:
-                chunk = resp.read(_CHUNK)
+                chunk = read(_CHUNK)
                 if not chunk:
                     break
                 got[0] += len(chunk)
@@ -860,18 +1041,44 @@ def _probe_rate(url: str, window: float = 0.35, limit: int = 1024 * 1024) -> flo
     return got[0] / dt
 
 
+# 源速率缓存：主机 -> (字节/秒, 采样时刻)。同一次安装里几十个大文件都问同一批源，
+# 每个文件都重新探一遍纯属浪费（0.35 秒 × 21 个文件 = 7 秒），所以按主机缓存 5 分钟。
+_RATE_CACHE: dict[str, tuple[float, float]] = {}
+_RATE_TTL = 300.0
+
+
+def _probe_rate_cached(url: str) -> float:
+    host = url.split("/")[2] if "://" in url else url
+    now = time.time()
+    hit = _RATE_CACHE.get(host)
+    if hit is not None and now - hit[1] < _RATE_TTL:
+        return hit[0]
+    rate = _probe_rate(url)
+    _RATE_CACHE[host] = (rate, now)
+    return rate
+
+
 def _rank_sources(urls: list[str]) -> list[str]:
     """按实测速度给源排序（0 字节的排后面，保留原顺序做兜底）。"""
     if len(urls) < 2:
         return list(urls)
-    scored = [(_probe_rate(u), i, u) for i, u in enumerate(urls)]
+    scored = [(_probe_rate_cached(u), i, u) for i, u in enumerate(urls)]
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [u for _, _, u in scored]
 
 
 def _download_big(urls: list[str], dest: Path, size: int,
                   on_progress=None, verify=None) -> Path:
-    """大文件按候选顺序分段下载，当前来源失败后再试下一个。"""
+    """大文件按实测速度选源后分段下载，当前来源失败后再试下一个。
+
+    官方 10 MB/s、BMCLAPI 落到 CERNET 镜像 16 MB/s、落到境外节点 0.06 MB/s——
+    同一时刻不同源的差距能到两个数量级，所以先量 0.35 秒再决定用谁，而不是按配置顺序盲下。
+    """
+    if len(urls) > 1:
+        try:
+            urls = _rank_sources(urls)
+        except Exception:
+            pass
     last: Exception | None = None
     for u in urls:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1675,30 +1882,36 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     (vdir / f"{vid}.json").write_text(json.dumps(version_json, indent=2), encoding="utf-8")
     log(f"[安装] {vid} 版本 JSON 已写入")
 
+    # 依赖库清单只依赖版本 JSON，和资源索引没有关系：先把它算出来，库和客户端 jar
+    # 就能立刻开跑，不必为了等几百 KB 的索引把上百 MB 的下载全堵在后面。
+    from ml2.core import Version
+    _selected = list(Version(mc_dir, vid).selected_libraries())
+
     # 先把资源索引拿到手，才能算出这次一共要下多少字节。
     # 否则「先下完库和 jar（几 MB）→ 再把几百 MB 资源加进分母」会让总进度从 90% 掉回 10%，
     # 用户看到的就是「一个下载里百分比反复从 0% 重来」。
     ai = version_json.get("assetIndex")
     asset_bytes = 0
+    idx_path = None
+    _index_ready = False
     if ai:
         idx_path = mc_dir / "assets" / "indexes" / f"{ai['id']}.json"
         try:
             index_valid = valid_file(idx_path, str(ai.get("sha1") or ""), int(ai.get("size") or 0)) and isinstance(json.loads(idx_path.read_text(encoding="utf-8")).get("objects"), dict)
         except (OSError, ValueError, AttributeError):
             index_valid = False
-        if not index_valid:
-            # 索引本身也有几百 KB~几 MB，原来这一段完全静默，任务卡会卡在 5% 不动。
-            log(f"[安装] 下载资源索引 {ai['id']}")
-            _download(ai["url"], idx_path,
-                      lambda d, t: report("index", d, t, f"indexes/{ai['id']}.json"),
-                      sha1=str(ai.get("sha1") or ""), size=int(ai.get("size") or 0))
-            log(f"[安装] 资源索引 {ai['id']} 完成")
-        _missing_assets = assets_missing(mc_dir, ai["id"])
-        log(f"[安装] 需要补 {len(_missing_assets)} 个资源文件，开始统计大小")
-        asset_bytes = sum(int(o.get("size") or 0) for o in _missing_assets)
+        _index_ready = bool(index_valid)
+        if _index_ready:
+            # 索引本来就在本地：顺手扫一遍缺失对象，进度条的分母一次算准。
+            _missing_assets = assets_missing(mc_dir, ai["id"])
+            log(f"[安装] 需要补 {len(_missing_assets)} 个资源文件，开始统计大小")
+            asset_bytes = sum(int(o.get("size") or 0) for o in _missing_assets)
+        else:
+            # 索引不在本地时不在这里等：几百 KB 的资源连接换不来几十 MB 的库和 jar，
+            # 交给资源线程自己一边下索引一边起下载，库和客户端 jar 同时已经在跑。
+            log(f"[安装] 资源索引 {ai['id']} 交由资源线程下载")
 
-    from ml2.core import Version
-    selected = list(Version(mc_dir, vid).selected_libraries())
+    selected = _selected
     total = len(selected)
     jobs = [(art, dest) for _, art, dest, _ in selected
             if not valid_file(dest, str(art.get("sha1") or ""), int(art.get("size") or 0))]
@@ -1707,7 +1920,9 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
     client = (version_json.get("downloads") or {}).get("client")
     client_bytes = int((client or {}).get("size") or 0)
     index_bytes = int((ai or {}).get("size") or 0) if ai else 0
-    total_bytes = max(lib_bytes + client_bytes + index_bytes + asset_bytes, 1)
+    # 资源索引还没到手时分母先按「库 + jar」算，索引到了在 _do_assets 里补上
+    # （总进度会跳一下，但库和 jar 那两路是立刻在跑的）。
+    total_box = [max(lib_bytes + client_bytes + index_bytes + asset_bytes, 1)]
 
     # 三条线并发，各自只记自己已经下到多少；总进度 = 三块分别封顶后相加。
     # 直接用 meter.total 会把「重试/重复计入」的字节也算进去，出现「总进度 98% 但 jar 才 47%」。
@@ -1727,7 +1942,7 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
         info = {"name": name, "speed": meter.speed(), "step": step_index, "complete": complete,
                 "steppct": (100.0 * step_done / step_total) if step_total > 0 else 100.0}
         try:
-            _rep("bytes", int(overall_bytes()), int(total_bytes), info)
+            _rep("bytes", int(overall_bytes()), int(total_box[0]), info)
         except TypeError:
             pass
 
@@ -1794,10 +2009,22 @@ def install_vanilla(mc_dir: Path, version_json: dict, on_log: Callable[[str], No
         breport(1, client_bytes, client_bytes, complete=True)
 
     def _do_assets() -> None:
+        nonlocal asset_bytes
         if not ai:
             breport(2, 0, 0, complete=True)
             return
         report("assets", 0, 1, {"name": "统计资源文件"})
+        if not _index_ready:
+            # 索引不在本地：本线程先把索引下下来，库和客户端 jar 那边同时已经在跑。
+            log(f"[安装] 下载资源索引 {ai['id']}")
+            _download(ai["url"], idx_path,
+                      lambda d, t: report("index", d, t, f"indexes/{ai['id']}.json"),
+                      sha1=str(ai.get("sha1") or ""), size=int(ai.get("size") or 0))
+            log(f"[安装] 资源索引 {ai['id']} 完成")
+            _miss = assets_missing(mc_dir, ai["id"])
+            log(f"[安装] 需要补 {len(_miss)} 个资源文件，开始统计大小")
+            asset_bytes = sum(int(o.get("size") or 0) for o in _miss)
+            total_box[0] = max(lib_bytes + client_bytes + index_bytes + asset_bytes, 1)
         if asset_bytes:
             breport(2, 0, asset_bytes)
 
@@ -1879,6 +2106,22 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
     if not missing:
         return (0, 0)
     total = len(missing)
+    # 资源对象走自建 CDN 还是官方：拿到索引后用其中最小的一个对象实测一次。
+    # 只在大批量时测，几十个文件的补全不值得多花这一秒。
+    if total >= 500 and _download_mode() == "auto":
+        _ensure_pref()
+        if "assets" not in _SRC_PREF:
+            try:
+                # 样本取 64~512 KB 的中间档：太小量不出吞吐，太大拖慢探测。
+                _pool = [it for it in missing if 64 * 1024 <= int(it.get("size") or 0) <= 512 * 1024]
+                _sample = (_pool or missing)[0] if not _pool else min(
+                    _pool, key=lambda _it: int(_it.get("size") or 0))
+                _h = _sample["hash"]
+                _SRC_PREF["assets"] = _probe_pair(f"{ASSET_BASE}/{_h[:2]}/{_h}",
+                                                  f"{ASSET_CDN}/{_h[:2]}/{_h}")
+                _save_pref()
+            except Exception:
+                pass
     workers = max(1, int(workers or _dl_threads()))
     log(f"[资源] 缺少 {total} 个资源文件，开始补全（{workers} 个线程）…")
     root = mc_dir / "assets" / "objects"
@@ -1887,6 +2130,9 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
     done = 0
     failed = 0
     lock = threading.Lock()
+    # 已确认落盘的对象路径：下载进程边写边算 sha1，回报成功即已校验过。
+    # 收尾复检时直接跳过它们，否则要把 5000 多个文件（几百 MB）重新读一遍算 sha1。
+    ok_all: set = set()
 
     def present(item: dict) -> bool:
         dest = root / item["hash"][:2] / item["hash"]
@@ -1910,7 +2156,9 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
 
     def recover() -> tuple[int, int]:
         # 大批下载收尾时只重试失败对象，降低并发，避免单次连接抖动使整个安装失败。
-        remaining = [item for item in missing if not present(item)]
+        remaining = [item for item in missing
+                     if str(root / item["hash"][:2] / item["hash"]) not in ok_all
+                     and not present(item)]
         for attempt in range(1, 4):
             if not remaining:
                 break
@@ -1936,6 +2184,7 @@ def ensure_assets(mc_dir: Path, index_id: str, on_log: Callable[[str], None] | N
             with lock:
                 done += 1
                 cur = done
+                ok_all.add(dest)
             if on_item:
                 try:
                     on_item(cur, total, Path(dest).name)
