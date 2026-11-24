@@ -35,6 +35,8 @@ BMCLAPI = "https://bmclapi2.bangbang93.com"
 # 资源文件（assets）专用加速源：内容按 hash 寻址、可长期缓存，走境内边缘节点比 BMCLAPI 的
 # 海外 302 快得多；调用方都是「镜像失败再回官方」，所以优先它不会让安装变脆。
 ASSET_CDN = "https://assets.cdn.sadcgame.top"
+# 压测旁路：MEOW_ASSET_SRC=official 时不走自建 CDN（用于对比不同网络下官方源与 CDN 谁快）。
+_ASSET_SRC_OFFICIAL = os.environ.get("MEOW_ASSET_SRC", "").strip().lower() == "official"
 _MIRROR_RULES = (
     ("https://launchermeta.mojang.com", BMCLAPI),
     ("https://piston-meta.mojang.com", BMCLAPI),
@@ -419,6 +421,8 @@ def _mirrored(url: str):
     # 资源文件单独走自建 CDN：BMCLAPI 对 assets 只是 302 到境外节点，小文件每次多等 1~2 秒；
     # 自家 CDN 是境内边缘节点且按 hash 长缓存。失败时调用方会回退官方，两条路都通。
     if url.startswith("https://resources.download.minecraft.net/"):
+        if _ASSET_SRC_OFFICIAL:
+            return None
         return ASSET_CDN + url[len("https://resources.download.minecraft.net"):]
     base = _mirror_base()
     if not base:
@@ -1493,7 +1497,14 @@ def phase_pool(many: bool = False) -> tuple[int, int]:
     总连接数仍然等于设置里的线程数。
     """
     total = max(2, _dl_threads())
-    if many:
+    try:
+        forced = int(os.environ.get("MEOW_DL_CONC") or 0)
+    except Exception:  # noqa: BLE001
+        forced = 0
+    if forced > 0:
+        # 压测用的旁路：直接指定总连接数（8~256），不动用户设置。
+        total = max(2, min(256, forced))
+    elif many:
         # 成百上千个小文件的瓶颈是「每个文件一次往返」而不是带宽：连接数上去，
         # 每秒能完成的文件数才上得去（实测 16 条约 110 个/秒，48 条翻倍以上）。
         total = max(total, 48)

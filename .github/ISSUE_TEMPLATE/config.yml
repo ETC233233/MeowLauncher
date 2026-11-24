@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问题 / 不会用
+    url: https://github.com/ETC233233/MeowLauncher/discussions
+    about: 装不上、不会配置、启动不了但不确定是不是 bug，先到讨论区问
+  - name: 先看 README
+    url: https://github.com/ETC233233/MeowLauncher/blob/main/README.md
+    about: 安装要求、WebView2 运行时、日志位置都在里面

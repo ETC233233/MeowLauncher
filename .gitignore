@@ -129,3 +129,6 @@ _tmp/
 cfkey*.txt
 # CurseForge 镜像 Worker 的部署配置，属服务端资产
 tools/meow-cfmi/
+
+# 调试时 game_dir() fallback 产生的实例目录（本机 600MB，不入库）
+MeowLauncher.WinUI/.minecraft/
