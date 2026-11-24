@@ -872,6 +872,20 @@ public sealed partial class MainWindow : Window
             SetOnboardingChrome(true);
             await web.EnsureCoreWebView2Async();
             var core = web.CoreWebView2;
+            // EnsureCoreWebView2Async 返回后 CoreWebView2 仍可能短暂为 null（WebView2 已知行为），
+            // 直接取值会在下一行抛 NullReferenceException，用户看到的是「点了没反应」。
+            for (var attempt = 0; core is null && attempt < 50; attempt++)
+            {
+                await Task.Delay(100);
+                core = web.CoreWebView2;
+            }
+            if (core is null)
+            {
+                App.Trace("Onboarding: CoreWebView2 未就绪（WebView2 运行时或用户数据目录不可用）");
+                CloseOnboardingWindow();
+                ShowOnboardingFailure(new InvalidOperationException("WebView2 初始化未完成"));
+                return;
+            }
             core.SetVirtualHostNameToFolderMapping("onboarding.meow", folder,
                 Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
             core.SetVirtualHostNameToFolderMapping("skinviewer.meow",

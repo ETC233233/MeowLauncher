@@ -41,6 +41,10 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
     private readonly Dictionary<string, List<VersionInfo>> _versionsByDir = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<VersionGroup> _groups = [];
     private readonly HashSet<string> _collapsedDirs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<RadioMenuFlyoutItem> _sortItems = new();
+    private bool _onlyRunning;
+    private bool _onlyModded;
+    private bool _onlyLoader;
     private string _primaryDir = "";
     private bool _suppressDirChange;
     private bool _changingDefaultDir;
@@ -314,15 +318,49 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         ApplyFilter(keepSelection: true);
     }
 
-    /// <summary>排序 / 筛选面板挂到搜索框右侧的漏斗上。排序选择与首页那个小的实例选择列表共享（InstanceSort）。</summary>
+    /// <summary>搜索框右侧的漏斗挂着原生菜单：排序三选一 + 三个筛选开关。排序与首页那个实例选择列表共享（InstanceSort）。</summary>
     private void AttachListFilterPanel()
     {
-        if (ListFilterPanel.Parent is Panel host) host.Children.Remove(ListFilterPanel);
-        QueryBox.AttachFilterPanel(ListFilterPanel);
-        SyncSortBox();
+        QueryBox.EnableFilterButton();
+        var menu = QueryBox.FilterMenu;
+        menu.Items.Clear();
+        _sortItems.Clear();
+
+        menu.Items.Add(MakeSortItem("按使用时间", InstanceSortMode.Recent));
+        menu.Items.Add(MakeSortItem("按名称", InstanceSortMode.Name));
+        menu.Items.Add(MakeSortItem("按创建时间", InstanceSortMode.Created));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(MakeFilterItem("只看正在运行", () => _onlyRunning, v => _onlyRunning = v));
+        menu.Items.Add(MakeFilterItem("只看带 Mod", () => _onlyModded, v => _onlyModded = v));
+        menu.Items.Add(MakeFilterItem("只看带加载器", () => _onlyLoader, v => _onlyLoader = v));
+        menu.Opening += (_, _) => SyncSortMenu();
+        SyncSortMenu();
     }
 
-    private void SyncSortBox()
+    private RadioMenuFlyoutItem MakeSortItem(string text, InstanceSortMode mode)
+    {
+        var item = new RadioMenuFlyoutItem { Text = text, GroupName = "listSort" };
+        item.Click += (_, _) =>
+        {
+            InstanceSort.Set(mode);
+            ApplyFilter(keepSelection: true);
+        };
+        _sortItems.Add(item);
+        return item;
+    }
+
+    private ToggleMenuFlyoutItem MakeFilterItem(string text, Func<bool> get, Action<bool> set)
+    {
+        var item = new ToggleMenuFlyoutItem { Text = text, IsChecked = get() };
+        item.Click += (_, _) =>
+        {
+            set(item.IsChecked);
+            ApplyFilter(keepSelection: true);
+        };
+        return item;
+    }
+
+    private void SyncSortMenu()
     {
         var index = InstanceSort.Mode switch
         {
@@ -330,26 +368,7 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
             InstanceSortMode.Created => 2,
             _ => 0,
         };
-        if (SortBox.SelectedIndex != index) SortBox.SelectedIndex = index;
-    }
-
-    private void SortBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        var mode = ((SortBox.SelectedItem as ComboBoxItem)?.Tag as string) switch
-        {
-            "name" => InstanceSortMode.Name,
-            "created" => InstanceSortMode.Created,
-            _ => InstanceSortMode.Recent,
-        };
-        if (InstanceSort.Mode == mode) return;
-        InstanceSort.Set(mode);
-        ApplyFilter(keepSelection: true);
-    }
-
-    private void ListFilter_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsLoaded) return;
-        ApplyFilter(keepSelection: true);
+        for (var i = 0; i < _sortItems.Count; i++) _sortItems[i].IsChecked = i == index;
     }
 
     private void QueryBox_QueryChanged(object? sender, string text)
@@ -372,18 +391,16 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         // 页内搜索框（QueryBox）按实例名等过滤，再叠加目录与隐藏状态筛选。
         _groups.Clear();
         var total = 0;
-        var filtering = OnlyRunningCheck.IsChecked == true
-                        || OnlyModdedCheck.IsChecked == true
-                        || OnlyLoaderCheck.IsChecked == true;
+        var filtering = _onlyRunning || _onlyModded || _onlyLoader;
         foreach (var dir in _dirs)
         {
             if (!_versionsByDir.TryGetValue(dir, out var source)) continue;
             var visible = source.Where(v => v.Valid && !v.Hidden);
-            if (OnlyRunningCheck.IsChecked == true)
+            if (_onlyRunning)
                 visible = visible.Where(v => GameSessions.IsRunning(v.Id, v.Root));
-            if (OnlyModdedCheck.IsChecked == true)
+            if (_onlyModded)
                 visible = visible.Where(v => v.HasMods);
-            if (OnlyLoaderCheck.IsChecked == true)
+            if (_onlyLoader)
             {
                 visible = visible.Where(v => !string.IsNullOrWhiteSpace(v.Loader)
                     && !v.Loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase));

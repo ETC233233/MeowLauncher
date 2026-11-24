@@ -56,20 +56,21 @@ public sealed partial class PageSearchBox : UserControl
 
     public bool FocusInput() => Box.Focus(FocusState.Programmatic);
 
+    /// <summary>漏斗上的原生菜单；页面往里加排序/筛选项。</summary>
+    public MenuFlyout FilterMenu => FilterMenuControl;
+
     /// <summary>
-    /// 在搜索框右侧挂一个「筛选与排序」漏斗（点击弹出面板）。只有真的提供筛选/排序的页面才调用它；
-    /// 没调用的页面不会显示这个图标，避免点开一个空面板。
+    /// 显示搜索框右侧的「筛选与排序」漏斗。只有真的提供筛选/排序的页面才调用它，没调用的页面不出现这个图标。
+    /// 这里只负责按钮本身：点击后抛 <see cref="FilterRequested"/>，面板由页面盖在列表上方。
+    /// 不做 Flyout —— 内容一旦还是 Collapsed，弹出层量出来是 0×0，WinUI 算位置时会抛 ArgumentException「参数错误。」
     /// </summary>
-    public void AttachFilterPanel(FrameworkElement panel)
+    public void EnableFilterButton()
     {
-        if (panel is null) return;
-        FilterButton.Flyout = new Flyout
-        {
-            Content = panel,
-            Placement = FlyoutPlacementMode.BottomEdgeAlignedRight,
-        };
         FilterButton.Visibility = Visibility.Visible;
-        Box.Margin = new Thickness(0, 0, 40, 0);
+        // 漏斗是输入框右边的独立按钮，不塞进框里：框内只留输入和清除，避免和清除 × 挤在一起、
+        // 也避免为了腾位把输入宽度压窄导致占位文字被截。
+        Box.Margin = new Thickness(0);
+        Box.QueryIcon = null;
     }
 
     private void Box_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)

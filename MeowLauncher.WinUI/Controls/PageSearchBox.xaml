@@ -6,6 +6,11 @@
     <!-- 页内搜索框：所有列表页共用这一个控件。它只管「这一页的列表」；跨页跳转归顶栏全局搜索（Ctrl+Shift+K）。
          本页筛选用 IsFilter=True：漏斗图标 + 「在本页筛选：…」占位，避免看着像第二个全局搜索。 -->
     <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
         <AutoSuggestBox x:Name="Box" Height="36" QueryIcon="Find" VerticalAlignment="Center"
                         Background="{ThemeResource AppChipBrush}"
                         BorderBrush="{ThemeResource AppStrokeBrush}"
@@ -13,12 +18,28 @@
                         TextChanged="Box_TextChanged"
                         QuerySubmitted="Box_QuerySubmitted" />
 
-        <!-- 漏斗是「筛选与排序」的入口，只有提供面板的页面才显示（AttachFilterPanel）。没有面板的页面不出现这个图标。 -->
-        <Button x:Name="FilterButton" Width="32" Height="32" Padding="0" CornerRadius="9"
-                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,2,0"
+        <!-- 漏斗是「筛选与排序」的入口，只有提供筛选的页面才显示（EnableFilterButton）。没有面板的页面不出现这个图标。 -->
+        <Button x:Name="FilterButton" Grid.Column="1" Width="32" Height="32" Padding="0" CornerRadius="9"
+                VerticalAlignment="Center" Margin="6,0,0,0"
                 Background="Transparent" BorderThickness="0"
                 Foreground="{ThemeResource AppText2Brush}" Visibility="Collapsed"
                 AutomationProperties.Name="筛选与排序" ToolTipService.ToolTip="筛选与排序">
+            <!-- 原生菜单：排序/筛选都是 WinUI 自带的菜单项，位置、阴影、失焦关闭全由系统处理，
+                 不再自己算卡片坐标（自算的那版会「乱飘」，也不好维护）。 -->
+            <Button.Flyout>
+                <MenuFlyout x:Name="FilterMenuControl" Placement="BottomEdgeAlignedRight">
+                    <!-- 菜单默认是亚克力半透明，压在列表上会看不出来，改成和页面卡片同一套底色。 -->
+                    <MenuFlyout.MenuFlyoutPresenterStyle>
+                        <Style TargetType="MenuFlyoutPresenter">
+                            <Setter Property="Padding" Value="6" />
+                            <Setter Property="CornerRadius" Value="10" />
+                            <Setter Property="Background" Value="{ThemeResource AppPanelBrush}" />
+                            <Setter Property="BorderBrush" Value="{ThemeResource AppStrokeBrush}" />
+                            <Setter Property="BorderThickness" Value="1" />
+                        </Style>
+                    </MenuFlyout.MenuFlyoutPresenterStyle>
+                </MenuFlyout>
+            </Button.Flyout>
             <FontIcon Glyph="&#xE71C;" FontSize="14" />
         </Button>
     </Grid>

@@ -138,8 +138,8 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <controls:PageSearchBox x:Name="QueryBox" Width="260" HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                    IsFilter="True" PlaceholderText="在本页筛选：实例名、MC 版本或加载器"
+                            <controls:PageSearchBox x:Name="QueryBox" Width="298" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                    IsFilter="True" PlaceholderText="筛选实例名、版本或加载器"
                                                     QueryChanged="QueryBox_QueryChanged" />
 
 
@@ -897,20 +897,6 @@
                 </StackPanel>
             </ScrollViewer>
         </Grid>
-
-        <!-- 实例列表的排序 + 筛选面板：由搜索框右侧的漏斗弹出（挂上之前先从可视树里摘掉）。 -->
-        <StackPanel x:Name="ListFilterPanel" Width="240" Spacing="12" Visibility="Collapsed">
-            <TextBlock Text="排序" FontSize="12" Foreground="{ThemeResource AppText3Brush}" />
-            <ComboBox x:Name="SortBox" HorizontalAlignment="Stretch" SelectionChanged="SortBox_SelectionChanged">
-                <ComboBoxItem Content="使用时间" Tag="recent" />
-                <ComboBoxItem Content="名称" Tag="name" />
-                <ComboBoxItem Content="创建时间" Tag="created" />
-            </ComboBox>
-            <TextBlock Text="筛选" FontSize="12" Foreground="{ThemeResource AppText3Brush}" />
-            <CheckBox x:Name="OnlyRunningCheck" Content="只看正在运行" Checked="ListFilter_Changed" Unchecked="ListFilter_Changed" />
-            <CheckBox x:Name="OnlyModdedCheck" Content="只看带 Mod" Checked="ListFilter_Changed" Unchecked="ListFilter_Changed" />
-            <CheckBox x:Name="OnlyLoaderCheck" Content="只看带加载器" Checked="ListFilter_Changed" Unchecked="ListFilter_Changed" />
-        </StackPanel>
 
         <InfoBar x:Name="Toast" Grid.Row="0" Grid.RowSpan="2" IsOpen="False"
                  HorizontalAlignment="Right" VerticalAlignment="Top" Width="380" IsClosable="True" />
