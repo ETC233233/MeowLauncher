@@ -12,7 +12,8 @@ namespace MeowLauncher.WinUI.Views;
 /// 打开 Mod 详情子页要带的东西：项目、来源、安装目标实例，以及装完通知列表页刷新「已安装」的回调。
 /// </summary>
 public sealed record OnlineDetailArgs(ModrinthProject Project, string Source, string SourceName,
-    string VersionId, ISubPageHost Host, Action<ModrinthProject> OnInstalled);
+    string VersionId, ISubPageHost Host, Action<ModrinthProject> OnInstalled,
+    string GameVersion = "", string Loader = "", bool ChooseDownloadTarget = false, string GameRoot = "");
 
 /// <summary>「获取 › 在线资源 › 某某 Mod」子页：简介 + 版本（文件）列表 + 底部固定安装。</summary>
 public sealed partial class OnlineDetailPage : Page
@@ -46,11 +47,11 @@ public sealed partial class OnlineDetailPage : Page
                     version = "";
                 return string.Join("  ·  ", new[]
                 {
+                    GameOnly(),
+                    File.Loader,
                     version,
                     File.Date,
                     File.SizeText,
-                    GameOnly(),
-                    File.Loader,
                     File.RequiredText,
                     File.Installed ? "已安装 · " + File.InstalledInstance : "",
                 }.Where(part => !string.IsNullOrWhiteSpace(part)));
@@ -83,8 +84,7 @@ public sealed partial class OnlineDetailPage : Page
     private bool _noFiles;
     private bool _loadingFiles;
     private bool _wasInstallingPack;
-    private string[] _skipDeps = [];
-    private bool _depsReviewed;
+    private OnlineModInstallPlan? _reviewedDeps;
     private string _installedInstanceId = "";
     private string _installedRoot = "";
     private TaskEntry? InstallingPack => _project?.IsModpack == true && _args is { } args
@@ -125,11 +125,19 @@ public sealed partial class OnlineDetailPage : Page
         }
     }
 
+    private bool ManualTarget => _args?.ChooseDownloadTarget == true;
+
     private void ApplyHint()
     {
         var p = _project!;
         var versionId = _args!.VersionId;
         string? hint = null;
+        if (ManualTarget)
+        {
+            DetailHint.Text = "按筛选条件显示版本，下载时选择目标实例或保存位置。";
+            DetailHint.Visibility = Visibility.Visible;
+            return;
+        }
         if (DatapackMode)
         {
             hint = string.IsNullOrWhiteSpace(versionId)
@@ -184,7 +192,7 @@ public sealed partial class OnlineDetailPage : Page
         FileList.ItemsSource = null;
         _selected = null;
 
-        if (!(p.IsInstallable || p.IsDatapack) || (!p.IsModpack && string.IsNullOrWhiteSpace(a.VersionId)))
+        if (!(p.IsInstallable || p.IsDatapack) || (!ManualTarget && !p.IsModpack && string.IsNullOrWhiteSpace(a.VersionId)))
         {
             SetNote("", busy: false);
             UpdateBottom();
@@ -197,7 +205,8 @@ public sealed partial class OnlineDetailPage : Page
         string error = "";
         try
         {
-            files = await App.Backend.GetOnlineFilesAsync(a.Source, p.Id, p.IsModpack ? "" : a.VersionId, p.InstallKind);
+            files = await App.Backend.GetOnlineFilesAsync(a.Source, p.Id, p.IsModpack ? "" : a.VersionId, p.InstallKind,
+                ManualTarget ? a.GameVersion : null, ManualTarget ? a.Loader : null, a.GameRoot);
         }
         catch (Exception ex)
         {
@@ -216,7 +225,7 @@ public sealed partial class OnlineDetailPage : Page
         if (files.Files.Count == 0)
         {
             _noFiles = true;
-            SetNote(p.IsModpack ? "这个整合包没有可下载的文件。" : $"没有兼容 {a.VersionId} 的文件：这个项目没有发布支持该游戏版本 / 加载器的文件。", busy: false);
+            SetNote(p.IsModpack ? "这个整合包没有可下载的文件。" : $"没有兼容 {(ManualTarget ? a.GameVersion + " / " + a.Loader : a.VersionId)} 的文件：这个项目没有发布支持该游戏版本 / 加载器的文件。", busy: false);
             UpdateBottom();
             return;
         }
@@ -243,7 +252,7 @@ public sealed partial class OnlineDetailPage : Page
     }
 
     /// <summary>底部「N 个前置」：点开看是哪些前置，勾选决定这次装不装。</summary>
-    private async void DepsLink_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    private async void DepsLink_Click(object sender, RoutedEventArgs e)
     {
         if (_busy || _selected is null || _args is null || _project is null) return;
         var a = _args;
@@ -253,15 +262,15 @@ public sealed partial class OnlineDetailPage : Page
         try
         {
             var plan = await App.Backend.ConfirmOnlineModInstallAsync(
-                a.Source, p.Id, _selected.File.Id, a.VersionId, XamlRoot);
+                a.Source, p.Id, _selected.File.Id, a.VersionId, XamlRoot, gameRoot: a.GameRoot, showAllDependencies: true);
             if (plan is null) return;
-            _skipDeps = plan.SkipDependencies;
-            _depsReviewed = true;
-            App.Trace($"OnlineDetail: deps picked, skip={_skipDeps.Length}");
+            _reviewedDeps = plan;
+            App.Trace($"OnlineDetail: deps picked, skip={plan.SkipDependencies.Length}");
         }
         catch (Exception ex)
         {
             App.Trace("OnlineDetail: deps pick failed " + ex.Message);
+            SetNote("无法查看前置：" + ex.Message, busy: false);
         }
         finally
         {
@@ -277,6 +286,7 @@ public sealed partial class OnlineDetailPage : Page
 
     private void Select(FileRow row)
     {
+        if (_selected?.File.Id != row.File.Id) _reviewedDeps = null;
         if (_selected is not null) _selected.Selected = false;
         _selected = row;
         row.Selected = true;
@@ -317,17 +327,17 @@ public sealed partial class OnlineDetailPage : Page
         var dp = DatapackMode;
 
         // 整合包装成新实例，不需要先选实例。
-        var hasTarget = p.IsModpack || !string.IsNullOrWhiteSpace(a.VersionId);
+        var hasTarget = ManualTarget || p.IsModpack || !string.IsNullOrWhiteSpace(a.VersionId);
         // 与列表页一致：实例加载器不在项目支持列表里（含原版实例装 Mod）时不给装，提示里已经说明原因。
         var snap = App.MainWindow?.Snapshot;
         var inst = snap?.Versions.FirstOrDefault(v => v.Id == a.VersionId) ?? snap?.Current;
-        var loaderBlocked = !dp && !string.IsNullOrWhiteSpace(a.VersionId) && !p.IsLoaderCompatibleWith(inst?.Loader ?? "");
-        if (dp && _saves is null && !_savesLoading) _ = LoadSavesAsync();
-        SavePanel.Visibility = dp ? Visibility.Visible : Visibility.Collapsed;
-        var needSave = dp && (SelectedSave() is null || (_selected is null && _rows.Count == 0));
-        var canInstall = (p.IsInstallable || dp) && !needSave && hasTarget && !_busy && !_loadingFiles && !_installed && !_noFiles && !loaderBlocked;
+        var loaderBlocked = !ManualTarget && !dp && !string.IsNullOrWhiteSpace(a.VersionId) && !p.IsLoaderCompatibleWith(inst?.Loader ?? "");
+        if (!ManualTarget && dp && _saves is null && !_savesLoading) _ = LoadSavesAsync();
+        SavePanel.Visibility = dp && !ManualTarget ? Visibility.Visible : Visibility.Collapsed;
+        var needSave = !ManualTarget && dp && (SelectedSave() is null || (_selected is null && _rows.Count == 0));
+        var canInstall = (p.IsInstallable || dp) && !needSave && hasTarget && !_busy && !_loadingFiles && !_installed && !_noFiles && !loaderBlocked && (!ManualTarget || _selected is not null);
         string summary;
-        var where = p.IsModpack ? "新实例" : dp ? $"{a.VersionId} / {SelectedSave()}" : a.VersionId;
+        var where = ManualTarget ? "选择实例或下载位置" : p.IsModpack ? "新实例" : dp ? $"{a.VersionId} / {SelectedSave()}" : a.VersionId;
         if (_installed) summary = p.IsModpack ? $"{p.Title} 已安装为新实例" : $"{p.Title} 已安装到 {a.VersionId}";
         else if (!(p.IsInstallable || dp)) summary = "暂不支持自动安装";
         else if (needSave) summary = _saves is { Count: 0 } ? "先在游戏里创建一个存档" : "请选择要装进的存档";
@@ -340,13 +350,14 @@ public sealed partial class OnlineDetailPage : Page
         DetailSummary.Text = summary;
 
         var required = _selected?.File.Required ?? 0;
-        var showDeps = required > 0 && !_installed && !dp && !p.IsModpack && p.InstallKind == "mod";
-        DepsLink.Text = showDeps ? $"· {required} 个前置" : "";
+        var showDeps = !ManualTarget && required > 0 && !_installed && !dp && !p.IsModpack && p.InstallKind == "mod";
+        DepsLink.Content = _busy ? "正在处理前置…" : $"查看 {required} 个前置";
+        DepsLink.IsEnabled = !_busy && !_loadingFiles;
         DepsLink.Visibility = showDeps ? Visibility.Visible : Visibility.Collapsed;
 
         var installingPack = InstallingPack is not null;
         DetailInstall.IsEnabled = installingPack || canInstall || (_project?.IsModpack == true && _installed && !_busy);
-        DetailInstall.Content = installingPack ? "查看安装进度" : _installed ? (p.IsModpack ? "查看实例" : "已安装") : _busy ? "安装中…" : "安装";
+        DetailInstall.Content = installingPack ? "查看安装进度" : _installed ? (p.IsModpack ? "查看实例" : "已安装") : _busy ? "处理中…" : ManualTarget ? "下载" : "安装";
     }
 
     private List<string>? _saves;
@@ -374,7 +385,7 @@ public sealed partial class OnlineDetailPage : Page
         _savesLoading = true;
         try
         {
-            _saves = await App.Backend.GetSaveNamesAsync(a.VersionId) ?? [];
+            _saves = await App.Backend.GetSaveNamesAsync(a.VersionId, a.GameRoot) ?? [];
         }
         catch { _saves = []; }
         _savesLoading = false;
@@ -397,6 +408,11 @@ public sealed partial class OnlineDetailPage : Page
             return;
         }
         if (_project is null || _args is null || _busy || _loadingFiles || _installed) return;
+        if (ManualTarget)
+        {
+            await DownloadToSelectedTargetAsync();
+            return;
+        }
         var p = _project;
         var a = _args;
         _busy = true;
@@ -412,8 +428,9 @@ public sealed partial class OnlineDetailPage : Page
             if (!dpInstall && p.InstallKind == "mod")
             {
                 SetNote("正在检查必需前置…", busy: true);
-                plan = await App.Backend.ConfirmOnlineModInstallAsync(a.Source, p.Id, file?.Id ?? "", target, XamlRoot,
-                    _depsReviewed ? _skipDeps : null);
+                plan = _reviewedDeps ?? await App.Backend.ConfirmOnlineModInstallAsync(a.Source, p.Id,
+                    file?.Id ?? "", target, XamlRoot, gameRoot: a.GameRoot);
+                _reviewedDeps = null;
                 SetNote("", busy: false);
                 if (plan is null) return;
             }
@@ -427,12 +444,13 @@ public sealed partial class OnlineDetailPage : Page
             var packProgress = p.IsModpack ? new Progress<string>(stage => TaskCenter.Report(task, stage)) : null;
             var result = plan is not null
                 ? await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, plan.FileId, target, p.InstallKind,
-                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies)
+                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies, gameRoot: a.GameRoot,
+                    dependencyVersions: plan.DependencyVersions)
                 : dpInstall
-                ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file?.Id ?? "", target, SelectedSave() ?? "", task.Id)
+                ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file?.Id ?? "", target, SelectedSave() ?? "", task.Id, a.GameRoot)
                 : file is null
                 ? await App.Backend.InstallOnlineAsync(a.Source, p.Id, target, p.InstallKind, packProgress, task.Id)
-                : await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, file.Id, target, p.InstallKind, progress: packProgress, taskId: task.Id);
+                : await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, file.Id, target, p.InstallKind, progress: packProgress, taskId: task.Id, gameRoot: a.GameRoot);
             if (result.Ok)
             {
                 if (p.IsModpack) task.TargetIcon = InstanceIcon.ForInstalledPack(result);
@@ -466,6 +484,159 @@ public sealed partial class OnlineDetailPage : Page
             _busy = false;
             UpdateBottom();
         }
+    }
+
+    private async Task DownloadToSelectedTargetAsync()
+    {
+        var a = _args!;
+        var p = _project!;
+        var file = _selected?.File;
+        if (file is null) return;
+        _busy = true;
+        UpdateBottom();
+        TaskEntry? task = null;
+        try
+        {
+            var snapshot = await App.Backend.GetSnapshotAsync(force: true);
+            var choice = await ChooseDownloadTargetAsync(XamlRoot, p, file,
+                snapshot?.Versions ?? App.MainWindow.Snapshot?.Versions ?? [], DatapackMode);
+            if (choice is null) return;
+            var target = choice.Value.Target;
+            string folder = "", save = "";
+            if (target is null)
+            {
+                var picker = new Windows.Storage.Pickers.FolderPicker();
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, App.MainWindow.WindowHandle);
+                picker.FileTypeFilter.Add("*");
+                var chosen = await picker.PickSingleFolderAsync();
+                if (chosen is null) return;
+                folder = chosen.Path;
+            }
+            else if (DatapackMode)
+            {
+                var saves = await App.Backend.GetSaveNamesAsync(target.Id, target.Root) ?? [];
+                var savesBox = new ComboBox { ItemsSource = saves, SelectedIndex = saves.Count > 0 ? 0 : -1,
+                    HorizontalAlignment = HorizontalAlignment.Stretch };
+                var savesDialog = new ContentDialog
+                {
+                    XamlRoot = XamlRoot, Title = "选择存档", Content = saves.Count == 0
+                        ? (object)"此实例没有存档，请先创建存档，或选择文件夹仅下载。" : savesBox,
+                    PrimaryButtonText = "安装", CloseButtonText = "取消", IsPrimaryButtonEnabled = saves.Count > 0,
+                };
+                if (await savesDialog.ShowAsync() != ContentDialogResult.Primary) return;
+                save = savesBox.SelectedItem as string ?? "";
+            }
+            OnlineModInstallPlan? plan = null;
+            if (target is not null && !DatapackMode && p.InstallKind == "mod")
+            {
+                plan = await App.Backend.ConfirmOnlineModInstallAsync(a.Source, p.Id, file.Id,
+                    target.Id, XamlRoot, gameRoot: target.Root);
+                if (plan is null) return;
+            }
+            task = TaskCenter.Add((target is null ? "下载 " : "安装 ") + p.Title,
+                a.SourceName + " · " + file.Display + " · " + (target?.Id ?? folder),
+                PageTagFor(p), "\uE7B8", InstanceIcon.ForProject(p, target));
+            if (p.IsModpack && target is not null) task.ResourceKey = $"pack:{a.Source}:{p.Id}";
+            var progress = new Progress<string>(stage => TaskCenter.Report(task, stage));
+            var result = target is null
+                ? await App.Backend.DownloadOnlineFileAsync(a.Source, p.Id, file.Id, folder, task.Id)
+                : DatapackMode
+                ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file.Id, target.Id, save, task.Id, target.Root)
+                : await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, plan?.FileId ?? file.Id,
+                    p.IsModpack ? "" : target.Id, p.InstallKind, plan?.Confirmation ?? "", progress, task.Id,
+                    plan?.SkipDependencies, target.Root, plan?.DependencyVersions);
+            if (!result.Ok)
+            {
+                TaskCenter.Fail(task, result.Message, result.Failure);
+                SetNote(result.Message, busy: false);
+                return;
+            }
+            TaskCenter.Complete(task, result.Message);
+            SetNote(result.Message, busy: false);
+            // Saving a standalone file does not mean it is installed in the selected instance.
+            if (target is not null && p.IsModpack) await ReadFilesAsync();
+            if (target is not null && target.Id == a.VersionId && target.Root == a.GameRoot) a.OnInstalled(p);
+        }
+        catch (Exception ex)
+        {
+            if (task is not null) TaskCenter.Fail(task, ex.Message);
+            SetNote(ex.Message, busy: false);
+        }
+        finally { _busy = false; UpdateBottom(); }
+    }
+
+    // Both paths stay visible even when no installed instance matches this file.
+    // Keep VersionInfo itself as the selection so duplicate IDs retain their game roots.
+    internal static async Task<(VersionInfo? Target, bool DownloadOnly)?> ChooseDownloadTargetAsync(
+        XamlRoot xamlRoot, ModrinthProject project, OnlineFileInfo file,
+        IEnumerable<VersionInfo> instances, bool datapack = false)
+    {
+        var valid = instances.Where(v => v.Valid).ToList();
+        var compatible = valid.Where(v => project.IsModpack || CompatibleTarget(v, file, project, datapack)).ToList();
+        var install = new RadioButton { Content = project.IsModpack ? "安装为新实例" : "选择实例", GroupName = "ResourceTarget" };
+        var download = new RadioButton { Content = "选择下载位置", GroupName = "ResourceTarget" };
+        var box = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 320,
+            PlaceholderText = project.IsModpack ? "选择游戏目录" : "选择安装到的实例" };
+        foreach (var instance in compatible.Concat(valid.Except(compatible)))
+        {
+            // Packs create a new instance in a game directory, never overwrite the chosen instance.
+            if (project.IsModpack && box.Items.Cast<ComboBoxItem>().Any(i =>
+                string.Equals(((VersionInfo)i.Tag).Root, instance.Root, StringComparison.OrdinalIgnoreCase))) continue;
+            var available = compatible.Contains(instance);
+            var label = project.IsModpack ? instance.Root : instance.Id + " · " + instance.GameVersion + " · " + instance.LoaderDisplay;
+            if (!project.IsModpack && valid.Count(v => v.Id.Equals(instance.Id, StringComparison.OrdinalIgnoreCase)) > 1)
+                label += " · " + System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(instance.Root.TrimEnd('\\', '/')));
+            var item = new ComboBoxItem { Content = label + (available ? "" : "（版本或加载器不匹配）"),
+                Tag = instance, IsEnabled = available };
+            ToolTipService.SetToolTip(item, instance.Root);
+            box.Items.Add(item);
+        }
+        box.SelectedIndex = compatible.Count > 0 ? 0 : -1;
+        var requirements = string.Join(" · ", new[] { file.GameShort, datapack || project.InstallKind != "mod" ? "" : file.Loader }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var info = new TextBlock { Text = requirements.Length > 0 ? "所选文件：" + requirements : file.Display,
+            TextWrapping = TextWrapping.Wrap, FontSize = 13, Foreground = (Brush)Application.Current.Resources["AppText2Brush"] };
+        var installHint = new TextBlock { Text = compatible.Count == 0
+                ? "没有与所选文件匹配的实例。可以选择下载位置，仅保存文件。"
+                : project.IsModpack ? "将在所选游戏目录中创建新实例。" : "仅可安装到游戏版本与加载器匹配的实例。",
+            TextWrapping = TextWrapping.Wrap, FontSize = 13, Foreground = info.Foreground };
+        var installDetails = new StackPanel { Spacing = 8, Margin = new Thickness(28, 0, 0, 0), Children = { box, installHint } };
+        var downloadHint = new TextBlock { Text = "仅下载文件，不安装到实例。", FontSize = 13,
+            Foreground = info.Foreground, Margin = new Thickness(28, 0, 0, 0) };
+        var content = new StackPanel { Spacing = 12, Children = { info, install, installDetails, download, downloadHint } };
+        var dialog = new ContentDialog { XamlRoot = xamlRoot, Title = "选择实例或下载位置", Content = content,
+            CloseButtonText = "取消", DefaultButton = ContentDialogButton.Primary };
+        void UpdateMode()
+        {
+            var installing = install.IsChecked == true;
+            installDetails.Visibility = installing || compatible.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            box.Visibility = installing && valid.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            downloadHint.Visibility = installing ? Visibility.Collapsed : Visibility.Visible;
+            box.IsEnabled = installing && compatible.Count > 0;
+            dialog.PrimaryButtonText = installing ? "安装" : "选择文件夹";
+            dialog.IsPrimaryButtonEnabled = !installing || (box.SelectedItem as ComboBoxItem)?.IsEnabled == true;
+        }
+        install.Checked += (_, _) => UpdateMode();
+        download.Checked += (_, _) => UpdateMode();
+        box.SelectionChanged += (_, _) => UpdateMode();
+        if (compatible.Count > 0) install.IsChecked = true;
+        else download.IsChecked = true;
+        UpdateMode();
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return null;
+        return install.IsChecked == true
+            ? (((box.SelectedItem as ComboBoxItem)?.Tag as VersionInfo), false)
+            : (null, true);
+    }
+
+    private static bool CompatibleTarget(VersionInfo instance, OnlineFileInfo file, ModrinthProject project, bool datapack)
+    {
+        var games = (file.Game ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (games.Length > 0 && !games.Contains(instance.GameVersion, StringComparer.OrdinalIgnoreCase)) return false;
+        if (datapack || project.InstallKind != "mod") return true;
+        var loader = instance.Loader.ToLowerInvariant();
+        var tag = new[] { "neoforge", "fabric", "forge", "quilt" }.FirstOrDefault(loader.Contains);
+        return tag is not null && (file.Loader ?? "").Split(',', StringSplitOptions.TrimEntries)
+            .Contains(tag, StringComparer.OrdinalIgnoreCase);
     }
 
     private async void DetailOpen_Click(object sender, RoutedEventArgs e)

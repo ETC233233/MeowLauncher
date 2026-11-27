@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import urllib.parse
 import urllib.request
@@ -4647,20 +4647,20 @@ def _install_online_pack(source: str, project_id: str, file_id: str = "", on_log
     return result
 
 
-def _dep_card(item: dict, curseforge: bool, key: str | None, net) -> dict:
+def _dep_card(item: dict, curseforge: bool, key: str | None, net, *, details: bool = False) -> dict:
     """前置卡片：标题 / 作者 / 简介 / 图标 / 大小，供前端列表和小窗预览用。"""
     if curseforge:
         name = str(item.get("fileName") or "")
         mod_id = int(item.get("modId") or 0)
         try:
-            info = net.cf_mod(mod_id, key=key) or {}
+            info = (net.cf_mod(mod_id, key=key) or {}) if details else {}
         except Exception:
             info = {}
         authors = info.get("authors") or []
         logo = (info.get("logo") or {}).get("thumbnailUrl") or ""
         return {
             "name": name,
-            "title": str(info.get("name") or name.rsplit(".", 1)[0]),
+            "title": str(info.get("name") or item.get("displayName") or name.rsplit(".", 1)[0]),
             "author": str((authors[0] or {}).get("name") or "") if authors else "",
             "summary": str(info.get("summary") or ""),
             "icon": str(logo),
@@ -4675,12 +4675,12 @@ def _dep_card(item: dict, curseforge: bool, key: str | None, net) -> dict:
     name = str(files[0].get("filename") or "") if files else ""
     size = int(files[0].get("size") or 0) if files else 0
     try:
-        info = net.modrinth_project(pid) or {}
+        info = (net.modrinth_project(pid) or {}) if details else {}
     except Exception:
         info = {}
     return {
         "name": name,
-        "title": str(info.get("title") or name.rsplit(".", 1)[0]),
+        "title": str(info.get("title") or name.rsplit(".", 1)[0] or item.get("name") or ""),
         "author": "",
         "summary": str(info.get("description") or ""),
         "icon": str(info.get("icon_url") or ""),
@@ -4693,7 +4693,8 @@ def _dep_card(item: dict, curseforge: bool, key: str | None, net) -> dict:
 
 def _install_online_mod(source: str, project_id: str, file_id: str, context,
                         *, plan_only: bool, confirmation: str,
-                        skip_deps: tuple[str, ...] = ()) -> dict:
+                        skip_deps: tuple[str, ...] = (), show_installed_deps: bool = False,
+                        dep_versions: dict | None = None) -> dict:
     st, net, mc, target, base, mc_version, loader = context
     dest = _online_dest("mod", net, mc, base, target)
     curseforge = source == "curseforge"
@@ -4702,11 +4703,34 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
     game_filter = _online_game_filter("mod", mc_version)
     selected: dict[str, dict] = {}
     dependencies: list[dict] = []
+    installed_dependencies: list[dict] = []
+    candidates: dict[str, list[dict]] = {}
+    prefetched: dict[tuple[str, str], list[dict]] = {}
+    exact_versions: dict[str, dict] = {}
+    pinned: set[str] = set()
+    dep_versions = dep_versions or {}
 
     def files_for(pid: str) -> list[dict]:
         if curseforge:
-            return net.cf_mod_files(int(pid), mc_version or None, loader or None, key=key) or []
+            files = net.cf_mod_files(int(pid), mc_version or None, loader or None, key=key) or []
+            return [f for f in files if net.cf_pick_file([f], mc_version or None, loader or None)]
         return net.modrinth_versions(pid, loaders=loaders, game_versions=game_filter) or []
+
+    def fetch_files(pid: str, exact: str) -> list[dict]:
+        if not exact:
+            return files_for(pid)
+        if curseforge:
+            item = net.cf_mod_file(int(pid), int(exact), key=key)
+            return [item] if item and str(item.get("modId") or pid) == pid and net.cf_pick_file(
+                [item], mc_version or None, loader or None) else []
+        item = exact_versions.get(exact)
+        if item is None:
+            item = net.modrinth_version(exact) or {}
+        if (str(item.get("project_id") or "") != pid
+                or (game_filter and mc_version not in (item.get("game_versions") or []))
+                or (loaders and not set(loaders).intersection(item.get("loaders") or []))):
+            return []
+        return [item]
 
     def filename(item: dict) -> str:
         if curseforge:
@@ -4720,6 +4744,11 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
         return name
 
     def visit(pid: str, exact: str, *, main: bool = False) -> dict:
+        override = str(dep_versions.get(pid) or "") if not main else ""
+        if not main and exact:
+            pinned.add(pid)
+            if override and override != exact:
+                raise RuntimeError(f"前置项目 {pid} 需要指定版本，无法更换。")
         if pid in selected:
             item = selected[pid]
             if exact and str(item.get("id") or "") != exact:
@@ -4728,23 +4757,24 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
         if len(selected) >= 40:
             raise RuntimeError("这个 Mod 的前置超过 40 个，请检查依赖列表。")
 
-        if exact and not main and not curseforge:
-            item = net.modrinth_version(exact)
-            if (str(item.get("project_id") or "") != pid
-                    or (game_filter and mc_version not in (item.get("game_versions") or []))
-                    or (loaders and not set(loaders).intersection(item.get("loaders") or []))):
-                item = None
+        files = prefetched.pop((pid, exact), None)
+        if files is None:
+            files = fetch_files(pid, exact)
+        if exact:
+            item = next((f for f in files if str(f.get("id") or "") == exact), None)
         else:
-            files = files_for(pid)
-            if curseforge:
-                files = [f for f in files if net.cf_pick_file([f], mc_version or None, loader or None)]
-            if exact:
-                item = next((f for f in files if str(f.get("id") or "") == exact), None)
-            else:
-                # 已启用且与当前实例兼容的文件优先，避免把同一前置装两份。
-                item = None if main else next((f for f in files if (dest / filename(f)).is_file()), None)
+            if not main:
+                candidates[pid] = files
+            # 已启用且与当前实例兼容的文件优先，避免把同一前置装两份。
+            item = None if main else next((f for f in files if (dest / filename(f)).is_file()), None)
+            if override:
+                if item is not None and str(item.get("id") or "") != override:
+                    raise RuntimeError(f"前置 {filename(item)} 已安装，请在 Mod 管理中更换版本。")
+                item = next((f for f in files if str(f.get("id") or "") == override), None)
                 if item is None:
-                    item = net.cf_pick_file(files) if curseforge else (files[0] if files else None)
+                    raise RuntimeError(f"选中的前置版本已不适配 {mc_version} / {loader}。")
+            if item is None:
+                item = net.cf_pick_file(files) if curseforge else (files[0] if files else None)
         if not item:
             what = "这个 Mod" if main else f"前置项目 {pid}"
             raise RuntimeError(f"{what}没有适配 {mc_version or '当前版本'} / {loader or '当前加载器'} 的文件。")
@@ -4754,6 +4784,7 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
             if any((dest / (name + suffix)).is_file() for suffix in (".disabled", ".off")):
                 raise RuntimeError(f"前置 {name} 已禁用，请先在 Mod 管理里启用后重试。")
         selected[pid] = item
+        required = []
         for dep in item.get("dependencies") or []:
             if curseforge:
                 if str(dep.get("relationType") or "") != "3":
@@ -4765,12 +4796,25 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
                 dep_id = str(dep.get("project_id") or "")
                 dep_version = str(dep.get("version_id") or "")
                 if not dep_id and dep_version:
-                    dep_id = str(net.modrinth_version(dep_version).get("project_id") or "")
+                    if dep_version not in exact_versions:
+                        exact_versions[dep_version] = net.modrinth_version(dep_version) or {}
+                    dep_id = str(exact_versions[dep_version].get("project_id") or "")
             if not dep_id:
                 raise RuntimeError(f"{name} 声明了无法自动定位的必需前置。")
+            required.append((dep_id, dep_version))
+        lookups = list(dict.fromkeys(ref for ref in required if ref[0] not in selected and ref not in prefetched))
+        if len(lookups) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(4, len(lookups))) as pool:
+                results = pool.map(lambda ref: fetch_files(*ref), lookups)
+                prefetched.update(zip(lookups, results))
+        for dep_id, dep_version in required:
             visit(dep_id, dep_version)
-        if not main and not (dest / name).is_file():
-            dependencies.append(item)
+        if not main:
+            if not (dest / name).is_file():
+                dependencies.append(item)
+            elif plan_only and show_installed_deps:
+                installed_dependencies.append(item)
         return item
 
     main_file = visit(project_id, file_id, main=True)
@@ -4783,9 +4827,22 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
                    [(str(item.get("id") or ""), filename(item)) for item in [*dependencies, main_file]]]
     plan = hashlib.sha256(json.dumps(transaction).encode("utf-8")).hexdigest()
     if plan_only:
-        cards = [_dep_card(item, curseforge, key, net) for item in dependencies]
-        for card, item in zip(cards, dependencies):
-            card["installed"] = (dest / filename(item)).is_file()
+        visible = {id(item) for item in [*dependencies, *installed_dependencies]}
+        cards = []
+        for pid, item in selected.items():
+            if id(item) not in visible:
+                continue
+            installed = (dest / filename(item)).is_file()
+            options = [item] if installed or pid in pinned else candidates.get(pid, [item])
+            date_key = "fileDate" if curseforge else "date_published"
+            options = sorted(options, key=lambda f: _file_release_timestamp(f.get(date_key)), reverse=True)
+            cards.append(dict(_dep_card(item, curseforge, key, net), projectId=pid, installed=installed,
+                              versionId=str(item.get("id") or ""), pinned=pid in pinned,
+                              versionOptions=[{
+                                  "id": str(f["id"]),
+                                  "label": str(f.get("version_number") or f.get("displayName")
+                                               or f.get("name") or f.get("fileName") or f["id"]),
+                              } for f in options if f.get("id")]))
         return {"ok": True, "fileId": str(main_file.get("id") or ""),
                 "dependencies": names, "dependencyCards": cards, "confirmation": plan}
     if (confirmation or names) and confirmation != plan:
@@ -4819,7 +4876,8 @@ def _install_online_mod(source: str, project_id: str, file_id: str, context,
 
 def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod",
                    *, plan_only: bool = False, confirmation: str = "",
-                   skip_deps: tuple[str, ...] = (), on_log=None) -> dict:
+                   skip_deps: tuple[str, ...] = (), on_log=None, show_installed_deps: bool = False,
+                   dep_versions: dict | None = None) -> dict:
     """安装在线资源：mod / 资源包 / 光影 / 数据包 / 整合包，按类型落到对应目录。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4831,7 +4889,8 @@ def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod
     if kind == "mod":
         return _install_online_mod(source, project_id, "", _online_context(vid),
                                    plan_only=plan_only, confirmation=confirmation,
-                                   skip_deps=skip_deps)
+                                   skip_deps=skip_deps, show_installed_deps=show_installed_deps,
+                                   dep_versions=dep_versions)
 
     if kind == "modpack":
         return _install_online_pack(source, project_id, on_log=on_log)
@@ -4886,11 +4945,16 @@ def install_online(source: str, project_id: str, vid: str = "", kind: str = "mod
     }
 
 
-def _online_target(vid: str = ""):
-    return _online_context(vid)
+def _file_release_timestamp(value) -> float:
+    try:
+        date = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return (date if date.tzinfo else date.replace(tzinfo=timezone.utc)).timestamp()
+    except (ValueError, OverflowError, OSError):
+        return float("-inf")
 
 
-def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod") -> dict:
+def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod",
+                 filters: dict | None = None) -> dict:
     """列出可安装文件，供启动器选择具体版本/文件。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4899,18 +4963,19 @@ def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod")
         raise RuntimeError("不支持的资源来源。")
     if not project_id:
         raise RuntimeError("没有指定项目。")
-    if kind == "modpack":
+    if filters is not None or kind == "modpack":
         st, net, _ = _pack_context()
-        target = mc_version = loader = ""
+        target = ""
+        mc_version = str((filters or {}).get("gameVersion") or "")
+        loader = str((filters or {}).get("loader") or "")
     else:
         st, net, _, target, _, mc_version, loader = _online_context(vid)
-    loaders = _online_loaders(kind, loader)
-    game_filter = _online_game_filter(kind, mc_version)
+    loaders = [loader] if filters is not None and loader else _online_loaders(kind, loader)
+    game_filter = [mc_version] if mc_version else None
     rows = []
     if source == "modrinth":
         versions = net.modrinth_versions(project_id, loaders=loaders, game_versions=game_filter) or []
-        if kind == "modpack":
-            versions = sorted(versions, key=lambda v: str(v.get("date_published") or ""), reverse=True)
+        versions = sorted(versions, key=lambda v: _file_release_timestamp(v.get("date_published")), reverse=True)
         for version in versions[:60]:
             files = version.get("files") or []
             primary = next((f for f in files if f.get("primary")), files[0] if files else {})
@@ -4937,6 +5002,7 @@ def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod")
             mod_id, mc_version or None, _online_cf_loader(kind, loader),
             limit=50, key=str(st.get("cfApiKey") or "") or None,
         ) or []
+        files = sorted(files, key=lambda f: _file_release_timestamp(f.get("fileDate")), reverse=True)
         for item in files[:60]:
             game = item.get("gameVersions") or []
             rows.append({
@@ -4965,9 +5031,35 @@ def online_files(source: str, project_id: str, vid: str = "", kind: str = "mod")
     return {"ok": True, "version": target, "files": rows}
 
 
+def download_online_file(source: str, project_id: str, file_id: str, folder: str) -> dict:
+    """Save exactly the selected file without requiring or changing an instance."""
+    st, net, _ = _pack_context()
+    dest = Path(folder)
+    if not dest.is_absolute():
+        raise RuntimeError("请选择有效的下载位置。")
+    dest.mkdir(parents=True, exist_ok=True)
+    if source == "modrinth":
+        version = net.modrinth_version(file_id)
+        if str(version.get("project_id") or "") != project_id:
+            raise RuntimeError("选中的文件不属于这个项目。")
+        paths = net.install_modrinth_version(version, dest)
+        if not paths:
+            raise RuntimeError("选中的文件没有可下载内容。")
+        path = paths[0]
+    elif source == "curseforge":
+        item = net.cf_mod_file(int(project_id), int(file_id), key=str(st.get("cfApiKey") or "") or None)
+        if str(item.get("modId") or "") != project_id:
+            raise RuntimeError("选中的文件不属于这个项目。")
+        path = net.install_curseforge_file(item, dest)
+    else:
+        raise RuntimeError("不支持的资源来源。")
+    return {"ok": True, "message": f"已下载 {path.name}", "path": str(path), "file": path.name}
+
+
 def install_online_file(source: str, project_id: str, file_id: str, vid: str = "", kind: str = "mod",
                         *, plan_only: bool = False, confirmation: str = "",
-                        skip_deps: tuple[str, ...] = (), on_log=None) -> dict:
+                        skip_deps: tuple[str, ...] = (), on_log=None, show_installed_deps: bool = False,
+                        dep_versions: dict | None = None) -> dict:
     """安装用户从 online_files 中选中的具体文件。"""
     source = (source or "").strip().lower()
     project_id = (project_id or "").strip()
@@ -4980,7 +5072,8 @@ def install_online_file(source: str, project_id: str, file_id: str, vid: str = "
     if kind == "mod":
         return _install_online_mod(source, project_id, file_id, _online_context(vid),
                                    plan_only=plan_only, confirmation=confirmation,
-                                   skip_deps=skip_deps)
+                                   skip_deps=skip_deps, show_installed_deps=show_installed_deps,
+                                   dep_versions=dep_versions)
     if kind == "modpack":
         return _install_online_pack(source, project_id, file_id, on_log=on_log)
 
@@ -5894,13 +5987,21 @@ def main(argv: list[str]) -> int:
             print(json.dumps(install_datapack(vid, save, src), ensure_ascii=False,
                              separators=(",", ":")))
             return 0
+        if "--download-online-file" in argv:
+            idx = argv.index("--download-online-file")
+            source, project, file_id, encoded = argv[idx + 1:idx + 5]
+            folder = base64.b64decode(encoded).decode("utf-8")
+            print(json.dumps(action_result(download_online_file(source, project, file_id, folder)), ensure_ascii=False))
+            return 0
         if "--online-files" in argv:
             idx = argv.index("--online-files")
             source = argv[idx + 1] if idx + 1 < len(argv) else ""
             project_id = argv[idx + 2] if idx + 2 < len(argv) else ""
             vid = argv[idx + 3] if idx + 3 < len(argv) else ""
             kind = argv[idx + 4] if idx + 4 < len(argv) else "mod"
-            print(json.dumps(online_files(source, project_id, vid, kind),
+            encoded = next((arg.partition("=")[2] for arg in argv if arg.startswith("--resource-filter=")), "")
+            filters = json.loads(base64.b64decode(encoded).decode("utf-8")) if encoded else None
+            print(json.dumps(online_files(source, project_id, vid, kind, filters),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--install-online-datapack" in argv:
@@ -5913,6 +6014,18 @@ def main(argv: list[str]) -> int:
             print(json.dumps(install_online_datapack(source, project_id, file_id, vid, save),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
+        if "--dependency-info" in argv:
+            idx = argv.index("--dependency-info")
+            source, pid = argv[idx + 1:idx + 3]
+            st, net, _ = _pack_context()
+            curseforge = source == "curseforge"
+            ref = {"modId": int(pid)} if curseforge else {"project_id": pid}
+            card = _dep_card(ref, curseforge, str(st.get("cfApiKey") or "") or None, net, details=True)
+            print(json.dumps(card, ensure_ascii=False, separators=(",", ":")))
+            return 0
+        if "--install-online-file" in argv or "--install-online" in argv:
+            dep_versions = decode_json_arg(next((arg.partition("=")[2] for arg in argv
+                                                if arg.startswith("--dependency-versions=")), ""))
         if "--install-online-file" in argv:
             idx = argv.index("--install-online-file")
             source = argv[idx + 1] if idx + 1 < len(argv) else ""
@@ -5929,7 +6042,9 @@ def main(argv: list[str]) -> int:
             print(json.dumps(action_result(install_online_file(source, project_id, file_id, vid, kind,
                                                  plan_only="--plan-online-mod" in argv,
                                                  confirmation=confirmation, skip_deps=skip,
-                                                 on_log=emit_import)),
+                                                 on_log=emit_import,
+                                                 show_installed_deps="--show-installed-deps" in argv,
+                                                 dep_versions=dep_versions)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--install-online" in argv:
@@ -5944,7 +6059,9 @@ def main(argv: list[str]) -> int:
             track_phase("安装在线资源")
             print(json.dumps(action_result(install_online(source, project_id, vid, kind,
                                            plan_only="--plan-online-mod" in argv,
-                                           skip_deps=skip, on_log=emit_import)),
+                                           skip_deps=skip, on_log=emit_import,
+                                           show_installed_deps="--show-installed-deps" in argv,
+                                           dep_versions=dep_versions)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--loader-versions" in argv:

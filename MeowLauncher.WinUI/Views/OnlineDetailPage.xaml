@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="Transparent">
 
-    <!-- 「获取 › 在线资源 › 某某 Mod」子页：页头（返回箭头 + 面包屑）由「获取」宿主画，这里只有内容。
+    <!-- 「获取 › 在线资源 › 某某 Mod」子页：面包屑由「获取」宿主画，这里只有内容。
          中间可滚动（项目卡 / 简介 / 版本列表），底部固定「要装哪个文件 + 安装」。 -->
     <Page.Resources>
         <Style x:Key="FlatItemStyle" TargetType="ListViewItem">
@@ -122,9 +122,6 @@
                                             <TextBlock Text="{Binding TypeText}" FontSize="11.5"
                                                        Foreground="{ThemeResource AppTextBrush}" />
                                         </Border>
-                                        <FontIcon Glyph="&#xE73E;" FontSize="14"
-                                                  Foreground="{ThemeResource AppBrandBrush}"
-                                                  Visibility="{Binding SelectedVisibility}" />
                                     </StackPanel>
                                 </Grid>
                             </Grid>
@@ -164,13 +161,11 @@
                                   AutomationProperties.Name="选择要装进的存档"
                                   SelectionChanged="SaveBox_SelectionChanged" />
                     </StackPanel>
-                    <TextBlock x:Name="DepsLink" Visibility="Collapsed" Margin="0,1,0,0"
+                    <HyperlinkButton x:Name="DepsLink" Visibility="Collapsed" Margin="0,1,0,0"
+                               Padding="0" MinHeight="0" HorizontalAlignment="Left"
                                FontSize="{StaticResource FontSizeCaption}"
-                               Foreground="{ThemeResource AppText2Brush}"
-                               TextDecorations="Underline"
-                               IsTextSelectionEnabled="False"
                                ToolTipService.ToolTip="查看并选择要一起安装的前置"
-                               Tapped="DepsLink_Tapped" />
+                               Click="DepsLink_Click" />
                 </StackPanel>
                 <Button x:Name="DetailInstall" Grid.Column="1" Content="安装" Height="36" MinWidth="136"
                         Padding="20,0" CornerRadius="4" BorderThickness="0"

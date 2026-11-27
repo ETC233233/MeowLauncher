@@ -263,6 +263,10 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     internal static bool DebugNoFilter;
 #endif
 
+    // 手动筛选是浏览/下载模式，安装目标留到详情页下载时选择。
+    private bool ChooseDownloadTarget => !string.IsNullOrWhiteSpace(_gameVersion)
+                                         || !string.IsNullOrWhiteSpace(_loader);
+
     private string EffectiveGameVersion() =>
 #if DEBUG
         DebugNoFilter ? "" :
@@ -303,6 +307,21 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             lb.Content = _category == "modpack" ? "不限加载器"
                 : name.Length == 0 ? "跟随实例"
                 : $"跟随 {name}";
+            // 原版不能作为 Mod 加载器筛选；默认落到下方第一个真实加载器。
+            // 整合包首项是“不限加载器”，仍保持可用。
+            lb.IsEnabled = _category == "modpack" || tag.Length > 0;
+            if (!lb.IsEnabled && LoaderGroup.Visibility == Visibility.Visible && LoaderBox.SelectedIndex <= 0
+                && LoaderBox.Items.Count > 1)
+            {
+                _relabeling = true;
+                try
+                {
+                    LoaderBox.SelectedIndex = 1;
+                    // 初始化时 _ready 尚未打开，不能依赖 SelectionChanged 写筛选值。
+                    _loader = (LoaderBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+                }
+                finally { _relabeling = false; }
+            }
         }
         // 选中项的文字改了，下拉框上显示的那份不会自己刷新：选中第一项时重选一次（不触发搜索）。
         Reselect(GameVersionBox);
@@ -322,10 +341,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
     private void UpdateFilterHint()
     {
-        var cur = CurrentInstance;
-        var vanilla = cur is not null && LoaderTagOf(cur).Length == 0;
-        FilterHint.Text = vanilla && _category == "mod" && string.IsNullOrWhiteSpace(_loader)
-            ? $"{cur!.Id} 是原版或未识别加载器：结果不限加载器，装 Mod 前要先给它装加载器"
+        FilterHint.Text = ChooseDownloadTarget
+            ? "当前按筛选条件浏览，下载时选择目标实例或保存位置"
             : "";
         FilterHint.Visibility = FilterHint.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -607,13 +624,9 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
         _hoverItem = null;
         _items.Clear();
-        // 原版实例装不了 Mod：列表行直接标「需加载器」并禁用，别让人点了才发现要在详情页拦。
-        var vanillaInstance = LoaderTagOf(CurrentInstance).Length == 0 && CurrentInstance is not null;
+        // 非跟随模式不展示当前实例的已安装状态，也不应用其加载器限制。
         foreach (var project in filtered)
-            _items.Add(new OnlineItem(project, IsInstalled(project))
-            {
-                LoaderBlocked = vanillaInstance && project.ProjectType == "mod",
-            });
+            _items.Add(new OnlineItem(project, IsInstalled(project), ChooseDownloadTarget));
 
         ResultCount.Text = $"{sourceName} · {_items.Count} 项";
         if (_items.Count == 0)
@@ -663,6 +676,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
     private bool IsInstalled(ModrinthProject project)
     {
+        if (ChooseDownloadTarget) return false;
         if (project.IsModpack) return _installed.Contains($"pack:{(SourceBox.SelectedIndex >= 1 ? "curseforge" : "modrinth")}:{project.Id}");
         if (_installed.Count == 0) return false;
         if (!string.IsNullOrWhiteSpace(project.Id) && _installed.Contains(project.Id)) return true;
@@ -848,7 +862,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
         // 不支持的资源类型没有「打开项目页」按钮了，点安装先把详情铺出来，
         // 详细原因和官网入口都在右侧，不会让人点了没反应。
-        if (!project.IsInstallable)
+        if (ChooseDownloadTarget || !project.IsInstallable)
         {
             await OpenDetailAsync(project);
             return;
@@ -900,7 +914,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             ResultCount.Text = $"正在安装 {project.Title}…";
             var result = plan is not null
                 ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind,
-                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies)
+                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies,
+                    dependencyVersions: plan.DependencyVersions)
                 : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind, taskId: task.Id);
             if (result.Ok)
             {
@@ -1044,7 +1059,10 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         try
         {
             _host.OpenSubPage(typeof(OnlineDetailPage),
-                new OnlineDetailArgs(project, source, sourceName, versionId, _host, MarkInstalled),
+                new OnlineDetailArgs(project, source, sourceName, versionId, _host, MarkInstalled,
+                    EffectiveGameVersion(), EffectiveLoader(),
+                    ChooseDownloadTarget,
+                    snapshot?.Current?.Root ?? ""),
                 "获取", "在线资源", project.Title);
             App.Trace("OpenDetail: sub page opened");
         }

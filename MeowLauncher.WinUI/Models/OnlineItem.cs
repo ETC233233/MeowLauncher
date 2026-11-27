@@ -8,14 +8,16 @@ namespace MeowLauncher.WinUI.Models;
 /// </summary>
 public sealed class OnlineItem
 {
-    public OnlineItem(ModrinthProject project, bool installed)
+    public OnlineItem(ModrinthProject project, bool installed, bool chooseDownloadTarget = false)
     {
         Project = project;
-        IsInstalled = installed;
+        ChooseDownloadTarget = chooseDownloadTarget;
+        IsInstalled = installed && !chooseDownloadTarget;
     }
 
     public ModrinthProject Project { get; }
     public bool IsInstalled { get; }
+    public bool ChooseDownloadTarget { get; }
 
     public string Id => Project.Id;
     public string Title => Project.Title;
@@ -42,10 +44,10 @@ public sealed class OnlineItem
     public override string ToString() => Title;
     public ImageSource? IconSource => Project.IconSource;
 
-    /// <summary>列表行只保留一个动作按钮：可装=安装，已装=已安装（禁用），实例没加载器=需加载器（禁用）。</summary>
-    public string ActionText => IsInstalled ? "已安装" : LoaderBlocked ? "需加载器" : "安装";
+    /// <summary>跟随模式显示安装状态；非跟随模式进入下载与目标选择。</summary>
+    public string ActionText => ChooseDownloadTarget ? "下载" : IsInstalled ? "已安装" : "安装";
 
-    public bool ActionEnabled => !IsInstalled && !LoaderBlocked;
+    public bool ActionEnabled => !IsInstalled;
 
     /// <summary>未装显示描边「安装」按钮，已装改显示绿色 ✓ 文字（和下载页一致）。</summary>
     public Microsoft.UI.Xaml.Visibility InstallVisibility =>
@@ -54,18 +56,15 @@ public sealed class OnlineItem
     public Microsoft.UI.Xaml.Visibility InstalledVisibility =>
         IsInstalled ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
 
-    public string ActionTooltip => IsInstalled
+    public string ActionTooltip => ChooseDownloadTarget
+        ? "按筛选条件选择版本，下载时选择目标实例或保存位置"
+        : IsInstalled
         ? $"{Project.Title} 已经在当前实例里了"
-        : LoaderBlocked
-            ? "当前实例是原版，先给它装一个加载器（Fabric / Forge / NeoForge）再装 Mod"
         : Project.IsModpack
             ? "安装成一个新实例"
         : Project.IsInstallable
             ? "安装到当前实例"
             : "查看详情";
-
-    /// <summary>原版实例装不了 Mod：列表里直接标「需加载器」，不去点一个只会弹详情的按钮。</summary>
-    public bool LoaderBlocked { get; init; }
 
     private static string ShortNumber(long number) => number switch
     {

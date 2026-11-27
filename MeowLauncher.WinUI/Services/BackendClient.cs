@@ -264,7 +264,7 @@ public sealed partial class BackendClient
 
     /// <summary>下载在线项目里选中的文件，直接装进指定存档的 datapacks。</summary>
     public async Task<BackendResult> InstallOnlineDatapackAsync(
-        string source, string projectId, string fileId, string versionId, string save, string? taskId = null)
+        string source, string projectId, string fileId, string versionId, string save, string? taskId = null, string gameRoot = "")
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId) ||
             string.IsNullOrWhiteSpace(fileId) || string.IsNullOrWhiteSpace(save))
@@ -272,7 +272,7 @@ public sealed partial class BackendClient
 
         var result = await RunAsync(
             $"--install-online-datapack {source} {projectId} {fileId} \"{versionId}\" \"{save}\"",
-            TimeSpan.FromMinutes(10), taskId: taskId);
+            TimeSpan.FromMinutes(10), gameDir: gameRoot, taskId: taskId);
         return ParseActionResult(result);
     }
 
@@ -760,11 +760,36 @@ public sealed partial class BackendClient
         }
     }
 
+    private async Task<BackendResult> SelectInstalledInstanceAsync(BackendResult result, string root)
+    {
+        if (!result.Ok || result.Version.Length == 0 || App.MainWindow is null) return result;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(result.InstancePath))
+                root = Path.GetDirectoryName(Path.GetDirectoryName(result.InstancePath)) ?? root;
+            if (string.IsNullOrWhiteSpace(root)) root = DefaultPackRoot();
+            var snapshot = await ScanDirAsync(root);
+            var target = snapshot?.Versions.FirstOrDefault(v => v.Id == result.Version);
+            if (target is null) return result with { Message = result.Message + "；未找到新实例，无法自动切换。" };
+            target.Root = root;
+            var existing = App.MainWindow.Snapshot?.Versions;
+            if (existing is not null && !existing.Any(v => InstanceSelection.Same(v, target))) existing.Add(target);
+            var (ok, message) = await InstanceSelection.SelectAsync(target);
+            if (!ok) return result with { Message = result.Message + "；自动切换失败：" + message };
+        }
+        catch (Exception ex)
+        {
+            App.Trace("Select installed instance: " + ex.Message);
+            return result with { Message = result.Message + "；自动切换失败：" + ex.Message };
+        }
+        return result;
+    }
+
     public async Task<BackendResult> ImportModpackAsync(string path, string gameDir, IProgress<string> progress, string? taskId = null)
     {
         var result = await RunAsync($"--import-modpack \"{path}\" --progress", TimeSpan.FromMinutes(45),
             progress.Report, gameDir, taskId);
-        return ParseActionResult(result);
+        return await SelectInstalledInstanceAsync(ParseActionResult(result), gameDir);
     }
 
     public async Task<BackendResult> InstallOnlineAsync(string source, string projectId, string versionId, string kind = "mod",
@@ -781,17 +806,29 @@ public sealed partial class BackendClient
             + (progress is null ? "" : " --progress")
             + (skipDependencies is { Length: > 0 } ? " --skip-dependencies=" + string.Join(",", skipDependencies) : ""),
             TimeSpan.FromMinutes(pack ? 45 : 10), progress is null ? null : progress.Report, pack ? DefaultPackRoot() : "", taskId);
+        return pack ? await SelectInstalledInstanceAsync(ParseActionResult(result), DefaultPackRoot()) : ParseActionResult(result);
+    }
+
+    public async Task<BackendResult> DownloadOnlineFileAsync(string source, string projectId,
+        string fileId, string folder, string taskId)
+    {
+        var path = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(folder));
+        var result = await RunAsync($"--download-online-file {source} {projectId} {fileId} {path}",
+            TimeSpan.FromMinutes(30), taskId: taskId);
         return ParseActionResult(result);
     }
 
-    public async Task<OnlineFilesResult?> GetOnlineFilesAsync(string source, string projectId, string versionId, string kind = "mod")
+    public async Task<OnlineFilesResult?> GetOnlineFilesAsync(string source, string projectId, string versionId, string kind = "mod",
+        string? gameVersion = null, string? loader = null, string gameRoot = "")
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId))
             return new OnlineFilesResult { Ok = false, Message = "没有指定在线资源。" };
 
         var result = await RunAsync(
-            $"--online-files {source} {projectId} \"{versionId}\" {kind}",
-            TimeSpan.FromSeconds(45));
+            $"--online-files {source} {projectId} \"{versionId}\" {kind}"
+            + (gameVersion is null ? "" : " --resource-filter=" + Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { gameVersion, loader })))),
+            TimeSpan.FromSeconds(45), gameDir: gameRoot);
         if (!result.Success) return new OnlineFilesResult { Ok = false, Message = result.Error };
         try
         {
@@ -806,7 +843,8 @@ public sealed partial class BackendClient
     public async Task<BackendResult> InstallOnlineFileAsync(
         string source, string projectId, string fileId, string versionId, string kind = "mod",
         string confirmation = "", IProgress<string>? progress = null, string? taskId = null,
-        string[]? skipDependencies = null)
+        string[]? skipDependencies = null, string gameRoot = "",
+        IReadOnlyDictionary<string, string>? dependencyVersions = null)
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId) ||
             string.IsNullOrWhiteSpace(fileId))
@@ -816,11 +854,12 @@ public sealed partial class BackendClient
         if (confirmation.Length > 0) args += $" --confirmed-dependencies={confirmation}";
         if (skipDependencies is { Length: > 0 })
             args += " --skip-dependencies=" + string.Join(",", skipDependencies);
+        args += DependencyVersionArgument(dependencyVersions);
         if (progress is not null) args += " --progress";
         var pack = kind == "modpack";
         var result = await RunAsync(args, TimeSpan.FromMinutes(pack ? 45 : 10),
-            progress is null ? null : progress.Report, pack ? DefaultPackRoot() : "", taskId);
-        return ParseActionResult(result);
+            progress is null ? null : progress.Report, gameRoot.Length > 0 ? gameRoot : pack ? DefaultPackRoot() : "", taskId);
+        return pack ? await SelectInstalledInstanceAsync(ParseActionResult(result), gameRoot.Length > 0 ? gameRoot : DefaultPackRoot()) : ParseActionResult(result);
     }
 
     /// <summary>前置列表的一张卡：图标 + 标题 + 来源/大小，点开看详情。</summary>
@@ -1009,18 +1048,33 @@ public sealed partial class BackendClient
     private static string DefaultPackRoot() =>
         GameDirectoryResolver.Resolve(App.MainWindow?.Preferences).FirstOrDefault() ?? "";
 
+    private static string DependencyVersionArgument(IReadOnlyDictionary<string, string>? versions) =>
+        versions is { Count: > 0 }
+            ? " --dependency-versions=" + Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(versions))
+            : "";
+
+    private async Task<DependencyCard?> GetDependencyInfoAsync(string source, string projectId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) return null;
+        var result = await RunAsync($"--dependency-info {source} {projectId}", TimeSpan.FromSeconds(15));
+        return result.Success ? JsonSerializer.Deserialize<DependencyCard>(result.Output.Trim(), JsonOptions) : null;
+    }
+
     /// <summary>读前置计划（不弹窗）；skipDependencies 会让后台按过滤后的文件列表重算哈希。</summary>
     public async Task<OnlineModInstallPlan?> GetOnlineModPlanAsync(
         string source, string projectId, string fileId, string versionId,
-        IReadOnlyCollection<string>? skipDependencies = null)
+        IReadOnlyCollection<string>? skipDependencies = null, string gameRoot = "", bool showInstalled = false,
+        IReadOnlyDictionary<string, string>? dependencyVersions = null)
     {
         var args = string.IsNullOrWhiteSpace(fileId)
             ? $"--install-online {source} {projectId} \"{versionId}\" mod"
             : $"--install-online-file {source} {projectId} {fileId} \"{versionId}\" mod";
         args += " --plan-online-mod";
+        if (showInstalled) args += " --show-installed-deps";
+        args += DependencyVersionArgument(dependencyVersions);
         if (skipDependencies is { Count: > 0 })
             args += " --skip-dependencies=" + string.Join(",", skipDependencies);
-        var result = await RunAsync(args, TimeSpan.FromMinutes(2));
+        var result = await RunAsync(args, TimeSpan.FromMinutes(2), gameDir: gameRoot);
         if (!result.Success) throw new InvalidOperationException(result.Error);
         var plan = JsonSerializer.Deserialize<OnlineModInstallPlan>(result.Output.Trim(), JsonOptions);
         if (plan is not { Ok: true, Confirmation.Length: > 0, FileId.Length: > 0 })
@@ -1030,25 +1084,60 @@ public sealed partial class BackendClient
 
     public async Task<OnlineModInstallPlan?> ConfirmOnlineModInstallAsync(
         string source, string projectId, string fileId, string versionId,
-        Microsoft.UI.Xaml.XamlRoot xamlRoot, IReadOnlyCollection<string>? presetSkip = null)
+        Microsoft.UI.Xaml.XamlRoot xamlRoot, string gameRoot = "", bool showAllDependencies = false)
     {
-        // 已经在前置链接里点选过：不再弹一次窗，按选择重算带哈希的计划。
-        if (presetSkip is not null)
+        var versions = new Dictionary<string, string>(StringComparer.Ordinal);
+        var skippedProjects = new HashSet<string>(StringComparer.Ordinal);
+        var review = false;
+        while (true)
         {
-            var picked = await GetOnlineModPlanAsync(source, projectId, fileId, versionId, presetSkip);
-            return picked is null ? null : picked with { SkipDependencies = presetSkip.ToArray() };
+            var plan = (await GetOnlineModPlanAsync(source, projectId, fileId, versionId,
+                gameRoot: gameRoot, showInstalled: true, dependencyVersions: versions))!;
+            var missing = plan.Dependencies ?? Array.Empty<string>();
+            if (missing.Length == 0 && !showAllDependencies && !review) return plan;
+            var selection = await ShowDependencyDialogAsync(source, versionId, xamlRoot, plan, skippedProjects,
+                showAllDependencies, review);
+            if (selection is null) return null;
+            if (selection.Value.ChangedVersions.Count > 0)
+            {
+                foreach (var (project, version) in selection.Value.ChangedVersions) versions[project] = version;
+                review = true;
+                continue;
+            }
+            var skipped = selection.Value.Skipped;
+            var final = skipped.Length == 0 ? plan : (await GetOnlineModPlanAsync(source, projectId, fileId, versionId,
+                skipped, gameRoot, dependencyVersions: versions))!;
+            return final with { SkipDependencies = skipped, DependencyVersions = versions };
+        }
+    }
+
+    private async Task<(string[] Skipped, Dictionary<string, string> ChangedVersions)?> ShowDependencyDialogAsync(
+        string source, string versionId, Microsoft.UI.Xaml.XamlRoot xamlRoot, OnlineModInstallPlan plan,
+        HashSet<string> skippedProjects, bool showAllDependencies, bool review)
+    {
+        var missing = plan.Dependencies ?? Array.Empty<string>();
+        var cards = plan.DependencyCards ?? Array.Empty<DependencyCard>();
+        if (missing.Length == 0 && cards.Length == 0)
+        {
+            var resolved = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                XamlRoot = xamlRoot,
+                Title = "必需前置",
+                Content = "这个版本的必需前置已满足，可以直接安装。",
+                CloseButtonText = "关闭",
+            };
+            await resolved.ShowAsync();
+            return ([], new());
         }
 
-        var plan = await GetOnlineModPlanAsync(source, projectId, fileId, versionId);
-        if (plan!.Dependencies is not { Length: > 0 }) return plan;
-
-        var cards = plan.DependencyCards ?? Array.Empty<DependencyCard>();
         if (cards.Length == 0)
-            cards = plan.Dependencies.Select(name => new DependencyCard(name, name, "", "", "", "未知来源", 0, 0, "")).ToArray();
+            cards = missing.Select(name => new DependencyCard(name, name, "", "", "", "未知来源", 0, 0, "")).ToArray();
 
         var header = new Microsoft.UI.Xaml.Controls.TextBlock
         {
-            Text = $"以下前置会随 Mod 一起安装到 {versionId}；取消勾选就不装。",
+            Text = review ? "已按选中的版本重新检查前置，请确认安装内容。"
+                : missing.Length == 0 ? $"必需前置已安装在 {versionId}。"
+                : $"勾选的前置会随 Mod 一起安装到 {versionId}。",
             TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
         };
         var listHost = new Microsoft.UI.Xaml.Controls.StackPanel { Spacing = 6 };
@@ -1057,16 +1146,18 @@ public sealed partial class BackendClient
             Spacing = 10,
             Visibility = Microsoft.UI.Xaml.Visibility.Collapsed,
         };
-        var checks = new List<(DependencyCard Card, Microsoft.UI.Xaml.Controls.CheckBox Box)>();
+        var checks = new List<(DependencyCard Card, Microsoft.UI.Xaml.Controls.CheckBox Box,
+            Microsoft.UI.Xaml.Controls.ComboBox? VersionBox)>();
         foreach (var card in cards)
         {
             var box = new Microsoft.UI.Xaml.Controls.CheckBox
             {
-                IsChecked = true,
+                IsChecked = card.Installed || !skippedProjects.Contains(card.ProjectId),
+                IsEnabled = !card.Installed,
                 MinWidth = 0,
                 VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Center,
             };
-            var button = BuildDependencyCard(card, item =>
+            var button = BuildDependencyCard(card, async item =>
             {
                 listHost.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                 detailHost.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
@@ -1075,6 +1166,23 @@ public sealed partial class BackendClient
                     detailHost.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
                     listHost.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
                 });
+                var initial = detailHost.Children[0];
+                try
+                {
+                    var info = await GetDependencyInfoAsync(source, item.ProjectId);
+                    if (info is not null && detailHost.Visibility == Microsoft.UI.Xaml.Visibility.Visible
+                        && ReferenceEquals(initial, detailHost.Children.FirstOrDefault()))
+                        ShowDependencyDetail(detailHost, item with
+                        {
+                            Title = string.IsNullOrWhiteSpace(info.Title) ? item.Title : info.Title,
+                            Summary = info.Summary, Icon = info.Icon, Author = info.Author,
+                        }, () =>
+                        {
+                            detailHost.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+                            listHost.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+                        });
+                }
+                catch (Exception ex) { App.Trace("Dependency details: " + ex.Message); }
             });
             var row = new Microsoft.UI.Xaml.Controls.Grid { ColumnSpacing = 4 };
             row.ColumnDefinitions.Add(new Microsoft.UI.Xaml.Controls.ColumnDefinition
@@ -1086,10 +1194,36 @@ public sealed partial class BackendClient
                 Width = new Microsoft.UI.Xaml.GridLength(1, Microsoft.UI.Xaml.GridUnitType.Star),
             });
             row.Children.Add(box);
-            Microsoft.UI.Xaml.Controls.Grid.SetColumn(button, 1);
-            row.Children.Add(button);
+            var options = card.VersionOptions ?? [];
+            var choiceHost = new Microsoft.UI.Xaml.Controls.StackPanel { Spacing = 4 };
+            choiceHost.Children.Add(button);
+            Microsoft.UI.Xaml.Controls.ComboBox? versionBox = null;
+            if (!card.Installed && !card.Pinned && options.Length > 1)
+            {
+                versionBox = new Microsoft.UI.Xaml.Controls.ComboBox
+                {
+                    Header = "前置版本",
+                    ItemsSource = options,
+                    DisplayMemberPath = nameof(DependencyVersionOption.Label),
+                    SelectedItem = options.FirstOrDefault(v => v.Id == card.VersionId),
+                    HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
+                };
+                choiceHost.Children.Add(versionBox);
+            }
+            else if (options.Length > 0)
+            {
+                choiceHost.Children.Add(new Microsoft.UI.Xaml.Controls.TextBlock
+                {
+                    Text = (card.Pinned ? "要求版本 " : "版本 ") + options[0].Label,
+                    Opacity = 0.7,
+                    FontSize = 12,
+                    TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap,
+                });
+            }
+            Microsoft.UI.Xaml.Controls.Grid.SetColumn(choiceHost, 1);
+            row.Children.Add(choiceHost);
             listHost.Children.Add(row);
-            checks.Add((card, box));
+            checks.Add((card, box, versionBox));
         }
 
         var body = new Microsoft.UI.Xaml.Controls.Grid();
@@ -1099,7 +1233,7 @@ public sealed partial class BackendClient
         var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
         {
             XamlRoot = xamlRoot,
-            Title = "安装必需前置",
+            Title = showAllDependencies ? "查看必需前置" : "安装必需前置",
             Content = new Microsoft.UI.Xaml.Controls.StackPanel
             {
                 Spacing = 10,
@@ -1113,10 +1247,14 @@ public sealed partial class BackendClient
             CloseButtonText = "取消",
         };
         if (await dialog.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return null;
-        var skipped = checks.Where(c => c.Box.IsChecked != true).Select(c => c.Card.Name).ToArray();
-        if (skipped.Length == 0) return plan;
-        var replan = await GetOnlineModPlanAsync(source, projectId, fileId, versionId, skipped);
-        return replan is null ? null : replan with { SkipDependencies = skipped };
+        var skipped = checks.Where(c => c.Box.IsChecked != true).ToArray();
+        skippedProjects.Clear();
+        skippedProjects.UnionWith(skipped.Select(c => c.Card.ProjectId));
+        var changed = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (card, check, selector) in checks)
+            if (check.IsChecked == true && selector?.SelectedItem is DependencyVersionOption option && option.Id != card.VersionId)
+                changed[card.ProjectId] = option.Id;
+        return (skipped.Select(c => c.Card.Name).ToArray(), changed);
     }
 
     public async Task<BackendResult> InstallInstanceLoaderAsync(string id, string kind, string version,
@@ -1151,7 +1289,7 @@ public sealed partial class BackendClient
         var result = progress is null
             ? await RunAsync(args, TimeSpan.FromMinutes(30), gameDir: gameDir, taskId: taskId)
             : await RunAsync(args, TimeSpan.FromMinutes(30), stage => progress.Report(stage), gameDir, taskId);
-        return ParseActionResult(result);
+        return await SelectInstalledInstanceAsync(ParseActionResult(result), gameDir);
     }
 
     public async Task<IReadOnlyList<ApiRelease>?> GetApiVersionsAsync(string mcVersion, string projectId)
@@ -1436,9 +1574,9 @@ public sealed partial class BackendClient
     }
 
     /// <summary>--saves：该实例实际使用的 saves 目录里的存档名（隔离实例看 versions/<id>/saves）；失败返回 null。</summary>
-    public async Task<List<string>?> GetSaveNamesAsync(string versionId)
+    public async Task<List<string>?> GetSaveNamesAsync(string versionId, string gameRoot = "")
     {
-        var result = await RunAsync($"--saves \"{versionId}\"", TimeSpan.FromSeconds(25));
+        var result = await RunAsync($"--saves \"{versionId}\"", TimeSpan.FromSeconds(25), gameDir: gameRoot);
         if (!result.Success) return null;
         try
         {
@@ -2137,11 +2275,15 @@ public sealed record OnlineModInstallPlan(bool Ok, string? Message, string FileI
 {
     /// <summary>用户明确不装的前置（文件名），安装时要一起传给后台。</summary>
     public string[] SkipDependencies { get; init; } = Array.Empty<string>();
+    public IReadOnlyDictionary<string, string>? DependencyVersions { get; init; }
 }
 
 /// <summary>安装前置卡片：列表里显示标题/来源，点开看简介。</summary>
 public sealed record DependencyCard(string Name, string Title, string Author, string Summary,
-    string Icon, string Source, long Downloads, long Size, string Url, bool Installed = false);
+    string Icon, string Source, long Downloads, long Size, string Url, bool Installed = false,
+    string ProjectId = "", string VersionId = "", bool Pinned = false, DependencyVersionOption[]? VersionOptions = null);
+
+public sealed record DependencyVersionOption(string Id, string Label);
 
 public sealed record BackendResult(bool Ok, string Message)
 {
