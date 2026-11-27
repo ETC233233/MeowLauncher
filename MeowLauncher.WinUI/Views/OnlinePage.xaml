@@ -195,17 +195,6 @@
                                           ToolTipService.ToolTip="加载器（「跟随」= 当前实例的加载器）"
                                           AutomationProperties.Name="加载器筛选" />
                             </StackPanel>
-                            <ComboBox x:Name="TypeBox" Height="32" Width="112" CornerRadius="10"
-                                      VerticalAlignment="Center" SelectionChanged="Type_SelectionChanged"
-                                      ToolTipService.ToolTip="内容类型"
-                                      AutomationProperties.Name="内容类型筛选">
-                                <ComboBoxItem Content="全部类型" Tag="all" />
-                                <ComboBoxItem Content="Mod" Tag="mod" />
-                                <ComboBoxItem Content="整合包" Tag="modpack" />
-                                <ComboBoxItem Content="资源包" Tag="resourcepack" />
-                                <ComboBoxItem Content="光影" Tag="shader" />
-                                <ComboBoxItem Content="数据包" Tag="datapack" />
-                            </ComboBox>
                             <TextBlock Text="排序" FontSize="11.5" Margin="6,0,2,0" VerticalAlignment="Center"
                                        Foreground="{ThemeResource AppText3Brush}" />
                             <ComboBox x:Name="SortBox" Height="32" Width="104" CornerRadius="10"

@@ -452,7 +452,16 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     public static int PreferredSource { get; set; } = -1;
 
     /// <summary>CurseForge 来源（0 MCIM 社区镜像 / 1 MeowAPI / 2 官方），同样由「获取」页的下载源菜单写入。</summary>
-    public static int PreferredCfSource { get; set; }
+    public static int PreferredCfSource
+    {
+        get => App.MainWindow?.Preferences.CurseForgeSource ?? 0;
+        set
+        {
+            if (App.MainWindow?.Preferences is not { } prefs) return;
+            prefs.CurseForgeSource = Math.Clamp(value, 0, 2);
+            AppPreferencesStore.Save(prefs);
+        }
+    }
 
     internal static int ResourceSourceIndex(string source) =>
         source is "priority:curseforge,modrinth" or "only:curseforge" ? 1 : 0;
@@ -693,36 +702,6 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         ApplyResults(SourceBox.SelectedIndex >= 1 ? "CurseForge" : "Modrinth", _query);
     }
 
-    private bool _typeSyncing;
-
-    /// <summary>顶部「类型」下拉：和左栏分类是同一个状态，互相点亮。</summary>
-    private async void Type_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_typeSyncing || TypeBox?.SelectedItem is not ComboBoxItem { Tag: string category }) return;
-        // CurseForge 没有「全部类型」，落到 Mod。
-        if (category == "all" && SourceBox.SelectedIndex >= 1) category = "mod";
-        if (category == _category) { SyncTypeBox(); return; }
-        await SwitchCategoryAsync(category);
-    }
-
-    private void SyncTypeBox()
-    {
-        if (TypeBox is null) return;
-        var index = _category switch
-        {
-            "mod" => 1,
-            "modpack" => 2,
-            "resourcepack" => 3,
-            "shader" => 4,
-            "datapack" => 5,
-            _ => 0,
-        };
-        if (TypeBox.SelectedIndex == index) return;
-        _typeSyncing = true;
-        TypeBox.SelectedIndex = index;
-        _typeSyncing = false;
-    }
-
     /// <summary>由「获取」页的来源菜单调用：0 MCIM 社区镜像 / 1 MeowAPI / 2 官方。</summary>
     public void SetCfSource(int index)
     {
@@ -774,7 +753,6 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 ? Microsoft.UI.Text.FontWeights.SemiBold
                 : Microsoft.UI.Text.FontWeights.Normal;
         }
-        SyncTypeBox();
     }
 
     private async void CategoryShortcut_Click(object sender, RoutedEventArgs e)

@@ -591,6 +591,8 @@ public sealed partial class SettingsPage : Page
         _suppress = true;
         _savedResourceSource = general.DownloadSource;
         DownloadSourceBox.SelectedIndex = OnlinePage.ResourceSourceIndex(_savedResourceSource);
+        ResourceMirrorBox.SelectedIndex = McimClient.PreferOfficial ? 1 : 0;
+        CfMirrorBox.SelectedIndex = OnlinePage.PreferredCfSource;
         LoadProxyFromPreferences();
         LoadAfterLaunch();
         _savedGameMirror = general.Mirror;
@@ -1155,6 +1157,14 @@ public sealed partial class SettingsPage : Page
         if (prefs is null) return;
         prefs.AfterLaunch = string.IsNullOrWhiteSpace(SelectedTag(AfterLaunchBox)) ? "keep" : SelectedTag(AfterLaunchBox);
         AppPreferencesStore.Save(prefs);
+        MarkSaved();
+    }
+
+    private void ResourceMirror_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppress || !_ready) return;
+        McimClient.SetPreferOfficial(ResourceMirrorBox.SelectedIndex == 1);
+        OnlinePage.PreferredCfSource = Math.Clamp(CfMirrorBox.SelectedIndex, 0, 2);
         MarkSaved();
     }
 

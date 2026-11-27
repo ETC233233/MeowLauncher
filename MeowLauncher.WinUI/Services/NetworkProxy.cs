@@ -22,7 +22,7 @@ public static class NetworkProxy
         Current = preferences;
         ChildEnvironment.Clear();
 
-        var mode = preferences.ProxyMode;
+        var mode = string.IsNullOrWhiteSpace(preferences.ProxyMode) ? "direct" : preferences.ProxyMode;
         if (string.Equals(mode, "direct", StringComparison.OrdinalIgnoreCase))
         {
             Proxy = new WebProxy();

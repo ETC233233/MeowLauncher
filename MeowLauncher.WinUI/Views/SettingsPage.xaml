@@ -657,6 +657,27 @@
 
                             </Border>
                             <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="38">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Modrinth 优先提供源" Style="{StaticResource RowLabelStyle}" />
+                                    <ComboBox Grid.Column="1" x:Name="ResourceMirrorBox" Style="{StaticResource SettingsComboStyle}" SelectionChanged="ResourceMirror_Changed">
+                                        <ComboBoxItem Content="MCIM 镜像" Tag="mirror" />
+                                        <ComboBoxItem Content="官方源" Tag="official" />
+                                    </ComboBox>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
+                                <Grid ColumnSpacing="14" MinHeight="38">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="CurseForge 优先提供源" Style="{StaticResource RowLabelStyle}" />
+                                    <ComboBox Grid.Column="1" x:Name="CfMirrorBox" Style="{StaticResource SettingsComboStyle}" SelectionChanged="ResourceMirror_Changed">
+                                        <ComboBoxItem Content="MCIM" Tag="mcim" />
+                                        <ComboBoxItem Content="MeowAPI" Tag="cfmi" />
+                                        <ComboBoxItem Content="CurseForge 官方" Tag="official" />
+                                    </ComboBox>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingsRowCardStyle}">
                                 <Grid ColumnSpacing="14">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />

@@ -82,7 +82,9 @@ public sealed class AppPreferences
 
     public bool PreferOfficialResources { get; set; }
 
-    public string ProxyMode { get; set; } = "system";
+    public string ProxyMode { get; set; } = "direct";
+
+    public int CurseForgeSource { get; set; } = 0;
 
     /// <summary>自定义代理主机（ProxyMode=custom 时使用），例如 127.0.0.1。</summary>
     public string ProxyHost { get; set; } = "";
