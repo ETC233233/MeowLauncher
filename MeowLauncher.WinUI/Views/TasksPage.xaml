@@ -24,96 +24,92 @@
         </Style>
         <!-- 任务行：进行中带行内转圈 + 取消；完成/失败带状态胶囊。 -->
         <DataTemplate x:Key="TaskRowTemplate" x:DataType="models:TaskEntry">
-            <ContentControl Margin="0,0,0,14" IsTabStop="True" UseSystemFocusVisuals="True"
-                            HorizontalContentAlignment="Stretch" AutomationProperties.Name="{x:Bind Title}"
-                            Tag="{x:Bind}" KeyDown="TaskRow_KeyDown" Tapped="TaskRow_Tapped">
-                <Border BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="0,0,0,1" Padding="0,7,0,14">
-                    <StackPanel Spacing="12">
-                        <Grid ColumnSpacing="9">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <Grid Width="28" Height="30">
-                                <FontIcon Glyph="{x:Bind views:TaskVisuals.IconFor(Title)}" FontSize="18" Foreground="{ThemeResource AppText2Brush}" Visibility="{x:Bind TaskGlyphVisibility, Mode=OneWay}"/>
-                                <Image Source="{x:Bind TargetIcon, Mode=OneWay}" Width="28" Height="28" Stretch="Uniform"/>
+            <Border Margin="0,0,0,14" BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="0,0,0,1" Padding="0,7,0,14">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="9">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <Grid Width="28" Height="30">
+                            <FontIcon Glyph="{x:Bind views:TaskVisuals.IconFor(Title)}" FontSize="18" Foreground="{ThemeResource AppText2Brush}" Visibility="{x:Bind TaskGlyphVisibility, Mode=OneWay}"/>
+                            <Image Source="{x:Bind TargetIcon, Mode=OneWay}" Width="28" Height="28" Stretch="Uniform"/>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind views:TaskVisuals.DisplayTitle(Title)}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{x:Bind views:TaskVisuals.TaskMeta(Title, Status, TimeText), Mode=OneWay}" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Button Grid.Column="2" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0"
+                                AutomationProperties.Name="移除此任务记录" Tag="{x:Bind Id}" Click="DismissTask_Click"
+                                Visibility="{x:Bind views:TaskVisuals.FinishedVisibility(Status), Mode=OneWay}"><FontIcon Glyph="&#xE711;" FontSize="11"/></Button>
+                    </Grid>
+                    <Grid ColumnSpacing="12" Visibility="{x:Bind views:TaskVisuals.ActiveVisibility(Status), Mode=OneWay}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{x:Bind views:TaskVisuals.DeterminateVisibility(IsIndeterminate), Mode=OneWay}">
+                            <TextBlock Text="{x:Bind views:TaskVisuals.PercentNumber(Progress), Mode=OneWay}" FontSize="32" FontWeight="SemiBold"/>
+                            <TextBlock Text="%" FontSize="13" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Bottom" Margin="2,0,0,5"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource AppText2Brush}" MaxLines="1" TextTrimming="CharacterEllipsis"/>
+                            <Grid Height="3">
+                                <Border CornerRadius="1.5" Background="{ThemeResource AppChipBrush}"/>
+                                <Border CornerRadius="1.5" Background="{ThemeResource AppAccentBrush}" RenderTransformOrigin="0,0.5" Visibility="{x:Bind views:TaskVisuals.DeterminateVisibility(IsIndeterminate), Mode=OneWay}">
+                                    <Border.RenderTransform><ScaleTransform ScaleX="{x:Bind views:TaskVisuals.ProgressScale(Progress), Mode=OneWay}"/></Border.RenderTransform>
+                                </Border>
+                                <ProgressBar IsIndeterminate="True" Height="3" Background="Transparent" Foreground="{ThemeResource AppAccentBrush}" Visibility="{x:Bind views:TaskVisuals.IndeterminateVisibility(IsIndeterminate), Mode=OneWay}"/>
                             </Grid>
-                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind views:TaskVisuals.DisplayTitle(Title)}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{x:Bind views:TaskVisuals.TaskMeta(Title, Status, TimeText), Mode=OneWay}" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                            <Button Grid.Column="2" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0"
-                                    AutomationProperties.Name="移除此任务记录" Tag="{x:Bind Id}" Click="DismissTask_Click"
-                                    Visibility="{x:Bind views:TaskVisuals.FinishedVisibility(Status), Mode=OneWay}"><FontIcon Glyph="&#xE711;" FontSize="11"/></Button>
-                        </Grid>
-                        <Grid ColumnSpacing="12" Visibility="{x:Bind views:TaskVisuals.ActiveVisibility(Status), Mode=OneWay}">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{x:Bind views:TaskVisuals.DeterminateVisibility(IsIndeterminate), Mode=OneWay}">
-                                <TextBlock Text="{x:Bind views:TaskVisuals.PercentNumber(Progress), Mode=OneWay}" FontSize="32" FontWeight="SemiBold"/>
-                                <TextBlock Text="%" FontSize="13" Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Bottom" Margin="2,0,0,5"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Spacing="7" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource AppText2Brush}" MaxLines="1" TextTrimming="CharacterEllipsis"/>
-                                <Grid Height="3">
-                                    <Border CornerRadius="1.5" Background="{ThemeResource AppChipBrush}"/>
-                                    <Border CornerRadius="1.5" Background="{ThemeResource AppAccentBrush}" RenderTransformOrigin="0,0.5" Visibility="{x:Bind views:TaskVisuals.DeterminateVisibility(IsIndeterminate), Mode=OneWay}">
-                                        <Border.RenderTransform><ScaleTransform ScaleX="{x:Bind views:TaskVisuals.ProgressScale(Progress), Mode=OneWay}"/></Border.RenderTransform>
-                                    </Border>
-                                    <ProgressBar IsIndeterminate="True" Height="3" Background="Transparent" Foreground="{ThemeResource AppAccentBrush}" Visibility="{x:Bind views:TaskVisuals.IndeterminateVisibility(IsIndeterminate), Mode=OneWay}"/>
+                            <TextBlock Text="{x:Bind views:TaskVisuals.StatsText(SpeedText, RemainText), Mode=OneWay}" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap"
+                                       Visibility="{x:Bind views:TaskVisuals.HasStatsVisibility(HasStats), Mode=OneWay}"/>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource AppText2Brush}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                               Visibility="{x:Bind views:TaskVisuals.TaskDetailVisibility(Status, IsIndeterminate), Mode=OneWay}"/>
+                    <Grid ColumnSpacing="12" Visibility="{x:Bind views:TaskVisuals.ActiveVisibility(Status), Mode=OneWay}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <ToggleButton x:Name="StepsToggle" IsChecked="False" Height="28" Padding="6,0" FontSize="12" HorizontalAlignment="Left" Background="Transparent" BorderThickness="0"
+                                      Visibility="{x:Bind StepsVisibility, Mode=OneWay}" AutomationProperties.Name="展开或收起安装步骤">
+                            <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE70D;" FontSize="10"/><TextBlock Text="安装详情" FontSize="12"/></StackPanel>
+                        </ToggleButton>
+                        <Button Grid.Column="1" Content="取消" Height="28" Padding="8,0" FontSize="12" Background="Transparent" BorderThickness="0" HorizontalAlignment="Right" Tag="{x:Bind Id}" Click="Cancel_Click"
+                                AutomationProperties.Name="取消这个进行中的任务" IsEnabled="{x:Bind views:TaskVisuals.CancelEnabled(Status, Detail), Mode=OneWay}"/>
+                    </Grid>
+                    <ItemsControl ItemsSource="{x:Bind Steps, Mode=OneWay}" Margin="0,2,0,0"
+                                  Visibility="{Binding IsChecked, ElementName=StepsToggle, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:TaskStep">
+                                <Grid Height="22" ColumnSpacing="8" Opacity="{x:Bind Opacity, Mode=OneWay}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="12"
+                                              Foreground="{ThemeResource AppAccentBrush}" Visibility="{x:Bind GlyphVisibility, Mode=OneWay}"/>
+                                    <ProgressRing Width="18" Height="18" IsActive="True"
+                                                  HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                  Margin="-1,0,0,0"
+                                                  Foreground="{ThemeResource TintTasksBrush}"
+                                                  Visibility="{x:Bind SpinnerVisibility, Mode=OneWay}" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Title}" FontSize="12"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                               MaxLines="1" />
+                                    <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" FontSize="11.5"
+                                               Margin="8,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource AppText3Brush}"
+                                               TextTrimming="CharacterEllipsis" MaxLines="1"
+                                               Visibility="{x:Bind DetailVisibility, Mode=OneWay}" />
+                                    <TextBlock Grid.Column="3" Text="{x:Bind PctText, Mode=OneWay}" FontSize="11.5"
+                                               Margin="8,0,0,0"
+                                               VerticalAlignment="Center" Foreground="{ThemeResource AppText3Brush}" />
                                 </Grid>
-                                <TextBlock Text="{x:Bind views:TaskVisuals.StatsText(SpeedText, RemainText), Mode=OneWay}" FontSize="11.5" Foreground="{ThemeResource AppText3Brush}" TextWrapping="Wrap"
-                                           Visibility="{x:Bind views:TaskVisuals.HasStatsVisibility(HasStats), Mode=OneWay}"/>
-                            </StackPanel>
-                        </Grid>
-                        <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource AppText2Brush}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
-                                   Visibility="{x:Bind views:TaskVisuals.TaskDetailVisibility(Status, IsIndeterminate), Mode=OneWay}"/>
-                        <Grid ColumnSpacing="12" Visibility="{x:Bind views:TaskVisuals.ActiveVisibility(Status), Mode=OneWay}">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <ToggleButton x:Name="StepsToggle" IsChecked="False" Height="28" Padding="6,0" FontSize="12" HorizontalAlignment="Left" Background="Transparent" BorderThickness="0"
-                                          Visibility="{x:Bind StepsVisibility, Mode=OneWay}" AutomationProperties.Name="展开或收起安装步骤">
-                                <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE70D;" FontSize="10"/><TextBlock Text="安装详情" FontSize="12"/></StackPanel>
-                            </ToggleButton>
-                            <Button Grid.Column="1" Content="取消" Height="28" Padding="8,0" FontSize="12" Background="Transparent" BorderThickness="0" HorizontalAlignment="Right" Tag="{x:Bind Id}" Click="Cancel_Click"
-                                    AutomationProperties.Name="取消这个进行中的任务" IsEnabled="{x:Bind views:TaskVisuals.CancelEnabled(Status, Detail), Mode=OneWay}"/>
-                        </Grid>
-                        <ItemsControl ItemsSource="{x:Bind Steps, Mode=OneWay}" Margin="0,2,0,0"
-                                      Visibility="{Binding IsChecked, ElementName=StepsToggle, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="models:TaskStep">
-                                    <Grid Height="22" ColumnSpacing="8" Opacity="{x:Bind Opacity, Mode=OneWay}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="18" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="12"
-                                                  Foreground="{ThemeResource AppAccentBrush}" Visibility="{x:Bind GlyphVisibility, Mode=OneWay}"/>
-                                        <ProgressRing Width="18" Height="18" IsActive="True"
-                                                      HorizontalAlignment="Left" VerticalAlignment="Center"
-                                                      Margin="-1,0,0,0"
-                                                      Foreground="{ThemeResource TintTasksBrush}"
-                                                      Visibility="{x:Bind SpinnerVisibility, Mode=OneWay}" />
-                                        <TextBlock Grid.Column="1" Text="{x:Bind Title}" FontSize="12"
-                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                                   MaxLines="1" />
-                                        <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" FontSize="11.5"
-                                                   Margin="8,0,0,0" VerticalAlignment="Center"
-                                                   Foreground="{ThemeResource AppText3Brush}"
-                                                   TextTrimming="CharacterEllipsis" MaxLines="1"
-                                                   Visibility="{x:Bind DetailVisibility, Mode=OneWay}" />
-                                        <TextBlock Grid.Column="3" Text="{x:Bind PctText, Mode=OneWay}" FontSize="11.5"
-                                                   Margin="8,0,0,0"
-                                                   VerticalAlignment="Center" Foreground="{ThemeResource AppText3Brush}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <Grid ColumnSpacing="8" Visibility="{x:Bind views:TaskVisuals.FailedVisibility(Status), Mode=OneWay}">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock Text="{x:Bind ErrorCodeText, Mode=OneWay}" FontSize="11.5" Foreground="{ThemeResource AppBadBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                            <Button Grid.Column="1" Content="复制诊断" FontSize="12" Padding="6,3" Background="Transparent" BorderThickness="0" AutomationProperties.Name="复制诊断信息" Tag="{x:Bind Id}" Click="CopyDiagnostics_Click"/>
-                        </Grid>
-                    </StackPanel>
-                </Border>
-            </ContentControl>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Grid ColumnSpacing="8" Visibility="{x:Bind views:TaskVisuals.FailedVisibility(Status), Mode=OneWay}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="{x:Bind ErrorCodeText, Mode=OneWay}" FontSize="11.5" Foreground="{ThemeResource AppBadBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="复制诊断" FontSize="12" Padding="6,3" Background="Transparent" BorderThickness="0" AutomationProperties.Name="复制诊断信息" Tag="{x:Bind Id}" Click="CopyDiagnostics_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </DataTemplate>
 
         <DataTemplate x:Key="NotificationRowTemplate" x:DataType="services:TaskNotification">
@@ -144,29 +140,6 @@
             </ContentControl>
         </DataTemplate>
         <!-- 详情里的单段：左边状态图标、中间标题+说明、右边状态字。 -->
-        <DataTemplate x:Key="StageRowTemplate" x:DataType="services:LaunchStage">
-            <Grid ColumnSpacing="10" Padding="0,3">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="18" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="12" VerticalAlignment="Top"
-                          Margin="0,2,0,0"
-                          Foreground="{x:Bind views:TaskVisuals.StageBrush(State), Mode=OneWay}" />
-                <StackPanel Grid.Column="1" Spacing="1">
-                    <TextBlock Text="{x:Bind Title}" FontSize="12"
-                               Foreground="{x:Bind views:TaskVisuals.StageTitleBrush(State), Mode=OneWay}" />
-                    <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="11.5"
-                               Visibility="{x:Bind DetailVisibility, Mode=OneWay}"
-                               Foreground="{ThemeResource AppText3Brush}"
-                               TextTrimming="CharacterEllipsis" />
-                </StackPanel>
-                <TextBlock Grid.Column="2" Text="{x:Bind StateText, Mode=OneWay}" FontSize="11.5"
-                           VerticalAlignment="Center"
-                           Foreground="{x:Bind views:TaskVisuals.StageBrush(State), Mode=OneWay}" />
-            </Grid>
-        </DataTemplate>
         <!-- 正在运行的游戏：任务页里直接看到 pid 并结束进程。 -->
         <DataTemplate x:Key="RunningRowTemplate" x:DataType="services:RunningGame">
             <Border Margin="0,0,0,8" Background="{ThemeResource AppCardBrush}"
@@ -363,103 +336,6 @@
             </StackPanel>
             </Grid>
 
-            <!-- 任务详情：侧栏内查看阶段及日志，不打开新窗口。 -->
-            <Border x:Name="DetailPanel" Grid.Row="1" Height="310" Margin="0,12,0,0"
-                    Visibility="Collapsed"
-                    Background="{ThemeResource AppCardBrush}"
-                    BorderBrush="{ThemeResource CardStrokeBrush}" BorderThickness="1"
-                    CornerRadius="{StaticResource CardCornerRadius}"
-                    Padding="{StaticResource CardPadding}">
-                <Grid RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Spacing="2">
-                            <TextBlock x:Name="DetailTitle" FontSize="14" FontWeight="SemiBold"
-                                       Foreground="{ThemeResource AppTextBrush}"
-                                       TextTrimming="CharacterEllipsis" />
-                            <TextBlock x:Name="DetailMeta" FontSize="11.5"
-                                       Foreground="{ThemeResource AppText3Brush}" />
-                        </StackPanel>
-                        <Border Grid.Column="1" x:Name="DetailPill" VerticalAlignment="Center"
-                                CornerRadius="{StaticResource ChipCornerRadius}" Padding="9,2"
-                                Background="{ThemeResource AppChipBrush}">
-                            <TextBlock x:Name="DetailStatus" Text="进行中" FontSize="11.5"
-                                       Foreground="{ThemeResource AppText2Brush}" />
-                        </Border>
-                        <Button Grid.Column="2" Width="30" Height="32" Padding="0" VerticalAlignment="Center"
-                                CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
-                                Background="{ThemeResource AppChipBrush}"
-                                AutomationProperties.Name="关闭任务详情" Click="CloseDetail_Click">
-                            <FontIcon Glyph="&#xE711;" FontSize="12" Foreground="{ThemeResource AppText2Brush}" />
-                        </Button>
-                    </Grid>
-
-                    <TextBlock Grid.Row="1" Text="任务详情" FontSize="12" FontWeight="SemiBold"
-                               Foreground="{ThemeResource AppText2Brush}" />
-
-                    <ItemsControl x:Name="DetailStageList" Grid.Row="2" ItemsSource="{x:Bind DetailStages}"
-                                  ItemTemplate="{StaticResource StageRowTemplate}" />
-
-                    <Grid Grid.Row="3" RowSpacing="6">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <Grid>
-                            <TextBlock Text="实时日志" FontSize="12" FontWeight="SemiBold"
-                                       Foreground="{ThemeResource AppText2Brush}" VerticalAlignment="Center" />
-                            <ToggleButton x:Name="FollowToggle" Content="跟随" IsChecked="True"
-                                          HorizontalAlignment="Right" Height="32" Padding="10,0"
-                                          FontSize="11.5" BorderThickness="0"
-                                          CornerRadius="{StaticResource ChipCornerRadius}"
-                                          AutomationProperties.Name="日志自动滚到底" Click="Follow_Click" />
-                        </Grid>
-                        <Border Grid.Row="1" Background="{ThemeResource AppChipBrush}" MinHeight="40"
-                                CornerRadius="{StaticResource ChipCornerRadius}" Padding="10,8">
-                            <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto"
-                                          HorizontalScrollBarVisibility="Auto">
-                                <TextBlock x:Name="LogText" FontFamily="Consolas" FontSize="11.5"
-                                           Foreground="{ThemeResource AppText2Brush}"
-                                           TextWrapping="NoWrap" IsTextSelectionEnabled="True" />
-                            </ScrollViewer>
-                        </Border>
-                    </Grid>
-
-                    <StackPanel Grid.Row="4" Spacing="8">
-                        <TextBlock x:Name="DetailError" FontSize="11.5" Visibility="Collapsed"
-                                   TextWrapping="Wrap" Foreground="{ThemeResource AppBadBrush}" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button x:Name="DetailCopyButton" Content="复制诊断" Height="32" Padding="12,0"
-                                    CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
-                                    Background="{ThemeResource AppChipBrush}" FontSize="11.5"
-                                    Foreground="{ThemeResource AppText2Brush}"
-                                    AutomationProperties.Name="复制诊断信息" Click="DetailCopy_Click" />
-                            <Button x:Name="DetailOpenLogButton" Content="打开日志文件" Height="32" Padding="12,0"
-                                    CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
-                                    Background="{ThemeResource AppChipBrush}" FontSize="11.5"
-                                    Foreground="{ThemeResource AppText2Brush}"
-                                    AutomationProperties.Name="打开日志文件" Click="DetailOpenLog_Click" />
-                            <Button x:Name="DetailGoButton" Content="前往该页" Height="32" Padding="12,0"
-                                    CornerRadius="{StaticResource ChipCornerRadius}" BorderThickness="0"
-                                    Background="{ThemeResource AppChipBrush}" FontSize="11.5"
-                                    Foreground="{ThemeResource AppText2Brush}"
-                                    AutomationProperties.Name="前往任务所属页面" Click="DetailGo_Click" />
-                        </StackPanel>
-                    </StackPanel>
-                </Grid>
-            </Border>
         </Grid>
 
     </Grid>

@@ -88,14 +88,10 @@ public sealed partial class MainWindow
         if (width <= 0) return;
         string? actionLabel = null;
         Action? action = null;
-        if (notice.SourceTask is { } task)
+        if (notice.SourceTask is not null)
         {
             actionLabel = "查看任务";
-            action = () =>
-            {
-                OpenTaskCenter();
-                if (TaskCenter.Entries.Contains(task)) _activityPage?.OpenDetail(task);
-            };
+            action = OpenTaskCenter;
         }
         else if (notice.Kind == "更新")
         {

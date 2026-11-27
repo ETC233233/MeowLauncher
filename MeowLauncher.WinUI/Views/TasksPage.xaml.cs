@@ -18,13 +18,11 @@ public sealed partial class TasksPage : Page
     private bool _drawerMode;
     private Storyboard? _sectionTransition;
     private bool _suppressSection;
-    private TaskEntry? _detailEntry;
 
     public ObservableCollection<TaskEntry> ActiveTasks { get; } = new();
     public ObservableCollection<TaskEntry> DoneTasks { get; } = new();
     public ObservableCollection<TaskEntry> FailedTasks { get; } = new();
     public ObservableCollection<TaskNotification> Notifications => TaskCenter.Notifications;
-    public ObservableCollection<LaunchStage> DetailStages { get; } = new();
     public ObservableCollection<RunningGame> RunningGames { get; } = new();
 
     public TasksPage()
@@ -58,18 +56,9 @@ public sealed partial class TasksPage : Page
         PageRoot.RowDefinitions[0].Height = new GridLength(0);
         PageRoot.RowSpacing = 0;
         PageRoot.Padding = new Thickness(0);
-        Grid.SetRow(DetailPanel, 0);
-        Grid.SetRowSpan(DetailPanel, 2);
-        DetailPanel.Height = double.NaN;
-        DetailPanel.Margin = new Thickness(0);
-        DetailPanel.Padding = new Thickness(10);
     }
 
-    public void ShowActivitySection(bool notifications)
-    {
-        if (_showNotifications != notifications) CloseDetail();
-        SetSection(notifications);
-    }
+    public void ShowActivitySection(bool notifications) => SetSection(notifications);
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -148,8 +137,6 @@ public sealed partial class TasksPage : Page
         NotificationEmptyHost.Visibility = Notifications.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         NotificationsScroll.Visibility = Notifications.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         UpdateActionVisibility();
-
-        RefreshDetail();
     }
 
     /// <summary>把集合同步成目标列表：多删、缺插、错位移动，已存在的元素原样保留。</summary>
@@ -282,13 +269,6 @@ public sealed partial class TasksPage : Page
         ShowContent(PageState.Error);
     }
 
-    private static string ClipText(string? text, int max)
-    {
-        var value = (text ?? "").Trim();
-        if (value.Length == 0) return "没有拿到具体原因，可以重试一次。";
-        return value.Length <= max ? value : value[..max] + "…";
-    }
-
     private void Retry_Click(object sender, RoutedEventArgs e) => _ = RefreshAsync();
 
     // ── 操作 ────────────────────────────────────────────────────────────
@@ -388,38 +368,11 @@ public sealed partial class TasksPage : Page
         }
     }
 
-    private void Row_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
-    {
-        if (sender is Border { Tag: string tag } && !string.IsNullOrWhiteSpace(tag))
-        {
-            App.MainWindow?.Navigate(tag);
-        }
-    }
-
     private void CopyDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string id }) return;
         var entry = TaskCenter.Entries.FirstOrDefault(item => item.Id == id);
         if (entry is not null) CopyTaskFailure(entry);
-    }
-
-    // ── 任务详情：四阶段时间线 + 实时日志尾 ──────────────────────────────
-
-    private void TaskRow_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
-    {
-        // Buttons and expanders handle their own action; bubbling must not open the log pane.
-        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, sender); node = VisualTreeHelper.GetParent(node))
-            if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase or Expander) return;
-        if (sender is FrameworkElement { Tag: TaskEntry entry }) OpenDetail(entry);
-    }
-
-    private void TaskRow_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, sender); node = VisualTreeHelper.GetParent(node))
-            if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase or Expander) return;
-        if (e.Key is not (VirtualKey.Enter or VirtualKey.Space)) return;
-        e.Handled = true;
-        if (sender is FrameworkElement { Tag: TaskEntry entry }) OpenDetail(entry);
     }
 
     private void Notification_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -432,102 +385,6 @@ public sealed partial class TasksPage : Page
         }
     }
 
-    internal void OpenDetail(TaskEntry entry)
-    {
-        _detailEntry = entry;
-        DetailPanel.Visibility = Visibility.Visible;
-        if (_drawerMode) TaskSection.Visibility = Visibility.Collapsed;
-        DetailStages.Clear();
-        var trace = TaskCenter.TraceFor(entry.Id);
-        if (trace is not null)
-        {
-            foreach (var stage in trace.Stages) DetailStages.Add(stage);
-        }
-        RefreshDetail();
-        if (FollowToggle.IsChecked == true) ScrollLogToEnd();
-    }
-
-    private void CloseDetail_Click(object sender, RoutedEventArgs e)
-    {
-        _detailEntry = null;
-        DetailPanel.Visibility = Visibility.Collapsed;
-        if (_drawerMode) SetSection(_showNotifications);
-    }
-
-    private void CloseDetail()
-    {
-        _detailEntry = null;
-        DetailPanel.Visibility = Visibility.Collapsed;
-        if (_drawerMode) SetSection(_showNotifications);
-    }
-
-    /// <summary>详情面板跟着任务轨迹刷新：阶段状态、日志尾、失败诊断都从 TaskCenter 取。</summary>
-    private void RefreshDetail()
-    {
-        var entry = _detailEntry;
-        if (entry is null) return;
-
-        if (TaskCenter.Entries.All(item => item.Id != entry.Id))
-        {
-            CloseDetail();
-            return;
-        }
-
-        DetailTitle.Text = TaskVisuals.DisplayTitle(entry.Title);
-        DetailMeta.Text = $"{TaskVisuals.KindLabel(entry.Title)} · {entry.TimeText}";
-        DetailStatus.Text = entry.Status;
-        DetailStatus.Foreground = TaskVisuals.StatusBrush(entry.Status);
-        DetailPill.Background = TaskVisuals.PillBackground(entry.Status);
-
-        var trace = TaskCenter.TraceFor(entry.Id);
-        if (trace is not null && DetailStages.Count != trace.Stages.Length)
-        {
-            DetailStages.Clear();
-            foreach (var stage in trace.Stages) DetailStages.Add(stage);
-        }
-
-        var log = trace?.LogText ?? "";
-        if (string.IsNullOrWhiteSpace(log)) log = entry.LiveText;
-        if (entry.Failure is { } failure)
-        {
-            var phase = string.IsNullOrWhiteSpace(failure.Stage) ? "" : $" · {failure.Stage}";
-            var error = $"[{failure.TimeText}] {failure.Code}{phase} · {entry.Detail}";
-            log = log.Length == 0 ? error : log + Environment.NewLine + error;
-        }
-        if (LogText.Text != log)
-        {
-            LogText.Text = log;
-            if (FollowToggle.IsChecked == true) ScrollLogToEnd();
-        }
-
-        var failed = entry.Status == "失败";
-        DetailError.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
-        DetailError.Text = failed
-            ? $"{entry.ErrorCodeText} · {ClipText(entry.Detail, 120)}"
-            : "";
-        DetailStageList.Visibility = DetailStages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        DetailOpenLogButton.IsEnabled = trace is not null && !string.IsNullOrWhiteSpace(trace.LogPath);
-        DetailOpenLogButton.Visibility = DetailOpenLogButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
-        DetailCopyButton.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
-        DetailCopyButton.IsEnabled = failed;
-    }
-
-    private void ScrollLogToEnd()
-    {
-        LogScroll.UpdateLayout();
-        LogScroll.ChangeView(null, LogScroll.ScrollableHeight, null, true);
-    }
-
-    private void Follow_Click(object sender, RoutedEventArgs e)
-    {
-        if (FollowToggle.IsChecked == true) ScrollLogToEnd();
-    }
-
-    private void DetailCopy_Click(object sender, RoutedEventArgs e)
-    {
-        if (_detailEntry is not null) CopyTaskFailure(_detailEntry);
-    }
-
     private void CopyTaskFailure(TaskEntry entry)
     {
         if (entry.Failure is not { } failure) return;
@@ -536,41 +393,8 @@ public sealed partial class TasksPage : Page
         ShowToast(InfoBarSeverity.Success, "诊断信息", $"已复制错误码 {failure.Code} 与任务上下文，粘贴到反馈里即可。");
     }
 
-    private void DetailOpenLog_Click(object sender, RoutedEventArgs e)
-    {
-        var path = TaskCenter.TraceFor(_detailEntry?.Id)?.LogPath;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            ShowToast(InfoBarSeverity.Informational, "日志", "这次任务还没有生成日志文件。");
-            return;
-        }
-
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "explorer.exe",
-                Arguments = $"/select,\"{path}\"",
-                UseShellExecute = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            ShowToast(InfoBarSeverity.Error, "日志", $"打不开日志文件：{Diagnostics.FriendlyMessage(ex)}");
-        }
-    }
-
-    private void DetailGo_Click(object sender, RoutedEventArgs e)
-    {
-        var tag = _detailEntry?.PageTag;
-        if (!string.IsNullOrWhiteSpace(tag)) App.MainWindow?.Navigate(tag);
-    }
-
     private static void ShowToast(InfoBarSeverity severity, string title, string message) =>
         TaskCenter.PostFeedback(severity, title, message, addToHistory: false);
-
-    private void Home_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
-        App.MainWindow.Navigate("home");
 }
 
 /// <summary>任务行的类型/状态视觉：图标按任务类型（启动/下载/安装），颜色按状态（进行中蓝、完成绿、失败红）。</summary>
@@ -694,21 +518,6 @@ public static class TaskVisuals
     public static Brush NotificationBackground(bool isRead) =>
         isRead ? PagePalette.ThemeBrush("AppCardBrush") : PagePalette.SoftTint("TintTasksColor");
 
-    /// <summary>阶段图标颜色：完成绿、进行中蓝、失败红、未开始灰。</summary>
-    public static Brush StageBrush(LaunchStageState state) => state switch
-    {
-        LaunchStageState.Done => PagePalette.ThemeBrush("AppGoodBrush"),
-        LaunchStageState.Active => PagePalette.ThemeBrush("TintTasksBrush"),
-        LaunchStageState.Failed => PagePalette.ThemeBrush("AppBadBrush"),
-        _ => PagePalette.ThemeBrush("AppText3Brush"),
-    };
-
-    /// <summary>阶段标题颜色：未开始的整行压暗，已完成/进行中用正文色。</summary>
-    public static Brush StageTitleBrush(LaunchStageState state) =>
-        state == LaunchStageState.Pending
-            ? PagePalette.ThemeBrush("AppText3Brush")
-            : PagePalette.ThemeBrush("AppTextBrush");
-
     public static Brush StatusBrush(string? status) => status switch
     {
         "进行中" => PagePalette.ThemeBrush("TintTasksBrush"),
@@ -717,11 +526,6 @@ public static class TaskVisuals
         "已取消" => PagePalette.ThemeBrush("AppText3Brush"),
         _ => PagePalette.ThemeBrush("AppText2Brush"),
     };
-
-    public static Brush PillBackground(string? status) =>
-        status == "进行中"
-            ? PagePalette.SoftTint("TintTasksColor")
-            : PagePalette.ThemeBrush("AppChipBrush");
 
     public static string StageText(string? detail)
     {
