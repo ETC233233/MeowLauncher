@@ -231,7 +231,7 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
             throw;
         }
         MeowLauncher.WinUI.Controls.Motion.Enter(SubHeader, 0, 6, 200);
-        // 标题栏返回键 / Alt+Left 走同一条历史：只关子页，不换整页。
+        // Alt+Left 关闭子页，和面包屑返回一致。
         if (first) App.MainWindow?.PushSubPage(() => CloseSubPageCore(popHistory: false));
     }
 
@@ -249,9 +249,7 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         if (popHistory) App.MainWindow?.PopSubPage();
     }
 
-    private void SubBack_Click(object sender, RoutedEventArgs e) => CloseSubPage();
-
-    /// <summary>子页开着时：页头 = 返回箭头 + 面包屑，胶囊和列表收起（保留实例），内容区换成子页。</summary>
+    /// <summary>子页开着时显示面包屑并收起胶囊和列表，内容区换成子页。</summary>
     private void ApplyHeaderMode()
     {
         var sub = _subOpen;

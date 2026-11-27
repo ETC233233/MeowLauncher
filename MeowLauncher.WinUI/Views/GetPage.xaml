@@ -36,14 +36,9 @@
             </StackPanel>
         </Grid>
 
-        <!-- 子页页头：返回箭头 + 面包屑（获取 › 下载版本 › 1.20.1）。打开子页时替换上面的标题行 -->
+        <!-- 子页页头：面包屑（获取 › 下载版本 › 1.20.1）。打开子页时替换上面的标题行 -->
         <StackPanel x:Name="SubHeader" Grid.Row="0" Orientation="Horizontal" Spacing="12"
                     VerticalAlignment="Center" Visibility="Collapsed">
-            <Button x:Name="SubBackButton" Style="{StaticResource QuietIconButtonStyle}"
-                    AutomationProperties.Name="返回列表" ToolTipService.ToolTip="返回（Alt+Left）"
-                    VerticalAlignment="Center" Click="SubBack_Click">
-                <FontIcon Glyph="&#xE72B;" FontSize="14" />
-            </Button>
             <StackPanel x:Name="CrumbPanel" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" />
         </StackPanel>
 

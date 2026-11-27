@@ -973,7 +973,7 @@ public sealed partial class MainWindow : Window
         SearchHost.Visibility = onboarding ? Visibility.Collapsed : Visibility.Visible;
         MenuToggleButton.Visibility = onboarding ? Visibility.Collapsed : Visibility.Visible;
         AppVersionText.Visibility = onboarding ? Visibility.Collapsed : Visibility.Visible;
-        BackButton.Visibility = !onboarding && _navHistory.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateBackButton(onboarding);
         TitleBrandHost.Margin = new Thickness(onboarding ? 14 : 52, 0, 0, 0);
         TitleBarRoot.Background = onboarding
             ? new SolidColorBrush(_dark ? Color.FromArgb(255, 12, 18, 32) : Color.FromArgb(255, 248, 251, 255))
@@ -1732,7 +1732,7 @@ public sealed partial class MainWindow : Window
         OpenSpotlight();
     }
 
-    /// <summary>宿主页打开子页：当前页压进返回历史，标题栏返回键 / Alt+Left 关子页而不是换整页。</summary>
+    /// <summary>宿主页打开子页时保留 Alt+Left 返回历史。</summary>
     public void PushSubPage(Action back)
     {
         if (_currentEntry is null) return;
@@ -1740,7 +1740,7 @@ public sealed partial class MainWindow : Window
         UpdateBackButton();
     }
 
-    /// <summary>宿主页自己关了子页（页头返回箭头 / 面包屑）：把对应的返回项摘掉。</summary>
+    /// <summary>宿主页通过面包屑关闭子页时移除对应的返回项。</summary>
     public void PopSubPage()
     {
         for (var i = _navHistory.Count - 1; i >= 0; i--)
@@ -3215,11 +3215,12 @@ public sealed partial class MainWindow : Window
 		GoBack();
 	}
 
-	private void UpdateBackButton()
+	private void UpdateBackButton(bool onboarding = false)
 	{
 		if ((object)BackButton != null)
 		{
-			BackButton.Visibility = ((_navHistory.Count <= 0) ? Visibility.Collapsed : Visibility.Visible);
+			BackButton.Visibility = !onboarding && _navHistory.Count > 0 && _navHistory[^1].Back is null
+				? Visibility.Visible : Visibility.Collapsed;
 		}
 	}
 
