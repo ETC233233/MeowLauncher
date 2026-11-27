@@ -59,6 +59,10 @@ _MIRROR_RULES = (
     ("https://maven.neoforged.net/releases", BMCLAPI + "/maven"),
     ("https://maven.neoforged.net", BMCLAPI + "/maven"),
 )
+# 这类主机在国内基本连不上（实测 TCP 无响应 20 秒以上），无论「智能分配」测出什么，
+# 都必须走镜像，否则装 NeoForge / Forge 会永远卡在最后一个库文件上。
+_FORCE_MIRROR_HOSTS = ("https://maven.neoforged.net/", "https://maven.minecraftforge.net/")
+
 # 自定义镜像（路径保持型）：只接管 Mojang 官方主机，其余（Fabric/Forge 元数据）仍走官方。
 _MIRROR_HOSTS = (
     "https://launchermeta.mojang.com",
@@ -102,10 +106,6 @@ def _mirror_base():
         return None
 
 
-def _mirror_enabled() -> bool:
-    return bool(_mirror_base())
-
-
 def _download_mode() -> str:
     """设置里的下载渠道。
 
@@ -141,10 +141,10 @@ except Exception:  # noqa: BLE001
     _requests = None
     HAS_REQUESTS = False
 
-CONNECT_TIMEOUT = 6
-# 单条连接读写超时：一个慢文件最多拖这么久就放弃、换下一个源重试。
-# 原来是 60 秒，实测镜像节点抖动时一个文件就能占住线程一分钟，整批从 30 秒变成十几分钟。
-READ_TIMEOUT = 8
+CONNECT_TIMEOUT = 4
+# 建连和读分开：连不上要快（4 秒就换源），读得慢可以多等（12 秒），
+# 否则慢链路上下载大文件会被误判成失败。原来是建连 6 秒 / 读 8 秒，两头都不合适。
+READ_TIMEOUT = 12
 SEGMENT_MIN = 8 * 1024 * 1024
 SEGMENTS = 4
 _CHUNK = 262144
@@ -152,6 +152,26 @@ _SSL_CTX = ssl.create_default_context()
 _GOOD_IP: dict = {}                 # 主机 → 上次握手成功的 IP
 _TLS = threading.local()            # 每个线程自己的 keep-alive 连接池 {(scheme, host, port): conn}
 _THREADS_CACHE: list = [None, 16]   # [settings 文件 mtime, 线程数]
+
+# 统计口径：一次「建连」= 一次 TCP（+TLS）握手。分段下载到底有没有复用连接，看这两个数就行：
+# opens 远小于 requests 说明 keep-alive 生效，近似 1:1 说明每块都在重握手。
+_CONN_STATS = {"opens": 0, "requests": 0, "reused": 0}
+_CONN_STATS_LOCK = threading.Lock()
+
+
+def _stat(key: str, n: int = 1) -> None:
+    with _CONN_STATS_LOCK:
+        _CONN_STATS[key] = _CONN_STATS.get(key, 0) + n
+
+
+def conn_stats(reset: bool = False) -> dict:
+    """返回连接统计（opens/requests/reused），reset=True 时清零。"""
+    with _CONN_STATS_LOCK:
+        snap = dict(_CONN_STATS)
+        if reset:
+            for k in _CONN_STATS:
+                _CONN_STATS[k] = 0
+    return snap
 
 
 def _dl_threads() -> int:
@@ -201,6 +221,7 @@ def _connect(scheme: str, host: str, port: int, timeout: int = 60):
                 conn = http.client.HTTPConnection(host, port, timeout=timeout)
                 conn.sock = sock
             _GOOD_IP[host] = sa[0]
+            _stat("opens")
             return conn
         except Exception as e:  # 这个 IP 不通，换下一个
             last = e
@@ -266,6 +287,7 @@ def _request(url: str, timeout: int = 60, extra: dict | None = None, redirects: 
                 conn = _connect(scheme, host, port, timeout)
             try:
                 conn.request("GET", path, headers=headers)
+                _stat("requests")
                 resp = conn.getresponse()
                 break
             except (OSError, http.client.HTTPException):   # 含 ssl.SSLError / ConnectionError
@@ -329,7 +351,7 @@ def _seg_count(total: int) -> int:
 
 
 def _fetch_range(url: str, start: int, end: int, total: int) -> tuple[bytes, str]:
-    handle, final = _request(url, extra={"Range": f"bytes={start}-{end}"})
+    handle, final = _request(url, timeout=READ_TIMEOUT, extra={"Range": f"bytes={start}-{end}"})
     reuse = False
     try:
         resp = handle.resp
@@ -348,6 +370,8 @@ def _fetch_range(url: str, start: int, end: int, total: int) -> tuple[bytes, str
         reuse = True
         return data, final
     finally:
+        if reuse:
+            _stat("reused")
         handle.done(reuse)
 
 
@@ -459,6 +483,60 @@ _pref_ready = False
 _pref_busy = False
 _SRC_PREF_ROLES = ("meta", "maven", "assets")
 
+# 哪些主机算「依赖库」：原来只认 libraries.minecraft.net，导致 fabric / forge / neoforge
+# 的库全落到 meta 偏好上，maven 那一档测出来再准也用不上。
+_MAVEN_HOSTS = (
+    "libraries.minecraft.net",
+    "maven.fabricmc.net",
+    "maven.minecraftforge.net",
+    "maven.neoforged.net",
+    "files.minecraftforge.net",
+    "maven.quiltmc.org",
+)
+
+
+def _url_role(url: str) -> str:
+    """把地址归到 meta / maven / assets 三档里的一档。"""
+    if url.startswith("https://resources.download.minecraft.net/"):
+        return "assets"
+    host = url.split("/")[2] if "://" in url else ""
+    return "maven" if host in _MAVEN_HOSTS else "meta"
+
+
+# 失败熔断：同一个源连续失败就先别排队，退避 30s → 2min → 10min，成功一次立刻清零。
+# 按主机记而不是按 URL —— 一个域名不通，它下面所有文件都不通。
+_HOST_FAIL: dict[str, list] = {}
+_HOST_FAIL_LOCK = threading.Lock()
+
+
+def _host_of(url: str) -> str:
+    return url.split("/")[2] if "://" in url else url
+
+
+def _host_cooling(url: str) -> bool:
+    with _HOST_FAIL_LOCK:
+        rec = _HOST_FAIL.get(_host_of(url))
+        return bool(rec and rec[1] > time.time())
+
+
+def _mark_host(url: str, ok: bool) -> None:
+    host = _host_of(url)
+    with _HOST_FAIL_LOCK:
+        if ok:
+            _HOST_FAIL.pop(host, None)
+            return
+        rec = _HOST_FAIL.get(host) or [0, 0.0]
+        rec[0] += 1
+        rec[1] = time.time() + min(600.0, 30.0 * (2 ** (rec[0] - 1)))
+        _HOST_FAIL[host] = rec
+
+
+def _order_candidates(cands: list[str]) -> list[str]:
+    """熔断中的源挪到队尾，但保留做兜底：全都不通时仍然能尝试。"""
+    fresh = [u for u in cands if not _host_cooling(u)]
+    cooling = [u for u in cands if _host_cooling(u)]
+    return fresh + cooling
+
 
 def _pref_file() -> Path:
     base = os.environ.get("APPDATA") or str(Path.home())
@@ -496,8 +574,8 @@ def _save_pref() -> None:
 def _probe_many(pairs: list[tuple[str, str, str]]) -> dict[str, str]:
     """几组「官方 / 镜像」同时开测，选快的那个。
 
-    pairs 是 (角色, 官方地址, 镜像地址)。镜像要快 8% 以上才换，避免抖动来回切；
-    探测失败按 0 处理，也就是退回官方。
+    pairs 是 (角色, 官方地址, 镜像地址)。镜像要快 30% 以上才换，避免抖动来回切；
+    两边都没测出速度时不改结论（保留原偏好），只有镜像全挂才退回官方。
     """
     rates: dict[tuple[int, str], float] = {}
     lock = threading.Lock()
@@ -518,21 +596,21 @@ def _probe_many(pairs: list[tuple[str, str, str]]) -> dict[str, str]:
         t.start()
     for t in ts:
         # 探测只用于排优先级：超过 2 秒还没结果的源，本来就该排到后面去。
-        t.join(timeout=2.2)
+        t.join(timeout=4.0)
     out: dict[str, str] = {}
     for i, (name, _, _) in enumerate(pairs):
         o, m = rates.get((i, "o"), 0.0), rates.get((i, "m"), 0.0)
-        if m <= 0:
+        prev = _SRC_PREF.get(name)
+        if o <= 0 and m <= 0:
+            # 两边都没结果：探测失败不等于官方更快，保留上次结论。
+            out[name] = prev if prev in ("official", "mirror") else "official"
+        elif m <= 0:
             out[name] = "official"
         elif o <= 0:
             out[name] = "mirror"
         else:
-            out[name] = "mirror" if m > o * 1.08 else "official"
+            out[name] = "mirror" if m > o * 1.30 else "official"
     return out
-
-
-def _probe_pair(official: str, mirror: str) -> str:
-    return _probe_many([("x", official, mirror)]).get("x", "official")
 
 
 def _probe_assets(official: str, primary: str, backup: str) -> str:
@@ -558,7 +636,7 @@ def _probe_assets(official: str, primary: str, backup: str) -> str:
     for t in ts:
         t.start()
     for t in ts:
-        t.join(timeout=2.2)
+        t.join(timeout=4.0)
     o, p, b = rates.get("official", 0.0), rates.get("primary", 0.0), rates.get("backup", 0.0)
     best = "primary"
     if p <= 0 and b > 0:
@@ -572,10 +650,9 @@ def auto_select_sources(force: bool = False) -> None:
     """给三种资源各选一个源：可能先问官方，也可能先问镜像。"""
     if not force and _load_pref():
         return
-    if not _mirror_base():
-        _SRC_PREF.update({"meta": "official", "maven": "official"})
-        _save_pref()
-        return
+    # 以前这里有一条「没配镜像就直接把 meta/maven 写死 official」的短路，
+    # 等于把分流整个关掉：自动档下 BMCLAPI 本来就是默认候选，必须照测。
+    # 各档的胜负由 _probe_many 决定，探测不到才退回官方。
     # 样本要够大才量得准：几十 KB 的 jar 在一秒内就下完，测出的其实是握手耗时。
     # manifest 279 KB、lwjgl 700 KB 量级，能看出持续吞吐的差别。
     lib = "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3.jar"
@@ -601,8 +678,12 @@ def _ensure_pref() -> None:
         _pref_busy = False
 
 
-def _mirrored(url: str):
-    """启用镜像且该地址有对应映射时返回镜像地址，否则 None。"""
+def _mirrored(url: str, require_pref: bool = True):
+    """启用镜像且该地址有对应映射时返回镜像地址，否则 None。
+
+    require_pref=False 时忽略「实测偏好」，只按渠道能力给候选地址。
+    下载候选列表要用这个：偏好只能决定先后顺序，不能把备用源整个删掉。
+    """
     # 资源文件单独走自建 CDN：BMCLAPI 对 assets 只是 302 到境外节点，小文件每次多等 1~2 秒；
     # 自家 CDN 是境内边缘节点且按 hash 长缓存。失败时调用方会回退官方，两条路都通。
     _ensure_pref()
@@ -619,7 +700,7 @@ def _mirrored(url: str):
         if mode == "auto":
             # 智能分配：启动时没测过（要等拿到 assetIndex 才有样本），默认走主加速源。
             _pick = _SRC_PREF.get("assets")
-            if _pick == "official":
+            if _pick == "official" and require_pref:
                 return None
             if _pick == "backup":
                 return ASSET_CDN_ALT + tail
@@ -628,9 +709,14 @@ def _mirrored(url: str):
         base = _mirror_base()
         return (base + "/assets" + tail) if base else None
     base = _mirror_base()
+    if base is None and _download_mode() == "auto":
+        # 自动档没配自定义镜像时，BMCLAPI 就是默认候选：谁快交给实测，
+        # 不能因为「没配镜像」就把 meta/maven 整档钉死在官方。
+        base = BMCLAPI
+    forced = url.startswith(_FORCE_MIRROR_HOSTS)
     if not base:
         return None
-    if _SRC_PREF.get("maven" if url.startswith("https://libraries.minecraft.net/") else "meta") == "official":
+    if require_pref and not forced and _SRC_PREF.get(_url_role(url)) == "official":
         return None
     rules = _MIRROR_RULES if base == BMCLAPI else tuple((src, base) for src in _MIRROR_HOSTS)
     for src, dst in rules:
@@ -984,67 +1070,6 @@ def _race_source(urls: list[str], timeout: float = 3.0) -> str:
     return best[0] if best else urls[0]
 
 
-def _download_segments_multi(urls: list[str], tmp: Path, total: int, on_progress=None) -> None:
-    """多个源分摊同一个文件的分段：第 i 段走 urls[i % n]。
-
-    只用一个源时，那个源偶发抽风整轮就慢；两个源一起用，慢的那半边最多拖一半。
-    """
-    finals = [_final_url(u) for u in urls]
-    n = len(finals)
-    seg = (total + _seg_count(total) - 1) // max(2, _seg_count(total))
-    ranges = [(i * seg, min(total - 1, (i + 1) * seg - 1)) for i in range(max(2, _seg_count(total))) if i * seg < total]
-    with open(tmp, "wb") as fh:
-        fh.truncate(total)
-    lock = threading.Lock()
-    done = [0]
-
-    def grab(a: int, b: int, url: str) -> None:
-        for attempt in range(2):
-            scheme, host, port, path = _split(url)
-            conn = _connect(scheme, host, port, 60)
-            got = 0
-            try:
-                conn.request("GET", path, headers={"User-Agent": UA, "Accept": "*/*", "Range": f"bytes={a}-{b}"})
-                resp = conn.getresponse()
-                if resp.status == 200:
-                    raise _NoRange()
-                if resp.status != 206:
-                    raise RuntimeError(f"HTTP {resp.status}")
-                with open(tmp, "r+b") as fh:
-                    fh.seek(a)
-                    while True:
-                        chunk = resp.read(_CHUNK)
-                        if not chunk:
-                            break
-                        fh.write(chunk)
-                        got += len(chunk)
-                        if on_progress:
-                            with lock:
-                                done[0] += len(chunk)
-                                on_progress(done[0], total)
-                if got != b - a + 1:
-                    raise RuntimeError("分段没下完整")
-                return
-            except _NoRange:
-                raise
-            except Exception:
-                if attempt == 1:
-                    raise
-                if on_progress:
-                    with lock:
-                        done[0] = max(0, done[0] - got)
-                got = 0
-            finally:
-                _drop(conn)
-
-    with ThreadPoolExecutor(max_workers=len(ranges)) as ex:
-        futs = [ex.submit(grab, a, b, finals[i % n]) for i, (a, b) in enumerate(ranges)]
-        for f in futs:
-            f.result()
-    if tmp.stat().st_size != total:
-        raise RuntimeError("分段下载后文件大小不对")
-
-
 def _probe_rate(url: str, window: float = 0.4, limit: int = 2 * 1024 * 1024) -> float:
     """下载 window 秒，返回实测字节/秒。
 
@@ -1135,13 +1160,34 @@ def _download_big(urls: list[str], dest: Path, size: int,
             if verify is not None:
                 verify(tmp)
             os.replace(tmp, dest)
+            _mark_host(u, True)
             return dest
         except Exception as exc:  # noqa: BLE001
             last = exc
+            _mark_host(u, False)
             try:
                 tmp.unlink()
             except OSError:
                 pass
+    raise last or RuntimeError("下载失败")
+
+
+def _download_via_proxy(cands: list[str], dest: Path, on_progress, proxy: str,
+                        verify) -> Path:
+    """有系统代理时：候选顺序照旧，逐个走代理试，失败换下一个源。
+
+    代理只影响「怎么连」，不影响「连谁」——以前这里整块跳过镜像，
+    结果一开代理就退化成只连官方，NeoForge 那种官方连不上的场景直接卡死。
+    """
+    last: Exception | None = None
+    for u in cands:
+        try:
+            r = _stream_to_raw(u, dest, on_progress, proxy, verify=verify)
+            _mark_host(u, True)
+            return r
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            _mark_host(u, False)
     raise last or RuntimeError("下载失败")
 
 
@@ -1170,20 +1216,29 @@ def _download(url: str, dest: Path, on_progress: Callable[[int, int], None] | No
             return _download_big(list(mcim.candidates(url, resource_mirror)), dest, int(size), on_progress, ver)
         return _stream_to(url, dest, on_progress, proxy, verify=ver)
 
-    if proxy is None:
-        alt = _mirrored(url)
-        # 只有自家 CDN（assets）放前面：它按 hash 长缓存、边缘节点在境内，
-        # 大文件分段实测不比官方慢，官方连续下载后还会被限速。
-        # BMCLAPI 这类公共镜像反而要退到兜底——小文件 TTFB 1~2 秒还会 302 到境外节点。
-        if alt and _is_asset_cdn(alt):
-            cands = [alt, url]
-        else:
-            cands = [url] + ([alt] if alt and alt != url else [])
-        if size >= threshold:
-            return _download_big(cands, dest, int(size), on_progress, ver)
-        if size >= RACE_MIN and len(cands) > 1:
-            return _stream_race(cands, dest, on_progress, verify=ver)
-    return _stream_to(url, dest, on_progress, proxy, verify=ver,
+    # require_pref=False：偏好只影响先后顺序，镜像永远留在候选里兜底。
+    # 以前是「偏好 official 就返回 None」，等于把备用源整个删掉，官方不通时就直接卡死。
+    alt = _mirrored(url, require_pref=False)
+    pref = _SRC_PREF.get(_url_role(url))
+    mirror_first = bool(alt) and (pref != "official" or _is_asset_cdn(alt) or url.startswith(_FORCE_MIRROR_HOSTS))
+    if alt and mirror_first:
+        cands = [alt, url]
+    else:
+        cands = [url] + ([alt] if alt and alt != url else [])
+    uniq: list[str] = []
+    for u in cands:
+        if u and u not in uniq:
+            uniq.append(u)
+    cands = _order_candidates(uniq)
+    # 以前这里有 `if proxy is None:`：只要系统配了代理就整块跳过镜像。
+    # 代理只决定「怎么连」，不该决定「连谁」——候选顺序不变，只是换代理通道下载。
+    if proxy is not None:
+        return _download_via_proxy(cands, dest, on_progress, proxy, ver)
+    if size >= threshold:
+        return _download_big(cands, dest, int(size), on_progress, ver)
+    if size >= RACE_MIN and len(cands) > 1:
+        return _stream_race(cands, dest, on_progress, verify=ver)
+    return _stream_to(url, dest, on_progress, None, verify=ver,
                       prefer_raw=size >= SEGMENT_MIN)
 
 
@@ -1206,7 +1261,7 @@ MEOW_CFMI_EO = (_os.environ.get("MEOW_CFMI_EO") or "https://cf-api.cdn2.sadcgame
 MEOW_CFMI_ORDER = {"mcim": 0, "cfmi": 2, "official": 3}
 CF_API_BASES = (mcim.BASE + "/curseforge/v1", MEOW_CFMI_EO, MEOW_CFMI, mcim.CURSEFORGE_API)
 _CF_BASE_CACHE: dict[str, str] = {}
-_CF_PREF: dict[str, str | None] = {"src": None}
+_CF_PREF: dict[str, str | None] = {"src": os.environ.get("MEOW_CF_SOURCE") or None}
 
 
 def set_cf_source(src: str | None) -> None:
@@ -1681,7 +1736,7 @@ def manifest_cache_path() -> Path:
     return _core.user_dir() / "cache" / "mojang_versions.json"
 
 
-def mojang_versions(force: bool = False):
+def mojang_versions(force: bool = False, *, cache_only: bool = False):
     """Mojang 版本清单：默认走 30 分钟磁盘缓存，force=True 时强制联网刷新。
 
     清单 2 万多行，BMCL / 官方实测都要 3 秒左右，所以平时读缓存；
@@ -1690,12 +1745,15 @@ def mojang_versions(force: bool = False):
     import time as _t
     cache = manifest_cache_path()
     try:
-        if not force and cache.is_file() and (_t.time() - cache.stat().st_mtime) < _MANIFEST_CACHE_TTL:
+        if cache.is_file() and (cache_only or (
+                not force and (_t.time() - cache.stat().st_mtime) < _MANIFEST_CACHE_TTL)):
             data = json.loads(cache.read_text(encoding="utf-8"))
             if isinstance(data, list) and data:
                 return data
     except Exception:
         pass
+    if cache_only:
+        return []
     data = _get(MOJANG_MANIFEST).get("versions", [])
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)

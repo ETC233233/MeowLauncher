@@ -62,7 +62,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         RefreshButton.IsEnabled = false;
         try
         {
-            var snapshot = await App.Backend.GetSnapshotAsync();
+            var snapshot = App.MainWindow?.Snapshot ?? await App.Backend.GetSnapshotAsync();
             _versionId = snapshot?.Current?.Id ?? snapshot?.Selected ?? "";
             _versionRoot = snapshot?.Current?.Root ?? snapshot?.GameDir ?? "";
             if (string.IsNullOrWhiteSpace(_versionId))
@@ -73,7 +73,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
 
             _vanilla = string.IsNullOrWhiteSpace(snapshot?.Current?.Loader)
                 || snapshot.Current.Loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase);
-            var result = await App.Backend.GetModsAsync(_versionId);
+            var result = await App.Backend.GetModsAsync(_versionId, _versionRoot);
             if (result is null || !result.Ok)
             {
                 ShowError(result?.Message ?? "读取 Mod 列表失败。");
@@ -220,7 +220,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         CheckUpdatesText.Text = "正在检查…";
         try
         {
-            var result = await App.Backend.CheckModUpdatesAsync(_versionId);
+            var result = await App.Backend.CheckModUpdatesAsync(_versionId, _versionRoot);
             if (!result.Ok)
             {
                 ShowToast($"检查更新失败：{ClipText(result.Message)}", InfoBarSeverity.Error);
@@ -255,7 +255,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         button.Content = "更新中…";
         try
         {
-            var result = await App.Backend.UpdateModAsync(_versionId, update);
+            var result = await App.Backend.UpdateModAsync(_versionId, update, _versionRoot);
             if (result.Ok) _updates.Remove(file);
             ShowToast(result.Message, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
             await LoadAsync();
@@ -275,7 +275,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         {
             try
             {
-                var hit = await App.Backend.GetModProjectAsync(_versionId, mod.File);
+                var hit = await App.Backend.GetModProjectAsync(_versionId, mod.File, _versionRoot);
                 if (hit.Ok && hit.ProjectId.Length > 0)
                 {
                     var info = await App.Backend.GetProjectInfoAsync(hit.ProjectId);
@@ -293,7 +293,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
                         PageUrl = $"https://modrinth.com/mod/{(hit.Slug.Length > 0 ? hit.Slug : hit.ProjectId)}",
                         ProjectType = info.Ok ? info.ProjectType : "mod",
                     };
-                    App.MainWindow?.OpenOnlineProject(project, _versionId);
+                    App.MainWindow?.OpenOnlineProject(project, _versionId, _versionRoot);
                     return;
                 }
             }
@@ -317,7 +317,7 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
         button.IsEnabled = false;
         try
         {
-            var result = await App.Backend.MoveMisplacedAsync(file, _versionId, mod.Misplaced);
+            var result = await App.Backend.MoveMisplacedAsync(file, _versionId, mod.Misplaced, _versionRoot);
             ShowToast(result.Message, result.Ok ? InfoBarSeverity.Success : InfoBarSeverity.Error);
             await LoadAsync();
         }
@@ -535,13 +535,8 @@ public sealed partial class ModsPage : Page, IPageSearchFilter
     private void Home_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
         App.MainWindow.Navigate("home");
 
-    private void ShowToast(string message, InfoBarSeverity severity)
-    {
-        Toast.Title = severity == InfoBarSeverity.Error ? "操作失败" : "Mod 管理";
-        Toast.Message = ClipText(message);
-        Toast.Severity = severity;
-        Toast.IsOpen = true;
-    }
+    private static void ShowToast(string message, InfoBarSeverity severity) =>
+        TaskCenter.PostFeedback(severity, "Mod 管理", message);
 
     private static string ClipText(string? message)
     {

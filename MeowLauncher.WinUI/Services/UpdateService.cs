@@ -23,7 +23,8 @@ public static class UpdateService
 
     private static HttpClient CreateHttp()
     {
-        var c = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var c = new HttpClient(new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(4), Proxy = NetworkProxy.Proxy })
+            { Timeout = TimeSpan.FromSeconds(15) };
         c.DefaultRequestHeaders.UserAgent.ParseAdd("MeowLauncher");
         c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         return c;
@@ -73,9 +74,10 @@ public static class UpdateService
         }
 
         // ② GitHub Releases：直连，不行再走加速代理。404 表示仓库还没有发行版，不是错误。
+        if (!NetworkAvailability.CanStartRequest) return (null, null, NetworkAvailability.OfflineMessage);
         var api = $"https://api.github.com/repos/{Repo}/releases?per_page=20";
         string? lastErr = null;
-        foreach (var url in UrlAccel.Candidates(api))
+        foreach (var url in new[] { api })
         {
             try
             {

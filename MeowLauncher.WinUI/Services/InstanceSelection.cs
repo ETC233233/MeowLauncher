@@ -20,9 +20,25 @@ public static class InstanceSelection
     {
         if (a is null || b is null) return false;
         if (!string.Equals(a.Id, b.Id, StringComparison.OrdinalIgnoreCase)) return false;
-        var ra = GameDirectoryResolver.Normalize(a.Root);
-        var rb = GameDirectoryResolver.Normalize(b.Root);
-        return string.Equals(ra, rb, StringComparison.OrdinalIgnoreCase);
+        return SameRoot(a.Root, b.Root);
+    }
+
+    public static bool SameRoot(string? a, string? b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(GameDirectoryResolver.Normalize(a)),
+            Path.TrimEndingDirectorySeparator(GameDirectoryResolver.Normalize(b)), StringComparison.OrdinalIgnoreCase);
+
+    public static VersionInfo? Find(Snapshot? snapshot, string id, string root)
+    {
+        if (snapshot is null) return null;
+        var current = snapshot.Current;
+        if (id.Length == 0 && root.Length == 0 && current is not null) return current;
+        if (id.Length == 0) id = snapshot.Selected;
+        if (id.Length == 0) return null;
+        bool Matches(VersionInfo entry) => entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase)
+            && (root.Length == 0 || SameRoot(entry.Root, root));
+        if (current is not null && Matches(current)) return current;
+        var matches = snapshot.Versions.Where(Matches).Take(2).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
     }
 
     public static async Task<(bool Ok, string Message)> SelectAsync(VersionInfo target)

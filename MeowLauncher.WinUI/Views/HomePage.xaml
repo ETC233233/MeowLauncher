@@ -1659,8 +1659,5 @@
             </StackPanel>
         </Grid>
 
-        <!-- Toast -->
-        <InfoBar x:Name="Toast" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                 MaxWidth="380" Margin="0,0,8,6" IsOpen="False"/>
     </Grid>
 </Page>

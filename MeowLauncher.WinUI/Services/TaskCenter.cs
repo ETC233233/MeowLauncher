@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using MeowLauncher.WinUI.Models;
+using Microsoft.UI.Xaml.Controls;
 
 namespace MeowLauncher.WinUI.Services;
 
@@ -181,8 +182,14 @@ public sealed class TaskNotification : INotifyPropertyChanged
     public string Title { get; set; } = "";
     public string Message { get; set; } = "";
     public string Kind { get; set; } = "已完成";
-    public string SourceTaskId { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.Now;
+    internal InfoBarSeverity Severity { get; init; }
+    internal TaskEntry? SourceTask { get; init; }
+    internal bool IsTransient { get; init; }
+    internal bool IsPreview { get; init; }
+    internal string? AnnouncementId { get; init; }
+    internal DateTimeOffset? AnnouncementExpiresAt { get; init; }
+    public int MessageMaxLines => Kind == "公告" ? 0 : 4;
 
     public bool IsRead
     {
@@ -201,6 +208,7 @@ public sealed class TaskNotification : INotifyPropertyChanged
 
     // ---- 好友邀请通知：有 InviteFromUuid 就带「接受 / 拒绝」按钮，回复之后按钮收起、显示结果 ----
     private bool _inviteOpen;
+    private bool _inviteResponding;
     private string _resultText = "";
 
     /// <summary>邀请人的 UUID；空表示这不是一条可回复的邀请。</summary>
@@ -219,8 +227,23 @@ public sealed class TaskNotification : INotifyPropertyChanged
             _inviteOpen = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(InviteButtonsVisibility));
+            OnPropertyChanged(nameof(CanRespondToInvite));
         }
     }
+
+    public bool InviteResponding
+    {
+        get => _inviteResponding;
+        set
+        {
+            if (_inviteResponding == value) return;
+            _inviteResponding = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CanRespondToInvite));
+        }
+    }
+
+    public bool CanRespondToInvite => InviteOpen && !InviteResponding;
 
     /// <summary>回复的结果或失败原因，显示在按钮位置。</summary>
     public string ResultText
@@ -282,7 +305,7 @@ public static class TaskCenter
 
     public static event EventHandler? Changed;
     public static event EventHandler? NotificationsChanged;
-    public static event Action<TaskEntry>? TaskFinished;
+    public static event Action<TaskNotification>? NotificationRaised;
 
     public static TaskEntry Add(string title, string detail, string pageTag = "home", string glyph = "\\uE7C3",
         Microsoft.UI.Xaml.Media.ImageSource? targetIcon = null)
@@ -325,8 +348,7 @@ public static class TaskCenter
         TraceFor(entry.Id)?.Finish(true);
         foreach (var step in entry.Steps) { step.State = TaskStepState.Done; step.Pct = 100; }
         Notify();
-        TaskFinished?.Invoke(entry);
-
+        RaiseTaskResult(entry, succeeded: true);
     }
 
     public static void Fail(TaskEntry entry, string detail, FailureInfo? failure = null)
@@ -351,8 +373,7 @@ public static class TaskCenter
         entry.Progress = 0;
         TraceFor(entry.Id)?.Finish(false);
         Notify();
-        TaskFinished?.Invoke(entry);
-
+        RaiseTaskResult(entry, succeeded: false);
     }
 
     /// <summary>卡片上只放第一行，多行日志留给诊断报告。</summary>
@@ -546,7 +567,7 @@ public static class TaskCenter
         }
         if (kind == TaskKind.Install)
         {
-            return "可取消：中止当前下载/安装，已下载一半的文件会保留，稍后可重试。";
+            return "可取消：中止当前下载或安装。已写入的完整文件会保留，稍后可以重试。";
         }
         return "可取消：中止这次后台操作。";
     }
@@ -593,19 +614,100 @@ public static class TaskCenter
     {
         if (notification is null || notification.IsRead) return;
         notification.IsRead = true;
+        SaveAnnouncementReceipts([notification], dismissed: false);
         NotificationsChanged?.Invoke(null, EventArgs.Empty);
     }
 
     public static void MarkAllRead()
     {
         foreach (var item in Notifications) item.IsRead = true;
+        SaveAnnouncementReceipts(Notifications, dismissed: false);
         NotificationsChanged?.Invoke(null, EventArgs.Empty);
     }
 
     public static void ClearNotifications()
     {
+        SaveAnnouncementReceipts(Notifications, dismissed: true);
         Notifications.Clear();
         NotificationsChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    private static void SaveAnnouncementReceipts(IEnumerable<TaskNotification> notes, bool dismissed)
+    {
+        if (App.MainWindow?.Preferences is not { } preferences) return;
+        var receipts = preferences.AnnouncementReceipts;
+        if (receipts is null) return;
+        var changed = false;
+        foreach (var note in notes)
+        {
+            if (note.AnnouncementId is not { } id || !receipts.TryGetValue(id, out var existing)) continue;
+            var updated = existing with { Read = true, Dismissed = dismissed || existing.Dismissed };
+            if (updated == existing) continue;
+            receipts[id] = updated;
+            changed = true;
+        }
+        if (changed) AppPreferencesStore.Save(preferences);
+    }
+
+    internal static void SyncAnnouncements(IReadOnlyList<LauncherAnnouncement> announcements, AppPreferences preferences)
+    {
+        var receipts = preferences.AnnouncementReceipts ??= new(StringComparer.Ordinal);
+        var current = announcements.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var changed = false;
+        foreach (var note in Notifications.Where(note => note.AnnouncementId is not null).ToArray())
+        {
+            if (!current.TryGetValue(note.AnnouncementId!, out var item)
+                || note.Title != item.Title || note.Message != item.Message || note.CreatedAt != item.PublishedAt.LocalDateTime
+                || note.AnnouncementExpiresAt != item.ExpiresAt)
+                changed |= Notifications.Remove(note);
+        }
+
+        var saved = false;
+        var popups = new List<TaskNotification>();
+        foreach (var item in announcements)
+        {
+            var previouslySeen = receipts.TryGetValue(item.Id, out var receipt);
+            if (receipt?.Dismissed == true || Notifications.Any(note => note.AnnouncementId == item.Id)) continue;
+            var note = new TaskNotification
+            {
+                Id = "announcement:" + item.Id,
+                AnnouncementId = item.Id,
+                AnnouncementExpiresAt = item.ExpiresAt,
+                Kind = "公告",
+                Title = item.Title,
+                Message = item.Message,
+                CreatedAt = item.PublishedAt.LocalDateTime,
+                IsRead = receipt?.Read == true,
+            };
+            var index = 0;
+            while (index < Notifications.Count && Notifications[index].CreatedAt > note.CreatedAt) index++;
+            if (index < MaxNotifications)
+            {
+                Notifications.Insert(index, note);
+                changed = true;
+                if (!previouslySeen && item.Popup) popups.Add(note);
+            }
+            if (previouslySeen) continue;
+            receipts[item.Id] = new AnnouncementReceipt(item.PublishedAt);
+            saved = true;
+        }
+        while (Notifications.Count > MaxNotifications) Notifications.RemoveAt(Notifications.Count - 1);
+        if (saved)
+        {
+            foreach (var expired in receipts.Where(pair => !current.ContainsKey(pair.Key))
+                         .OrderByDescending(pair => pair.Value.PublishedAt).Skip(100).ToArray())
+                receipts.Remove(expired.Key);
+            AppPreferencesStore.Save(preferences);
+        }
+        if (changed) NotificationsChanged?.Invoke(null, EventArgs.Empty);
+        foreach (var popup in popups.AsEnumerable().Reverse()) NotificationRaised?.Invoke(popup);
+    }
+
+    internal static void PruneExpiredAnnouncements(DateTimeOffset now)
+    {
+        var expired = Notifications.Where(note => note.AnnouncementExpiresAt <= now).ToArray();
+        foreach (var note in expired) Notifications.Remove(note);
+        if (expired.Length > 0) NotificationsChanged?.Invoke(null, EventArgs.Empty);
     }
 
     private static bool LaunchHandedOff(string? detail)
@@ -632,12 +734,23 @@ public static class TaskCenter
 
     /// <summary>发一条和任务无关的通知（比如收到好友邀请）。必须在界面线程调用。</summary>
     public static TaskNotification PostMessage(string title, string message, string kind = "消息")
+        => Publish(new TaskNotification { Title = title, Message = message, Kind = kind });
+
+    public static void PostFeedback(InfoBarSeverity severity, string title, string message, bool addToHistory = true)
     {
-        var note = new TaskNotification { Title = title, Message = message, Kind = kind };
-        Notifications.Insert(0, note);
-        while (Notifications.Count > MaxNotifications) Notifications.RemoveAt(Notifications.Count - 1);
-        NotificationsChanged?.Invoke(null, EventArgs.Empty);
-        return note;
+        var kind = severity switch
+        {
+            InfoBarSeverity.Error => "失败",
+            InfoBarSeverity.Warning => "提示",
+            InfoBarSeverity.Success => "已完成",
+            _ => "消息"
+        };
+        var note = new TaskNotification
+        {
+            Title = title, Message = message, Kind = kind, Severity = severity, IsTransient = !addToHistory
+        };
+        if (addToHistory) Publish(note);
+        else NotificationRaised?.Invoke(note);
     }
 
     /// <summary>发一条可回复的好友邀请通知（带接受 / 拒绝按钮）。必须在界面线程调用。</summary>
@@ -651,27 +764,55 @@ public static class TaskCenter
                 Notifications.RemoveAt(i);
             }
         }
-        var note = new TaskNotification
+        return Publish(new TaskNotification
         {
             Title = title, Message = message, Kind = "邀请", InviteFromUuid = fromUuid, InviteRoomCode = roomCode, InviteOpen = true,
-        };
+        });
+    }
+
+    private static TaskNotification Publish(TaskNotification note)
+    {
         Notifications.Insert(0, note);
         while (Notifications.Count > MaxNotifications) Notifications.RemoveAt(Notifications.Count - 1);
         NotificationsChanged?.Invoke(null, EventArgs.Empty);
+        NotificationRaised?.Invoke(note);
         return note;
     }
 
-    private static void PushNotification(string kind, TaskEntry entry, string message)
+    private static void RaiseTaskResult(TaskEntry entry, bool succeeded)
     {
-        Notifications.Insert(0, new TaskNotification
+        NotificationRaised?.Invoke(new TaskNotification
         {
             Title = entry.Title,
-            Message = string.IsNullOrWhiteSpace(message) ? entry.Detail : message,
-            Kind = kind,
-            SourceTaskId = entry.Id,
+            Message = FirstLine(entry.Detail),
+            Kind = succeeded ? "已完成" : "失败",
+            Severity = succeeded ? InfoBarSeverity.Success : InfoBarSeverity.Error,
+            SourceTask = entry,
+            IsPreview = entry.IsNotificationPreview
         });
-        while (Notifications.Count > MaxNotifications) Notifications.RemoveAt(Notifications.Count - 1);
-        NotificationsChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    internal static void PreviewNotice(string title, string message, string kind,
+        InfoBarSeverity severity = InfoBarSeverity.Informational, bool invite = false, bool addToHistory = false)
+    {
+        var notice = new TaskNotification
+        {
+            Title = title, Message = message, Kind = kind, Severity = severity,
+            IsTransient = !addToHistory, IsPreview = true, InviteOpen = invite
+        };
+        if (addToHistory)
+        {
+            Notifications.Insert(0, notice);
+            NotificationsChanged?.Invoke(null, EventArgs.Empty);
+        }
+        NotificationRaised?.Invoke(notice);
+    }
+
+    internal static void ClearNoticePreviews()
+    {
+        var previews = Notifications.Where(note => note.IsPreview).ToArray();
+        foreach (var note in previews) Notifications.Remove(note);
+        if (previews.Length > 0) NotificationsChanged?.Invoke(null, EventArgs.Empty);
     }
 
     private static void Notify() => Changed?.Invoke(null, EventArgs.Empty);

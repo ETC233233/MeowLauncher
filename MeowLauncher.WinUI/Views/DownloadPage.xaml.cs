@@ -204,6 +204,8 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
 
             BuildGroups();
             ApplyFilter(resetList: true, resetNav: true);
+            if (force && !string.IsNullOrEmpty(result.Message))
+                ShowStatus(InfoBarSeverity.Warning, "暂时无法刷新", result.Message);
         }
         catch (Exception ex)
         {
@@ -950,7 +952,6 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         {
             TaskCenter.Complete(task, result.Message ?? "安装完成");
             await SyncInstalledAsync();
-            await OfferSwitchAsync(string.IsNullOrWhiteSpace(result.Version) ? v.Id : result.Version, folder, result.Message);
         }
         else TaskCenter.Fail(task, result.Message, result.Failure);
     }
@@ -972,32 +973,6 @@ public sealed partial class DownloadPage : Page, IPageSearchFilter
         return null;
     }
 
-    /// <summary>装完在底部提示一下，并给一个「切换到它」：新实例不会自己变成当前实例。</summary>
-    private async Task OfferSwitchAsync(string versionId, string folder, string? resultMessage)
-    {
-        var snapshot = await App.Backend.ScanDirAsync(folder);
-        var target = snapshot?.Versions.FirstOrDefault(x => string.Equals(x.Id, versionId, StringComparison.OrdinalIgnoreCase));
-        if (target is not null) target.Root = folder;
-        var isCurrent = InstanceSelection.Same(App.MainWindow?.Snapshot?.Current, target);
-        var message = resultMessage ?? $"已安装 {versionId}";
-        ShowStatus(InfoBarSeverity.Success, "安装完成", isCurrent ? $"{message}。它就是当前实例。" : message);
-        if (target is null || isCurrent) return;
-        var button = new Button { Content = "切换到这个实例" };
-        button.Click += async (_, _) =>
-        {
-            button.IsEnabled = false;
-            var (ok, message) = await InstanceSelection.SelectAsync(target);
-            ShowStatus(ok ? InfoBarSeverity.Success : InfoBarSeverity.Error,
-                ok ? "已切换" : "切换失败", ok ? $"当前实例：{target.Id}" : message);
-        };
-        StatusBar.ActionButton = button;
-    }
-    private void ShowStatus(InfoBarSeverity severity, string title, string message)
-    {
-        StatusBar.ActionButton = null;
-        StatusBar.Severity = severity;
-        StatusBar.Title = title;
-        StatusBar.Message = message;
-        StatusBar.IsOpen = true;
-    }
+    private static void ShowStatus(InfoBarSeverity severity, string title, string message) =>
+        TaskCenter.PostFeedback(severity, title, message);
 }

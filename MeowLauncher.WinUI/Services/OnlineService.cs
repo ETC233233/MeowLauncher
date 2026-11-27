@@ -35,10 +35,12 @@ public sealed class OnlineService
     public bool IsInvitePending(string toUuid, string roomCode = "") => _core?.IsInvitePending(toUuid, roomCode) ?? false;
 
     public Task<(bool Ok, bool Delivered, string Message)> InviteAsync(string toUuid, string roomCode = "") =>
-        _core is null ? Task.FromResult((false, false, "联机组件还没安装，先打开「联机」页下载。")) : _core.InviteAsync(toUuid, roomCode);
+        !NetworkAvailability.CanStartRequest ? Task.FromResult((false, false, NetworkAvailability.OfflineMessage))
+        : _core?.InviteAsync(toUuid, roomCode) ?? Task.FromResult((false, false, "联机组件还没安装，先打开「联机」页下载。"));
 
     public Task<(bool Ok, bool Delivered, string Message)> ReplyInviteAsync(string toUuid, bool accepted) =>
-        _core is null ? Task.FromResult((false, false, "联机组件还没安装。")) : _core.ReplyInviteAsync(toUuid, accepted);
+        !NetworkAvailability.CanStartRequest ? Task.FromResult((false, false, NetworkAvailability.OfflineMessage))
+        : _core?.ReplyInviteAsync(toUuid, accepted) ?? Task.FromResult((false, false, "联机组件还没安装。"));
 
     /// <summary>
     /// 回复一条邀请通知（通知页和弹窗共用）：成功就收起按钮并写结果；邀请已过期也收起；网络问题保留按钮可重试。
@@ -46,7 +48,27 @@ public sealed class OnlineService
     /// </summary>
     public async Task<bool> RespondToInviteAsync(TaskNotification note, bool accepted)
     {
-        if (note.InviteFromUuid.Length == 0 || !note.InviteOpen) return false;
+        if (!note.CanRespondToInvite) return false;
+        if (note.IsPreview)
+        {
+            note.InviteOpen = false;
+            note.ResultText = accepted ? "已接受演示邀请" : "已拒绝演示邀请";
+            TaskCenter.MarkRead(note);
+            return true;
+        }
+        if (note.InviteFromUuid.Length == 0) return false;
+        note.InviteResponding = true;
+        try { return await SendInviteResponseAsync(note, accepted); }
+        catch (Exception ex)
+        {
+            note.ResultText = Diagnostics.FriendlyMessage(ex);
+            return false;
+        }
+        finally { note.InviteResponding = false; }
+    }
+
+    private async Task<bool> SendInviteResponseAsync(TaskNotification note, bool accepted)
+    {
         var (ok, _, message) = await ReplyInviteAsync(note.InviteFromUuid, accepted);
         if (ok)
         {
@@ -66,6 +88,7 @@ public sealed class OnlineService
         {
             note.InviteOpen = false;                       // 已经回复过或已过期，按钮不再有意义
             note.ResultText = "这个邀请已过期或已处理";
+            TaskCenter.MarkRead(note);
             return true;
         }
         note.ResultText = message;                         // 网络问题等：保留按钮，可以重试

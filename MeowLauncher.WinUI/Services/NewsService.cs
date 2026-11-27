@@ -65,6 +65,7 @@ public sealed class NewsService
     {
         if (_loading) return;
         if (!force && _items.Count > 0 && DateTimeOffset.Now - _fetchedAt < TimeSpan.FromHours(6)) return;
+        if (!NetworkAvailability.CanStartRequest) return;
         _loading = true;
         try
         {

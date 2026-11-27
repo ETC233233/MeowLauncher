@@ -225,10 +225,6 @@ def _merge(parent: dict, child: dict) -> dict:
     return out
 
 
-def _ver_key(s: str) -> tuple[int, ...]:
-    return tuple(int(x) for x in re.findall(r"\d+", s))
-
-
 def system_arch() -> str:
     raw = platform.machine().lower()
     return {"amd64": "x86_64", "x64": "x86_64", "i386": "x86", "i686": "x86", "arm64": "aarch64"}.get(raw, raw)

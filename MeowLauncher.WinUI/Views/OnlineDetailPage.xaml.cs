@@ -159,7 +159,7 @@ public sealed partial class OnlineDetailPage : Page
         else
         {
             var snap = App.MainWindow?.Snapshot;
-            var inst = snap?.Versions.FirstOrDefault(v => v.Id == versionId) ?? snap?.Current;
+            var inst = InstanceSelection.Find(snap, versionId, _args.GameRoot);
             var gameVersion = inst?.GameVersion ?? "";
             if (!string.IsNullOrWhiteSpace(gameVersion) && !p.IsCompatibleWith(gameVersion))
                 hint = $"实例 {versionId} 是 {gameVersion}，这个项目没有对应的游戏版本，装了可能不生效。";
@@ -330,7 +330,7 @@ public sealed partial class OnlineDetailPage : Page
         var hasTarget = ManualTarget || p.IsModpack || !string.IsNullOrWhiteSpace(a.VersionId);
         // 与列表页一致：实例加载器不在项目支持列表里（含原版实例装 Mod）时不给装，提示里已经说明原因。
         var snap = App.MainWindow?.Snapshot;
-        var inst = snap?.Versions.FirstOrDefault(v => v.Id == a.VersionId) ?? snap?.Current;
+        var inst = InstanceSelection.Find(snap, a.VersionId, a.GameRoot);
         var loaderBlocked = !ManualTarget && !dp && !string.IsNullOrWhiteSpace(a.VersionId) && !p.IsLoaderCompatibleWith(inst?.Loader ?? "");
         if (!ManualTarget && dp && _saves is null && !_savesLoading) _ = LoadSavesAsync();
         SavePanel.Visibility = dp && !ManualTarget ? Visibility.Visible : Visibility.Collapsed;
@@ -435,8 +435,7 @@ public sealed partial class OnlineDetailPage : Page
                 if (plan is null) return;
             }
             var snapshot = App.MainWindow.Snapshot;
-            var targetInstance = snapshot?.Current is { } current && current.Id == target
-                ? current : snapshot?.Versions.FirstOrDefault(v => v.Id == target);
+            var targetInstance = target.Length > 0 ? InstanceSelection.Find(snapshot, target, a.GameRoot) : null;
             task = TaskCenter.Add($"安装 {p.Title}",
                 $"{a.SourceName} · {(file is null ? p.TypeText : file.Display)} · {(p.IsModpack ? "新实例" : a.VersionId)}",
                 PageTagFor(p), "\uE7B8", InstanceIcon.ForProject(p, targetInstance));
@@ -449,7 +448,8 @@ public sealed partial class OnlineDetailPage : Page
                 : dpInstall
                 ? await App.Backend.InstallOnlineDatapackAsync(a.Source, p.Id, file?.Id ?? "", target, SelectedSave() ?? "", task.Id, a.GameRoot)
                 : file is null
-                ? await App.Backend.InstallOnlineAsync(a.Source, p.Id, target, p.InstallKind, packProgress, task.Id)
+                ? await App.Backend.InstallOnlineAsync(a.Source, p.Id, target, p.InstallKind, packProgress, task.Id,
+                    gameRoot: p.IsModpack ? "" : a.GameRoot)
                 : await App.Backend.InstallOnlineFileAsync(a.Source, p.Id, file.Id, target, p.InstallKind, progress: packProgress, taskId: task.Id, gameRoot: a.GameRoot);
             if (result.Ok)
             {
@@ -555,7 +555,8 @@ public sealed partial class OnlineDetailPage : Page
             SetNote(result.Message, busy: false);
             // Saving a standalone file does not mean it is installed in the selected instance.
             if (target is not null && p.IsModpack) await ReadFilesAsync();
-            if (target is not null && target.Id == a.VersionId && target.Root == a.GameRoot) a.OnInstalled(p);
+            if (target is not null && target.Id.Equals(a.VersionId, StringComparison.OrdinalIgnoreCase)
+                && InstanceSelection.SameRoot(target.Root, a.GameRoot)) a.OnInstalled(p);
         }
         catch (Exception ex)
         {

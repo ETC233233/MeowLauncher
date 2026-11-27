@@ -436,48 +436,6 @@
                             </Button>
                         </StackPanel>
                     </Grid>
-                    <!-- 启动阶段：复用后端 progress 通道的四步契约 -->
-                    <StackPanel x:Name="LaunchStages" Spacing="6" Margin="0,6,0,0"
-                                Visibility="Collapsed">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ProgressRing x:Name="LaunchStageRing" IsActive="True"
-                                          Width="14" Height="14" VerticalAlignment="Center"
-                                          Foreground="{ThemeResource TintRecentBrush}" />
-                            <TextBlock x:Name="LaunchStageTitle" Text="正在启动…"
-                                       FontSize="{StaticResource FontSizeCaption}"
-                                       Foreground="{ThemeResource AppText2Brush}"
-                                       VerticalAlignment="Center" />
-                        </StackPanel>
-                        <StackPanel x:Name="StageRow1" Orientation="Horizontal" Spacing="8" Opacity="0.45">
-                            <FontIcon x:Name="Stage1Icon" Glyph="&#xE73B;" FontSize="12"
-                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="Stage1Text" Text="读取启动配置"
-                                       FontSize="{StaticResource FontSizeCaption}"
-                                       Foreground="{ThemeResource AppTextBrush}" />
-                        </StackPanel>
-                        <StackPanel x:Name="StageRow2" Orientation="Horizontal" Spacing="8" Opacity="0.45">
-                            <FontIcon x:Name="Stage2Icon" Glyph="&#xE73B;" FontSize="12"
-                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="Stage2Text" Text="检查 Java 运行时"
-                                       FontSize="{StaticResource FontSizeCaption}"
-                                       Foreground="{ThemeResource AppTextBrush}" />
-                        </StackPanel>
-                        <StackPanel x:Name="StageRow3" Orientation="Horizontal" Spacing="8" Opacity="0.45">
-                            <FontIcon x:Name="Stage3Icon" Glyph="&#xE73B;" FontSize="12"
-                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="Stage3Text" Text="组装启动参数"
-                                       FontSize="{StaticResource FontSizeCaption}"
-                                       Foreground="{ThemeResource AppTextBrush}" />
-                        </StackPanel>
-                        <StackPanel x:Name="StageRow4" Orientation="Horizontal" Spacing="8" Opacity="0.45">
-                            <FontIcon x:Name="Stage4Icon" Glyph="&#xE73B;" FontSize="12"
-                                      Foreground="{ThemeResource AppText3Brush}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="Stage4Text" Text="启动游戏进程"
-                                       FontSize="{StaticResource FontSizeCaption}"
-                                       Foreground="{ThemeResource AppTextBrush}" />
-                        </StackPanel>
-                    </StackPanel>
-
                     <Grid ColumnSpacing="14">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="1.25*" />
@@ -898,7 +856,5 @@
             </ScrollViewer>
         </Grid>
 
-        <InfoBar x:Name="Toast" Grid.Row="0" Grid.RowSpan="2" IsOpen="False"
-                 HorizontalAlignment="Right" VerticalAlignment="Top" Width="380" IsClosable="True" />
     </Grid>
 </Page>

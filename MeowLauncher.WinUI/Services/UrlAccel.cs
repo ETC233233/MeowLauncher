@@ -26,7 +26,12 @@ namespace MeowLauncher.WinUI.Services
         {
             if (!Enabled || string.IsNullOrWhiteSpace(url)) return url;
             if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return url;
-            if (url.IndexOf("github.com", StringComparison.OrdinalIgnoreCase) < 0) return url;
+            // ghproxy accelerates files, not GitHub's API, repository pages or arbitrary hosts.
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.UserInfo.Length > 0
+                || !(u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                     && u.AbsolutePath.Contains("/releases/download/", StringComparison.Ordinal)
+                     || u.Host.Equals("raw.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+                     || u.Host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase))) return url;
             var host = Normalize(Host);
             if (host.Length == 0) return url;
             if (url.StartsWith(host, StringComparison.OrdinalIgnoreCase)) return url;

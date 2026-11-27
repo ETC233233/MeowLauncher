@@ -28,6 +28,9 @@ h1{font-size:27px;font-weight:600;line-height:1.28}
 html[data-theme="dark"] .page-error{color:#FF99A4}
 #stage.account-confirm .row{cursor:default}
 #stage.account-confirm .row:hover{background:var(--panel)}
+#stage.account-confirm .presence-choice{justify-content:space-between}
+.presence-choice .tog{margin:0;flex:none}
+#accountPresenceStatus:empty{display:none}
 #stage.welcome{justify-content:center;padding-top:40px;padding-bottom:40px}
 #stage.login-wait{justify-content:center}
 #stage.login-wait h1{display:none}
@@ -522,7 +525,7 @@ function paintAccount(){
  stage.classList.toggle('login-wait',waiting);
  stage.classList.remove('authmode');stage.querySelector('.authwrap')?.remove();
  const choose=accountView==='choose',confirm=accountView==='confirm';
- stage.classList.toggle('account-confirm',confirm);stage.style.overflowY=accountView==='offline'?'auto':'';
+ stage.classList.toggle('account-confirm',confirm);stage.style.overflowY=accountView==='offline'||confirm?'auto':'';
  const old=stage.querySelector('.oldacc'),later=document.getElementById('later'),lead=stage.querySelector('.lead');
  if(old)old.hidden=!choose;if(later)later.style.display=choose?'':'none';
  if(lead)lead.hidden=!choose;
@@ -531,7 +534,7 @@ function paintAccount(){
  showPageError(!choose&&!confirm&&!waiting?accountFlow.message:'');
  const next=document.getElementById('next');
  if(next){
-  next.setAttribute('aria-disabled',String(!choose&&!confirm&&accountBusy()));
+  next.setAttribute('aria-disabled',String(!!accountFlow.presenceSaving||(!choose&&!confirm&&accountBusy())));
   next.style.display=accountView==='online'||waiting?'none':'';
  }
  if(waiting){
@@ -581,6 +584,22 @@ function paintAccount(){
   accountText(identity,'div','t',p.name);accountText(identity,'div','d',p.typeDisplay);
   accountRow(options,'UUID',p.uuid);
   accountRow(options,'皮肤模型',p.variant==='slim'?'纤细模型':'经典模型');
+  if(p.kind==='microsoft'){
+   const label=accountText(options,'label','row presence-choice','');
+   const text=accountText(label,'div','','');
+   accountText(text,'div','t','在线状态显示');
+   accountText(text,'div','d','用 MeowLauncher 的好友将能看到您正在使用启动器');
+   const control=accountText(label,'span','tog','');
+   const input=document.createElement('input');
+   input.type='checkbox';input.id='accountPresenceSwitch';input.checked=!!p.sharePresence;
+   input.setAttribute('aria-label','在线状态显示');
+   control.appendChild(input);accountText(control,'span','tr','');
+   input.onchange=()=>{
+    accountFlow.presenceSaving=true;input.disabled=true;next.setAttribute('aria-disabled','true');
+    bridge({type:'presence-sharing',value:input.checked});
+   };
+   accountText(options,'p','d','').id='accountPresenceStatus';
+  }
   return;
  }
  if(accountView==='online'){
@@ -664,6 +683,16 @@ function startAccount(){
  bridge({type:'account-login',kind,name:accountFlow.name.trim(),slim:!!accountFlow.slim});
 }
 window.__OOBE_PUSH__=msg=>{
+ if(msg?.type==='presence-sharing'){
+  accountFlow.presenceSaving=false;
+  const toggle=document.getElementById('accountPresenceSwitch');
+  if(!toggle||accountFlow.profile?.kind!=='microsoft')return;
+  accountFlow.profile.sharePresence=!!msg.value;
+  toggle.checked=!!msg.value;toggle.disabled=false;
+  document.getElementById('next').setAttribute('aria-disabled','false');
+  document.getElementById('accountPresenceStatus').textContent=msg.ok?'':'无法保存在线状态设置，请重试。';
+  return;
+ }
  if(msg?.type==='dir'){
   if(msg.error){showPageError(msg.error);return}
   HOST.selectedDir=msg.path;
@@ -720,7 +749,7 @@ function render(){
  const art=document.getElementById('art');const tpl=document.getElementById(n===1?'heroTpl':('artTpl'+(n===2?3:n===3?2:n)));art.innerHTML='';requestAnimationFrame(()=>{if(n===3&&accountView==='confirm')showAccountModel(art,accountFlow.profile);else if(n===3&&accountView==='offline')showAccountModel(art,{skin:defaultAccountSkin(accountFlow.slim),variant:accountFlow.slim?'slim':'classic'});else if(tpl)art.innerHTML=tpl.innerHTML});
  document.getElementById('foot').innerHTML='<div class="fleft">'+(n>1?'<span class="back" id="bk">'+BACK+'</span>':'<span class="back"></span>')+(n===1?'<span class="skipbtn" id="skip">不再显示</span>':'')+'</div>'+'<div class="btn primary" id="next">'+s.btn+'</div>';
  document.getElementById('next').onclick=()=>{
- if(n===3){nextAccount();return}
+ if(n===3){if(!accountFlow.presenceSaving)nextAccount();return}
  if(n<6)go(1);else bridge({type:'finish'});
 };
  const bk=document.getElementById('bk');if(bk)bk.onclick=()=>{if(n===3)backAccount();else go(-1)};

@@ -409,18 +409,6 @@ def _neoforge_installer_urls(mc_version: str, loader_version: str) -> list[str]:
     return res
 
 
-def _download_any(urls: list[str], dest: Path) -> Path:
-    """按候选顺序下安装器 jar；大小已知就走和普通下载一样的分段并发。"""
-    last = None
-    for url in urls:
-        try:
-            size = net.probe_size(url)
-            return net._download(url, dest, size=size, force_segments=True)
-        except Exception as exc:  # 换下一个源
-            last = exc
-    raise last or RuntimeError("没有可用的下载源")
-
-
 def _neoforge_versions_asc(mc_version: str) -> list[str]:
     """某 MC 版本下所有 NeoForge 构建，旧→新。
 
@@ -541,11 +529,8 @@ def api_mod_versions(project_id: str, mc_version: str) -> list[dict]:
         raise ValueError("未知的加载器 API 项目")
     key = f"api:{project_id}:{platform}:{mc_version}"
     cached = _cache_get(key)
-    if isinstance(cached, list):
-        return cached
-    rows = net.modrinth_versions(project_id, loaders=[platform],
-                                 game_versions=[mc_version] if mc_version else None) or []
-    _cache_put(key, rows)
+    rows = cached if isinstance(cached, list) else net.modrinth_versions(
+        project_id, loaders=[platform], game_versions=[mc_version] if mc_version else None) or []
 
     def published(row: dict) -> datetime:
         try:
@@ -557,7 +542,9 @@ def api_mod_versions(project_id: str, mc_version: str) -> list[dict]:
     compatible = (row for row in rows if row.get("project_id") == project_id
                   and platform in (row.get("loaders") or [])
                   and (not mc_version or mc_version in (row.get("game_versions") or [])))
-    return sorted(compatible, key=published, reverse=True)
+    ordered = sorted(compatible, key=published, reverse=True)
+    _cache_put(key, ordered)
+    return ordered
 
 
 def _exclusive_api_items(kind: str, sel: dict, log) -> list[tuple[str, str]]:
@@ -703,8 +690,42 @@ def _neoforge_versions_v2(mc: str) -> list:
 _AV_CACHE: dict[tuple, list] = {}
 
 
+def can_query_loader(mc: str, kind: str) -> bool:
+    """Reject impossible generations before any loader metadata request."""
+    kind = kind.lower()
+    if kind not in ("fabric", "quilt", "forge", "neoforge"):
+        return False
+    match = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?", mc)
+    if match:
+        v = tuple(int(x or 0) for x in match.groups())
+        floor = {"fabric": (1, 14, 0), "quilt": (1, 14, 0), "neoforge": (1, 20, 1), "forge": (1, 1, 0)}[kind]
+        return v >= floor
+    # Forge and NeoForge publish release builds; Fabric/Quilt snapshot support is index-driven.
+    return kind in ("fabric", "quilt", "forge") and not mc.startswith(("old_", "b1.", "a1.", "inf-", "rd-", "c0."))
+
+
+def loader_game_supported(mc: str, kind: str) -> bool:
+    if not can_query_loader(mc, kind):
+        return False
+    if kind in ("fabric", "quilt"):
+        url = ("https://meta.fabricmc.net/v2/versions/game" if kind == "fabric"
+               else "https://meta.quiltmc.org/v3/versions/game")
+        games = _get_json(url)
+        if not isinstance(games, list) or not games:
+            raise RuntimeError("读取加载器支持的游戏版本失败")
+        return any(isinstance(row, dict) and row.get("version") == mc for row in games)
+    if kind == "forge":
+        games = _get_json(f"{net.BMCLAPI}/forge/minecraft")
+        if not isinstance(games, list) or not games:
+            raise RuntimeError("读取 Forge 支持的游戏版本失败")
+        return mc in games
+    return True
+
+
 def available_versions_raw(mc: str, kind: str) -> list:
     """某 MC 版本下该加载器所有可用构建（新→旧）；没有就返回空列表。"""
+    if not loader_game_supported(mc, kind):
+        return []
     try:
         if kind == "fabric":
             rows = _get_json(f"https://meta.fabricmc.net/v2/versions/loader/{mc}") or []

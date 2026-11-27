@@ -36,6 +36,7 @@ public class TaskEntry : INotifyPropertyChanged
 
     public Visibility TaskGlyphVisibility => TargetIcon is null ? Visibility.Visible : Visibility.Collapsed;
     internal string LastStage { get; set; } = "";
+    internal bool IsNotificationPreview { get; set; }
 
     public FailureInfo? Failure
     {

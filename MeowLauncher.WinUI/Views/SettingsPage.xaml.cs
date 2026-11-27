@@ -53,8 +53,10 @@ public sealed partial class SettingsPage : Page
         Unloaded += (_, _) =>
         {
             _alive = false;
+            if (_section == "dev") App.MainWindow?.ClearNotificationPreview();
             CancelSectionEntrance();
             UpdateService.Changed -= OnUpdateChanged;
+            LauncherUpdater.Changed -= OnUpdateChanged;
             OnlineComponent.UpdateAvailable -= OnUpdateChanged;
             OnlineComponent.ReadyChanged -= OnUpdateChanged;
             if (_energySaverSubscribed)
@@ -131,6 +133,7 @@ public sealed partial class SettingsPage : Page
     {
         _alive = true;
         UpdateService.Changed += OnUpdateChanged;
+        LauncherUpdater.Changed += OnUpdateChanged;
         OnlineComponent.UpdateAvailable += OnUpdateChanged;
         OnlineComponent.ReadyChanged += OnUpdateChanged;
         try
@@ -274,6 +277,7 @@ public sealed partial class SettingsPage : Page
         };
         if (!SectionNames.Contains(key)) return;
         if (key == "dev" && !_devUnlocked) return;   // 没认证：这个分类不存在
+        if (_section == "dev" && key != "dev") App.MainWindow?.ClearNotificationPreview();
         CancelSectionEntrance();
         if (CardFor(_section) is { } outgoing) Motion.AttachLayout(outgoing, false);
         foreach (var panel in SectionMotionPanels(_section)) Motion.AttachVisibility(panel, false);
@@ -291,7 +295,7 @@ public sealed partial class SettingsPage : Page
     {
         "appearance" => new FrameworkElement[] { EnergySaverNotice, AcrylicKindRow, WallpaperEffectsPanel, BackgroundImageRow, CustomSizeRow },
         "network" => new FrameworkElement[] { GithubAccelHostRow, ProxyCustomRow, ProxyAuthRow },
-        "dev" => new FrameworkElement[] { DevFeaturesPanel },
+        "dev" => new FrameworkElement[] { DevFeaturesPanel, ComponentSection },
         _ => Array.Empty<FrameworkElement>(),
     };
 
@@ -1185,7 +1189,7 @@ public sealed partial class SettingsPage : Page
         var prefs = App.MainWindow?.Preferences;
         if (prefs is null) return;
         _suppress = true;
-        SelectTag(ProxyModeBox, string.IsNullOrWhiteSpace(prefs.ProxyMode) ? "system" : prefs.ProxyMode);
+        SelectTag(ProxyModeBox, string.IsNullOrWhiteSpace(prefs.ProxyMode) ? "direct" : prefs.ProxyMode);
         ProxyHostBox.Text = prefs.ProxyHost ?? "";
         ProxyPortBox.Value = prefs.ProxyPort <= 0 ? 7890 : prefs.ProxyPort;
         ProxyUserBox.Text = prefs.ProxyUser ?? "";
@@ -1201,7 +1205,7 @@ public sealed partial class SettingsPage : Page
         if (_suppress || !_ready) return;
         var prefs = App.MainWindow?.Preferences;
         if (prefs is null) return;
-        prefs.ProxyMode = string.IsNullOrWhiteSpace(SelectedTag(ProxyModeBox)) ? "system" : SelectedTag(ProxyModeBox);
+        prefs.ProxyMode = string.IsNullOrWhiteSpace(SelectedTag(ProxyModeBox)) ? "direct" : SelectedTag(ProxyModeBox);
         prefs.ProxyHost = ProxyHostBox.Text.Trim();
         prefs.ProxyPort = double.IsNaN(ProxyPortBox.Value) ? 0 : (int)Math.Round(ProxyPortBox.Value);
         prefs.ProxyUser = ProxyUserBox.Text.Trim();
@@ -1269,7 +1273,7 @@ public sealed partial class SettingsPage : Page
         box.SelectedItem is ComboBoxItem item ? item.Tag as string ?? "" : "";
 
     // ---- 开发者测试：认证 → 开发者测试功能总开关 → 联机功能，三层都开才生效（默认全关）----
-    // 设置存在 settings4.json 的 devUnlocked / devFeatures / onlineEnabled / shareOnline。
+    // 设置存在 settings4.json 的 devUnlocked / devFeatures / onlineEnabled。
     private async Task SyncDevAsync()
     {
         DevSettings s;
@@ -1302,19 +1306,29 @@ public sealed partial class SettingsPage : Page
             NavDev.Visibility = state.Unlocked ? Visibility.Visible : Visibility.Collapsed;
             DevFeaturesSwitch.IsOn = state.DevFeatures;
             OnlineEnabledSwitch.IsOn = state.OnlineEnabled;
-            ShareOnlineSwitch.IsOn = state.ShareOnline;
             OnlineEnvHint.Visibility = state.EnvOverride ? Visibility.Visible : Visibility.Collapsed;
             UpdateDevControls(state.EnvOverride);
+            if (!state.Unlocked && _section == "dev") ShowSection("launch");
         }
         finally { _suppress = suppress; }
     }
 
     private void UpdateDevControls(bool forced)
     {
-        DevFeaturesPanel.Visibility = DevFeaturesSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        var enabled = _devUnlocked && DevFeaturesSwitch.IsOn;
+        if (!enabled && DevFeaturesPanel.Visibility == Visibility.Visible)
+            App.MainWindow?.ClearNotificationPreview();
+        DevFeaturesPanel.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         DevFeaturesSwitch.IsEnabled = !_savingDev && !forced;
-        OnlineEnabledSwitch.IsEnabled = !_savingDev && !forced && DevFeaturesSwitch.IsOn;
-        ShareOnlineSwitch.IsEnabled = !_savingDev && DevFeaturesSwitch.IsOn && OnlineEnabledSwitch.IsOn;
+        OnlineEnabledSwitch.IsEnabled = !_savingDev && !forced && enabled;
+        PlayNotificationPreviewButton.IsEnabled = !_savingDev && enabled;
+    }
+
+    private void PlayNotificationPreview_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_devUnlocked || !DevFeaturesSwitch.IsOn || _savingDev) return;
+        if (NotificationPreviewBox.SelectedItem is ComboBoxItem { Tag: string scenario })
+            App.MainWindow?.PlayNotificationPreview(scenario);
     }
 
     private async Task SaveDevAsync()
@@ -1322,15 +1336,12 @@ public sealed partial class SettingsPage : Page
         if (_suppress || !_ready || _savingDev || _savedDev is not { } previous) return;
         var dev = DevFeaturesSwitch.IsOn;
         var online = dev && OnlineEnabledSwitch.IsOn;
-        var share = ShareOnlineSwitch.IsOn;
         _savingDev = true;
         // 立即响应总开关，保存结果回来后再确认状态。
         UpdateDevControls(previous.EnvOverride);
         try
         {
-            if (previous.DevFeatures && previous.OnlineEnabled && previous.ShareOnline && (!online || !share))
-                await App.Backend.ReportPresenceAsync("OFFLINE");
-            var saved = await App.Backend.SetDevSettingsAsync(dev, online, share);
+            var saved = await App.Backend.SetDevSettingsAsync(dev, online);
             if (!saved.Ok)
             {
                 if (_alive) ShowDevSaveError();
@@ -1354,15 +1365,11 @@ public sealed partial class SettingsPage : Page
 
     private void ShowDevSaveError()
     {
-        Toast.Title = "开发者测试设置保存失败";
-        Toast.Message = "已恢复上一次保存的设置。";
-        Toast.Severity = InfoBarSeverity.Error;
-        Toast.IsOpen = true;
+        TaskCenter.PostFeedback(InfoBarSeverity.Error, "开发者测试设置保存失败", "已恢复上一次保存的设置。");
     }
 
     private async void DevFeaturesSwitch_Toggled(object sender, RoutedEventArgs e) => await SaveDevAsync();
     private async void OnlineEnabledSwitch_Toggled(object sender, RoutedEventArgs e) => await SaveDevAsync();
-    private async void ShareOnlineSwitch_Toggled(object sender, RoutedEventArgs e) => await SaveDevAsync();
 
     private void NotifyTaskDoneSwitch_Toggled(object sender, RoutedEventArgs e)
     {
@@ -1390,12 +1397,12 @@ public sealed partial class SettingsPage : Page
         UpdateChannelBox.IsEnabled = !cur.IsReview;
         CheckUpdatesSwitch.IsEnabled = !cur.IsReview;
         UpdateChannelDescriptionText.Text = cur.IsReview ? "此版本暂不支持更新" : "选择当前更新的渠道";
-        // 当前更新服务只支持检查和打开发行页，下载/安装偏好与引导同步，暂不假装能执行。
-        AutoDownloadUpdateSwitch.IsEnabled = false;
-        AutoInstallUpdateSwitch.IsEnabled = false;
+        AutoDownloadUpdateSwitch.IsEnabled = !cur.IsReview && LauncherUpdater.Supported;
+        AutoInstallUpdateSwitch.IsEnabled = !cur.IsReview && LauncherUpdater.Supported;
         AutomaticUpdateNoticeText.Text = cur.IsReview
-            ? "此版本暂不支持更新。自动下载和安装偏好与新手引导同步，当前尚不可用。"
-            : "有可用更新时会提醒你。自动下载和安装暂不可用，请通过发行页手动下载。";
+            ? "此版本暂不支持更新。"
+            : LauncherUpdater.Supported ? "更新包校验通过后可重启安装。自动安装只会在没有任务和游戏运行时进行。"
+            : "当前安装方式暂不支持原地更新，请通过发行页下载新版。";
         UpdateOpenButton.Visibility = Visibility.Collapsed;
         UpdateOpenButton.Tag = null;
         string note = "";
@@ -1405,13 +1412,21 @@ public sealed partial class SettingsPage : Page
             {
                 case UpdateState.Available:
                     note = r.Message;
-                    if (r.Latest is { Url.Length: > 0 } available) { UpdateOpenButton.Tag = available.Url; UpdateOpenButton.Visibility = Visibility.Visible; }
+                    if (r.Latest is { } available && (available.Url.Length > 0 || available.Package is not null))
+                    {
+                        UpdateOpenButton.Tag = available.Url;
+                        UpdateOpenButton.Visibility = Visibility.Visible;
+                        UpdateOpenButton.Content = LauncherUpdater.Supported && available.Package is not null
+                            ? LauncherUpdater.Prepared?.Version == available.Version ? "重启并安装" : "下载更新" : "前往发行页";
+                        UpdateOpenButton.IsEnabled = !LauncherUpdater.Busy;
+                    }
                     break;
                 case UpdateState.UpToDate:
                 case UpdateState.Ahead:
                 default: note = r.Message; break;
             }
         }
+        if (LauncherUpdater.Message.Length > 0) note = LauncherUpdater.Message;
         UpdateStatusText.Text = note;
         UpdateResultPanel.Visibility = note.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1430,7 +1445,16 @@ public sealed partial class SettingsPage : Page
         }
     }
 
-    private void UpdateOpen_Click(object sender, RoutedEventArgs e) => OpenHttps((sender as Button)?.Tag as string);
+    private async void UpdateOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (UpdateService.Last?.Latest is not { Package: not null } release || !LauncherUpdater.Supported)
+        { OpenHttps((sender as Button)?.Tag as string); return; }
+        if (LauncherUpdater.Prepared?.Version != release.Version) { await LauncherUpdater.PrepareAsync(release); return; }
+        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "重启并安装更新？",
+            Content = "启动器将关闭并安装已校验的更新。你的账户、设置和游戏数据会保留。",
+            PrimaryButtonText = "重启安装", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await LauncherUpdater.InstallAsync();
+    }
 
     private void OpenRepo_Click(object sender, RoutedEventArgs e) => OpenHttps((sender as Button)?.Tag as string);
 
@@ -1631,17 +1655,11 @@ public sealed partial class SettingsPage : Page
                 $"diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
             System.IO.Directory.CreateDirectory(AppPreferencesStore.FolderPath);
             System.IO.File.WriteAllLines(outFile, lines);
-            Toast.Title = "日志已导出";
-            Toast.Message = outFile;
-            Toast.Severity = InfoBarSeverity.Success;
-            Toast.IsOpen = true;
+            TaskCenter.PostFeedback(InfoBarSeverity.Success, "日志已导出", outFile);
         }
         catch (Exception ex)
         {
-            Toast.Title = "导出失败";
-            Toast.Message = ex.Message;
-            Toast.Severity = InfoBarSeverity.Error;
-            Toast.IsOpen = true;
+            TaskCenter.PostFeedback(InfoBarSeverity.Error, "导出失败", ex.Message);
         }
     }
 
@@ -1658,17 +1676,11 @@ public sealed partial class SettingsPage : Page
                 removed += System.IO.Directory.GetFiles(dir, "*", System.IO.SearchOption.AllDirectories).Length;
                 System.IO.Directory.Delete(dir, recursive: true);
             }
-            Toast.Title = removed > 0 ? "缓存已清理" : "没有需要清理的缓存";
-            Toast.Message = removed > 0 ? $"共删除 {removed} 个文件" : "头像与缩略图目录本来就是空的";
-            Toast.Severity = InfoBarSeverity.Success;
-            Toast.IsOpen = true;
+            TaskCenter.PostFeedback(InfoBarSeverity.Success, removed > 0 ? "缓存已清理" : "没有需要清理的缓存", removed > 0 ? $"共删除 {removed} 个文件" : "头像与缩略图目录本来就是空的");
         }
         catch (Exception ex)
         {
-            Toast.Title = "清理失败";
-            Toast.Message = ex.Message;
-            Toast.Severity = InfoBarSeverity.Error;
-            Toast.IsOpen = true;
+            TaskCenter.PostFeedback(InfoBarSeverity.Error, "清理失败", ex.Message);
         }
     }
 
@@ -1685,10 +1697,7 @@ public sealed partial class SettingsPage : Page
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         Services.AppPreferencesStore.Save(new Services.AppPreferences());
-        Toast.Title = "已恢复默认设置";
-        Toast.Message = "重启启动器后生效";
-        Toast.Severity = InfoBarSeverity.Warning;
-        Toast.IsOpen = true;
+        TaskCenter.PostFeedback(InfoBarSeverity.Warning, "已恢复默认设置", "重启启动器后生效");
     }
 
     private void SyncNotifyAndUpdate()

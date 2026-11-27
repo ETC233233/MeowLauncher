@@ -27,8 +27,8 @@ public sealed partial class AccountPage : Page
     private MinecraftProfile? _profile;
     private AccountInfo? _activeAccount;
     private FriendsResult? _friends;
-    private bool _friendsLoaded;
     private bool _loadingFriends;
+    private bool _syncingPresenceSwitch;
     private bool _friendsReloadPending;   // 读取中又点了刷新：读完后立刻再读一遍
     private string _friendsAccountKey = "";
     private AccountPermsResult? _perms;
@@ -83,6 +83,7 @@ public sealed partial class AccountPage : Page
     public AccountPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) => SetFriendsAutoRefresh(false);
         // 展示台高度跟页面宽度分档（宽窗给满，窄窗收窄，避免把下面的单选与披风挤出视口）。
         SizeChanged += (_, e) => UpdateSkinLayout(e.NewSize.Width);
         WireRowHover();
@@ -146,13 +147,16 @@ public sealed partial class AccountPage : Page
         {
             _friendsAccountKey = active?.Key ?? "";
             _friends = null;
-            _friendsLoaded = false;
-            FriendsSummary.Text = "好友";
+            FriendsUpdatedAt.Text = "";
+            SetFriendsListStatus("");
+            FriendsPresenceHint.Visibility = Visibility.Collapsed;
             FriendList.Children.Clear();
             IncomingList.Children.Clear();
             OutgoingList.Children.Clear();
             IncomingSection.Visibility = Visibility.Collapsed;
             OutgoingSection.Visibility = Visibility.Collapsed;
+            RequestsEmptyCard.Visibility = Visibility.Collapsed;
+            FriendListCard.Visibility = Visibility.Collapsed;
             FriendEmpty.Visibility = Visibility.Collapsed;
             SetFriendsStatus("");
         }
@@ -1314,12 +1318,8 @@ public sealed partial class AccountPage : Page
         }
     }
 
-    private void ShowToast(string message, InfoBarSeverity severity)
-    {
-        Toast.Message = message;
-        Toast.Severity = severity;
-        Toast.IsOpen = true;
-    }
+    private static void ShowToast(string message, InfoBarSeverity severity) =>
+        TaskCenter.PostFeedback(severity, "账户", message);
 
     // ------------------------------------------------------------------ //
     // 子视图切换
@@ -1441,6 +1441,7 @@ public sealed partial class AccountPage : Page
 
     private void ShowRootView()
     {
+        SetFriendsAutoRefresh(false);
         RootView.Visibility = Visibility.Visible;
         SkinView.Visibility = Visibility.Collapsed;
         FriendsView.Visibility = Visibility.Collapsed;
@@ -1455,6 +1456,7 @@ public sealed partial class AccountPage : Page
 
     private void ShowSkinView(bool show)
     {
+        SetFriendsAutoRefresh(false);
         RootView.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
         SkinView.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         FriendsView.Visibility = Visibility.Collapsed;
@@ -1480,60 +1482,63 @@ public sealed partial class AccountPage : Page
         HeaderBackButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         CrumbRoot.FontWeight = show ? Microsoft.UI.Text.FontWeights.Normal : Microsoft.UI.Text.FontWeights.SemiBold;
         CrumbRoot.Opacity = show ? 0.72 : 1;
-        if (show) Motion.Settle(FriendsView);
+        if (show)
+        {
+            SyncPresenceSwitch();
+            Motion.Settle(FriendsView);
+        }
         else Motion.Settle(RootView);
     }
 
     // ------------------------------------------------------------------ //
     // 好友
     // ------------------------------------------------------------------ //
-    private async Task LoadFriendsAsync(bool force = false)
+    private async Task LoadFriendsAsync(bool force = false, bool automatic = false)
     {
+        if (!IsLoaded || FriendsView.Visibility != Visibility.Visible || _activeAccount is null || !IsMicrosoft(_activeAccount))
+            return;
         // 上一次读取还没结束时点刷新：不再静默丢掉，而是记下来，这次结束后立刻再读一遍
         if (_loadingFriends)
         {
             if (force) _friendsReloadPending = true;
             return;
         }
-        if (_friendsLoaded && !force)
-        {
-            RenderFriends();
-            return;
-        }
-
+        var accountKey = _friendsAccountKey;
+        bool StillCurrent() => IsLoaded && FriendsView.Visibility == Visibility.Visible &&
+            string.Equals(accountKey, _friendsAccountKey, StringComparison.OrdinalIgnoreCase);
         _loadingFriends = true;
-        FriendsLoadingRing.IsActive = true;
-        FriendsLoadingRing.Visibility = Visibility.Visible;
+        FriendsLoadingRing.IsActive = !automatic || _friends is null;
+        FriendsLoadingRing.Visibility = FriendsLoadingRing.IsActive ? Visibility.Visible : Visibility.Collapsed;
         FriendsRefreshButton.IsEnabled = false;
-        SetFriendsStatus("");
         try
         {
-            var result = await App.Backend.GetFriendsAsync();
-            if (!result.Ok)
+            if (!NetworkAvailability.CanStartRequest)
             {
-                // 到 Mojang 的网络偶发失败很常见（慢网络 / 代理），自动重试一次再认定失败
-                SetFriendsStatus("");
-                result = await App.Backend.GetFriendsAsync();
+                SetFriendsListStatus(_friends is null ? NetworkAvailability.OfflineMessage : "当前未连接网络，显示上次的好友列表。");
+                return;
             }
+            var result = await App.Backend.GetFriendsAsync();
+            if (!StillCurrent()) return;
 
             if (result.Ok)
             {
                 _friends = result;
-                _friendsLoaded = true;
                 App.Online.UpdateFriends((result.Friends ?? new()).Select(f => (f.Id, f.Name)));
                 RenderFriends();
                 // 显示上次成功更新的时间，让人一眼看出列表是不是新的
                 var note = $"上次更新 {DateTime.Now:HH:mm:ss}";
                 FriendsUpdatedAt.Text = note;
-                SetFriendsStatus(result.Message ?? "");
+                SetFriendsListStatus("");
             }
             else
             {
-                if (_friends is null) FriendsSummary.Text = "好友列表读取失败";
-                // 保留旧列表，但明确说"显示的是旧数据"，不要让人以为刷新成功了
-                var stale = _friends is null ? "" : "；下面显示的是上一次的结果，可能不是最新的";
-                SetFriendsStatus($"读取失败：{result.Message}{stale}。网络慢或不稳定时可再点一次刷新。", error: true);
+                var stale = _friends is null ? "" : "，显示上次的好友列表";
+                SetFriendsListStatus($"未能刷新好友列表{stale}。{result.Message}");
             }
+        }
+        catch (Exception ex)
+        {
+            if (StillCurrent()) SetFriendsListStatus("未能刷新好友列表。" + Diagnostics.FriendlyMessage(ex));
         }
         finally
         {
@@ -1549,7 +1554,7 @@ public sealed partial class AccountPage : Page
         }
     }
 
-    // 好友页打开期间每 60 秒自动刷新一次：新好友 / 好友上下线不用手动重进页面
+    // 只在好友页打开且窗口在前台时轮询。
     private DispatcherTimer? _friendsTimer;
 
     private void SetFriendsAutoRefresh(bool on)
@@ -1561,13 +1566,13 @@ public sealed partial class AccountPage : Page
         }
         if (_friendsTimer is null)
         {
-            _friendsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+            _friendsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
             _friendsTimer.Tick += (_, _) =>
             {
                 // 离开好友页 / 页面已卸载就停掉；读取中就跳过这一轮
                 if (!IsLoaded || FriendsView.Visibility != Visibility.Visible) { _friendsTimer?.Stop(); return; }
-                if (_loadingFriends) return;
-                _ = LoadFriendsAsync(force: true);
+                if (_loadingFriends || App.MainWindow?.IsForeground != true) return;
+                _ = LoadFriendsAsync(automatic: true);
             };
         }
         _friendsTimer.Start();
@@ -1582,16 +1587,13 @@ public sealed partial class AccountPage : Page
         var incoming = result.Incoming ?? new List<FriendInfo>();
         var outgoing = result.Outgoing ?? new List<FriendInfo>();
 
-        FriendsSummary.Text = "好友";
-
         // 提示：上报失败 / 因为游戏在运行或用户关了「显示在线」而没有刷新在线状态
         var hint = !string.IsNullOrWhiteSpace(result.PresenceError)
             ? $"在线状态暂时不可用：{result.PresenceError}"
             : result.PresenceSkipped switch
             {
-                "online-disabled" => "联机功能未启用，不显示好友在线状态。",
                 "game-running" => "游戏运行中：没有刷新在线状态，避免覆盖游戏里的状态。",
-                "disabled" => "已关闭「向好友显示在线」，所以看不到好友的在线状态。",
+                "disabled" or "online-disabled" => "开启「在线状态显示」后可查看好友的在线状态。",
                 _ => "",
             };
         FriendsPresenceHint.Text = hint;
@@ -1604,29 +1606,18 @@ public sealed partial class AccountPage : Page
             .ThenBy(friend => friend.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        FriendList.Children.Clear();
-        foreach (var friend in friends)
-        {
-            AddFriendRow(FriendList, friend, "REMOVE", "删除", destructive: true);
-        }
+        SyncFriendRows(FriendList, friends, "REMOVE", "删除", destructive: true, presenceKnown: hint.Length == 0);
+        FriendListCard.Visibility = Visibility.Visible;
         FriendEmpty.Visibility = friends.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        IncomingList.Children.Clear();
-        foreach (var request in incoming)
-        {
-            AddFriendRow(IncomingList, request, "ADD", "接受", destructive: false);
-        }
+        SyncFriendRows(IncomingList, incoming, "ADD", "接受", destructive: false);
         IncomingSection.Visibility = incoming.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         // 好友申请常驻显示：收到的和已发送的都没有时，给出明确的空态文字
         RequestsEmptyCard.Visibility = incoming.Count == 0 && outgoing.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        OutgoingList.Children.Clear();
-        foreach (var request in outgoing)
-        {
-            AddFriendRow(OutgoingList, request, "REMOVE", "取消", destructive: false);
-        }
+        SyncFriendRows(OutgoingList, outgoing, "REMOVE", "取消", destructive: false);
         OutgoingSection.Visibility = outgoing.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -1661,9 +1652,73 @@ public sealed partial class AccountPage : Page
         };
     }
 
-    private void AddFriendRow(StackPanel host, FriendInfo friend, string action, string actionText, bool destructive)
+    private void SetFriendsListStatus(string message)
     {
-        var row = new Grid { Height = 56, ColumnSpacing = 12 };
+        FriendsListStatus.Text = message;
+        FriendsListStatus.Visibility = message.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void SyncPresenceSwitch()
+    {
+        _syncingPresenceSwitch = true;
+        try { LauncherPresenceSwitch.IsOn = App.MainWindow?.ShareLauncherPresence == true; }
+        finally { _syncingPresenceSwitch = false; }
+    }
+
+    private void LauncherPresence_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncingPresenceSwitch || FriendsView.Visibility != Visibility.Visible ||
+            _activeAccount is not { } account || !IsMicrosoft(account) || App.MainWindow is not { } main) return;
+        if (!main.SetLauncherPresenceSharing(LauncherPresenceSwitch.IsOn))
+        {
+            SyncPresenceSwitch();
+            SetFriendsListStatus("无法保存在线状态设置，请重试。");
+            return;
+        }
+        _ = LoadFriendsAsync(force: true);
+    }
+
+    private sealed record FriendRowAppearance(string Id, string Name, string Head, string Subtitle,
+        bool Online, bool CanInvite, bool InvitePending);
+
+    private void SyncFriendRows(StackPanel host, IEnumerable<FriendInfo> rows, string action, string text,
+        bool destructive, bool presenceKnown = true)
+    {
+        var model = rows.Select(friend =>
+        {
+            var subtitle = friend.Kind switch
+            {
+                "incoming" => "请求添加你为好友",
+                "outgoing" => "等待对方接受",
+                _ when !presenceKnown => "状态未获取",
+                _ => friend.StatusText + (friend.Joinable ? " · 可加入" : ""),
+            };
+            var invite = presenceKnown && friend.Kind == "friend" && friend.Online && friend.Meow && App.Online.IsLoggedIn;
+            var pending = invite && App.Online.IsInvitePending(friend.Id, App.Room.IsHost ? App.Room.Code : "");
+            return (Friend: friend, View: new FriendRowAppearance(friend.Id, friend.Name, friend.HeadPath, subtitle,
+                presenceKnown && friend.Online, invite, pending));
+        }).ToList();
+        for (var i = 0; i < model.Count; i++)
+        {
+            var (friend, appearance) = model[i];
+            var found = i;
+            for (; found < host.Children.Count; found++)
+                if (host.Children[found] is Grid { Tag: FriendRowAppearance existing } && existing == appearance) break;
+            if (found == i && found < host.Children.Count) continue;
+            if (found < host.Children.Count)
+            {
+                var row = host.Children[found];
+                host.Children.RemoveAt(found);
+                host.Children.Insert(i, row);
+            }
+            else host.Children.Insert(i, CreateFriendRow(friend, action, text, destructive, appearance));
+        }
+        while (host.Children.Count > model.Count) host.Children.RemoveAt(host.Children.Count - 1);
+    }
+
+    private Grid CreateFriendRow(FriendInfo friend, string action, string actionText, bool destructive, FriendRowAppearance appearance)
+    {
+        var row = new Grid { Height = 52, ColumnSpacing = 12, Tag = appearance };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1680,12 +1735,6 @@ public sealed partial class AccountPage : Page
         Grid.SetColumn(avatar, 0);
         row.Children.Add(avatar);
 
-        var subtitle = friend.Kind switch
-        {
-            "incoming" => "请求添加你为好友",
-            "outgoing" => "等待对方接受",
-            _ => friend.StatusText + (friend.Joinable ? " · 可加入" : ""),
-        };
         var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock
         {
@@ -1696,9 +1745,9 @@ public sealed partial class AccountPage : Page
         });
         text.Children.Add(new TextBlock
         {
-            Text = subtitle,
+            Text = appearance.Subtitle,
             FontSize = (double)Application.Current.Resources["FontSizeCaption"],
-            Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
+            Foreground = (Brush)Application.Current.Resources[appearance.Online ? "AccountGreenBrush" : "AppText3Brush"],
         });
         Grid.SetColumn(text, 1);
         row.Children.Add(text);
@@ -1706,13 +1755,18 @@ public sealed partial class AccountPage : Page
         var button = new Button
         {
             Content = actionText,
-            Style = (Style)Resources["PillButtonStyle"],
+            CornerRadius = new CornerRadius(6),
+            Height = 32,
+            Padding = new Thickness(12, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Tag = new FriendActionRequest(friend, action),
         };
+        if (destructive) button.Foreground = (Brush)Application.Current.Resources["AppBadBrush"];
+        AutomationProperties.SetName(button, $"{actionText} {friend.Name}");
+        button.Click += FriendAction_Click;
 
         // 「邀请」：只对「在线且在用 MeowLauncher」的好友显示，并且自己的联机会话已经登录（走服务器推送）
-        if (friend.Kind == "friend" && friend.Online && friend.Meow && App.Online.IsLoggedIn)
+        if (appearance.CanInvite)
         {
             var invite = new Button
             {
@@ -1721,7 +1775,7 @@ public sealed partial class AccountPage : Page
                 VerticalAlignment = VerticalAlignment.Center,
                 Tag = friend,
             };
-            if (App.Online.IsInvitePending(friend.Id, App.Room.IsHost ? App.Room.Code : ""))
+            if (appearance.InvitePending)
             {
                 invite.Content = "已邀请";
                 invite.IsEnabled = false;
@@ -1730,23 +1784,14 @@ public sealed partial class AccountPage : Page
             var pair = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
             pair.Children.Add(invite);
             pair.Children.Add(button);
-            if (destructive) button.Foreground = (Brush)Application.Current.Resources["AppBadBrush"];
-            button.Click += FriendAction_Click;
             Grid.SetColumn(pair, 2);
             row.Children.Add(pair);
-            host.Children.Add(row);
-            return;
+            return row;
         }
-        if (destructive)
-        {
-            button.Foreground = (Brush)Application.Current.Resources["AppBadBrush"];
-        }
-        AutomationProperties.SetName(button, $"{actionText} {friend.Name}");
-        button.Click += FriendAction_Click;
         Grid.SetColumn(button, 2);
         row.Children.Add(button);
 
-        host.Children.Add(row);
+        return row;
     }
 
     private async void InviteFriend_Click(object sender, RoutedEventArgs e)

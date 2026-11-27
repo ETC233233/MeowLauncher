@@ -340,9 +340,6 @@
                         Style="{StaticResource QuietButtonStyle}" Click="Refresh_Click" />
             </StackPanel>
 
-            <InfoBar x:Name="StatusBar" IsOpen="False" Width="560"
-                     HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                     Margin="0,0,0,10" IsClosable="True" />
         </Grid>
     </Grid>
 </Page>

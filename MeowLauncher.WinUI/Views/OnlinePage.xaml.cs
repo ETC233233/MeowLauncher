@@ -17,6 +17,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     private readonly List<ModrinthProject> _results = new();
     // 第 5 项筛选状态：安装目标实例、游戏版本/加载器覆盖、排序、分页偏移。
     private string _installTo = "";
+    private string _installRoot = "";
     private string _gameVersion = "";
     private string _loader = "";
     private string _sort = "relevance";
@@ -94,6 +95,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     {
         if (!_ready) return;
         _installTo = target.Id;
+        _installRoot = target.Root;
         RefreshFollowLabels();
         _offset = 0;
         await SearchAsync(_query);
@@ -147,6 +149,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
         var current = snapshot?.Current?.Id ?? snapshot?.Selected ?? "";
         _installTo = string.IsNullOrWhiteSpace(current) ? "" : current;
+        _installRoot = snapshot?.Current?.Root ?? "";
 
         GameVersionBox.Items.Clear();
         GameVersionBox.Items.Add(new ComboBoxItem { Content = "跟随实例", Tag = "" });
@@ -574,6 +577,14 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 
         try
         {
+            if (!NetworkAvailability.CanStartRequest)
+            {
+                _results.Clear();
+                _items.Clear();
+                ResultCount.Text = $"{sourceName} · 离线";
+                ShowEmpty("\uE783", "当前处于离线状态", NetworkAvailability.OfflineMessage, retry: true);
+                return;
+            }
             // 分类已经交给服务端：Modrinth 用 facets、CurseForge 用 classId，本地只做兜底过滤。
             var limit = PageSize;
             var searchTask = useCurseForge
@@ -662,14 +673,14 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         _installed.Clear();
         try
         {
-            var snapshot = await App.Backend.GetSnapshotAsync(true);
+            var snapshot = App.MainWindow?.Snapshot ?? await App.Backend.GetSnapshotAsync(true);
             foreach (var pack in snapshot?.Versions ?? [])
                 if (pack.PackProject.Length > 0) _installed.Add($"pack:{pack.PackSource}:{pack.PackProject}");
-            var versionId = string.IsNullOrWhiteSpace(_installTo)
-                ? (snapshot?.Current?.Id ?? snapshot?.Selected ?? "")
-                : _installTo;
-            if (string.IsNullOrWhiteSpace(versionId)) return;
-            var mods = await App.Backend.GetModsAsync(versionId);
+            var target = InstanceSelection.Find(snapshot, _installTo, _installRoot);
+            if (target is null) return;
+            var mods = await App.Backend.GetModsAsync(target.Id, target.Root);
+            if (!InstanceSelection.Same(target, InstanceSelection.Find(App.MainWindow?.Snapshot ?? snapshot,
+                    _installTo, _installRoot))) return;
             if (mods is null) return;
             foreach (var mod in mods.Mods)
             {
@@ -853,18 +864,16 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
             await InstallModpackAsync(project, source, sourceName, button);
             return;
         }
-        var snapshot = await App.Backend.GetSnapshotAsync(true);
-        var versionId = string.IsNullOrWhiteSpace(_installTo)
-                ? (snapshot?.Current?.Id ?? snapshot?.Selected ?? "")
-                : _installTo;
-        if (string.IsNullOrWhiteSpace(versionId))
+        var snapshot = App.MainWindow?.Snapshot ?? await App.Backend.GetSnapshotAsync(false);
+        var target = InstanceSelection.Find(snapshot, _installTo, _installRoot);
+        if (target is null)
         {
             ResultCount.Text = "没有选择实例，先在版本管理里选择要安装到的实例。";
             return;
         }
 
-        var current = snapshot?.Current ?? snapshot?.Versions.FirstOrDefault(v => v.Id == versionId);
-        if (!project.IsLoaderCompatibleWith(current?.Loader ?? ""))
+        var versionId = target.Id;
+        if (!project.IsLoaderCompatibleWith(target.Loader))
         {
             await OpenDetailAsync(project);
             return;
@@ -880,7 +889,8 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 var previousStatus = ResultCount.Text;
                 var checking = $"正在检查 {project.Title} 的必需前置…";
                 ResultCount.Text = checking;
-                plan = await App.Backend.ConfirmOnlineModInstallAsync(source, project.Id, "", versionId, XamlRoot);
+                plan = await App.Backend.ConfirmOnlineModInstallAsync(source, project.Id, "", versionId, XamlRoot,
+                    gameRoot: target.Root);
                 if (plan is null)
                 {
                     if (ResultCount.Text == checking) ResultCount.Text = previousStatus;
@@ -888,18 +898,19 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
                 }
             }
             task = TaskCenter.Add($"安装 {project.Title}",
-                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.ForProject(project, current));
+                $"{sourceName} · {project.TypeText} · {versionId}", PageTagFor(project), "\uE7B8", InstanceIcon.ForProject(project, target));
             ResultCount.Text = $"正在安装 {project.Title}…";
             var result = plan is not null
                 ? await App.Backend.InstallOnlineFileAsync(source, project.Id, plan.FileId, versionId, project.InstallKind,
-                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies,
+                    plan.Confirmation, taskId: task.Id, skipDependencies: plan.SkipDependencies, gameRoot: target.Root,
                     dependencyVersions: plan.DependencyVersions)
-                : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind, taskId: task.Id);
+                : await App.Backend.InstallOnlineAsync(source, project.Id, versionId, project.InstallKind,
+                    taskId: task.Id, gameRoot: target.Root);
             if (result.Ok)
             {
                 TaskCenter.Complete(task, result.Message);
                 ResultCount.Text = $"{sourceName} · 已安装 {project.Title}";
-                MarkInstalled(project);
+                if (InstanceSelection.Same(CurrentInstance, target)) MarkInstalled(project);
             }
             else
             {
@@ -1003,7 +1014,7 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
     /// <summary>截图用：等搜索结果出来，直接打开第一行的详情子页。</summary>
     public async Task DebugOpenFirst(string instance = "")
     {
-        if (!string.IsNullOrWhiteSpace(instance)) _installTo = instance;
+        if (!string.IsNullOrWhiteSpace(instance)) { _installTo = instance; _installRoot = ""; }
         for (var i = 0; i < 200 && _items.Count == 0; i++) await Task.Delay(100);
         App.Trace("DebugOpenFirst items=" + _items.Count);
         if (_items.Count > 0) await OpenDetailAsync(_items[0].Project);
@@ -1011,10 +1022,10 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
 #endif
 
     /// <summary>从别处（比如实例 Mod 行按哈希认出项目）直接打开某个项目的详情子页。</summary>
-    public async Task OpenProjectAsync(ModrinthProject project, string instance)
+    public async Task OpenProjectAsync(ModrinthProject project, string instance, string root)
     {
         for (var i = 0; i < 50 && _host is null; i++) await Task.Delay(100);
-        if (!string.IsNullOrWhiteSpace(instance)) _installTo = instance;
+        if (!string.IsNullOrWhiteSpace(instance)) { _installTo = instance; _installRoot = root; }
         await OpenDetailAsync(project);
     }
 
@@ -1030,17 +1041,19 @@ public sealed partial class OnlinePage : Page, IPageSearchFilter
         App.Trace("OpenDetail: begin " + project.Title);
         // 只读缓存快照：详情页要的只是「装到哪个实例」，不必为此再跑一次后端。
         var snapshot = App.MainWindow?.Snapshot ?? await App.Backend.GetSnapshotAsync(false);
-        var versionId = string.IsNullOrWhiteSpace(_installTo)
-            ? (snapshot?.Current?.Id ?? snapshot?.Selected ?? "")
-            : _installTo;
+        var target = InstanceSelection.Find(snapshot, _installTo, _installRoot);
+        var versionId = target?.Id ?? "";
         App.Trace("OpenDetail: opening sub page, versionId=" + versionId);
         try
         {
             _host.OpenSubPage(typeof(OnlineDetailPage),
-                new OnlineDetailArgs(project, source, sourceName, versionId, _host, MarkInstalled,
+                new OnlineDetailArgs(project, source, sourceName, versionId, _host, installed =>
+                    {
+                        if (installed.IsModpack || InstanceSelection.Same(CurrentInstance, target)) MarkInstalled(installed);
+                    },
                     EffectiveGameVersion(), EffectiveLoader(),
                     ChooseDownloadTarget,
-                    snapshot?.Current?.Root ?? ""),
+                    target?.Root ?? ""),
                 "获取", "在线资源", project.Title);
             App.Trace("OpenDetail: sub page opened");
         }

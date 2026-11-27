@@ -6,6 +6,8 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.UI.Xaml.Media.Animation;
+using MeowLauncher.WinUI.Controls;
 using Windows.System;
 
 namespace MeowLauncher.WinUI.Views;
@@ -13,6 +15,8 @@ namespace MeowLauncher.WinUI.Views;
 public sealed partial class TasksPage : Page
 {
     private bool _showNotifications;
+    private bool _drawerMode;
+    private Storyboard? _sectionTransition;
     private bool _suppressSection;
     private TaskEntry? _detailEntry;
 
@@ -29,19 +33,42 @@ public sealed partial class TasksPage : Page
         _suppressSection = true;
         TasksTab.IsChecked = true;
         _suppressSection = false;
-        TaskCenter.Changed += OnTasksChanged;
-        TaskCenter.NotificationsChanged += OnNotificationsChanged;
         Loaded += (_, _) =>
         {
+            TaskCenter.Changed += OnTasksChanged;
+            TaskCenter.NotificationsChanged += OnNotificationsChanged;
             GameSessions.Changed += OnGamesChanged;
             _ = RefreshAsync();
         };
         Unloaded += (_, _) =>
         {
+            ResetSectionTransition();
             TaskCenter.Changed -= OnTasksChanged;
             TaskCenter.NotificationsChanged -= OnNotificationsChanged;
             GameSessions.Changed -= OnGamesChanged;
         };
+    }
+
+    public void ConfigureActivityDrawer(bool notifications)
+    {
+        _drawerMode = true;
+        ActiveSectionHeader.Visibility = Visibility.Collapsed;
+        SetSection(notifications);
+        PageHeader.Visibility = Visibility.Collapsed;
+        PageRoot.RowDefinitions[0].Height = new GridLength(0);
+        PageRoot.RowSpacing = 0;
+        PageRoot.Padding = new Thickness(0);
+        Grid.SetRow(DetailPanel, 0);
+        Grid.SetRowSpan(DetailPanel, 2);
+        DetailPanel.Height = double.NaN;
+        DetailPanel.Margin = new Thickness(0);
+        DetailPanel.Padding = new Thickness(10);
+    }
+
+    public void ShowActivitySection(bool notifications)
+    {
+        if (_showNotifications != notifications) CloseDetail();
+        SetSection(notifications);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -50,15 +77,16 @@ public sealed partial class TasksPage : Page
         _ = RefreshAsync();
     }
 
-    private void OnTasksChanged(object? sender, EventArgs e) => Refresh();
+    private void OnTasksChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(Refresh);
 
-    private void OnNotificationsChanged(object? sender, EventArgs e) => Refresh();
+    private void OnNotificationsChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(Refresh);
 
     private void OnGamesChanged() => DispatcherQueue.TryEnqueue(Refresh);
 
     /// <summary>进入页面先摆加载态，顺手做一次后端自检；失败就走错误面板，重试原地重发。</summary>
     private async Task RefreshAsync()
     {
+        if (_drawerMode) { Refresh(); ShowContent(PageState.Content); return; }
         ShowContent(PageState.Loading);
         await Task.Delay(120);
 
@@ -170,6 +198,8 @@ public sealed partial class TasksPage : Page
 
     private void SetSection(bool notifications)
     {
+        var changed = _showNotifications != notifications;
+        if (changed) ResetSectionTransition();
         _showNotifications = notifications;
         if (notifications != (NotificationsTab.IsChecked == true))
         {
@@ -181,6 +211,37 @@ public sealed partial class TasksPage : Page
         TaskSection.Visibility = notifications ? Visibility.Collapsed : Visibility.Visible;
         NotificationSection.Visibility = notifications ? Visibility.Visible : Visibility.Collapsed;
         UpdateActionVisibility();
+        if (changed && _drawerMode && IsLoaded && Motion.Enabled)
+        {
+            var incoming = notifications ? NotificationSection : TaskSection;
+            var slide = new TranslateTransform { X = notifications ? 12 : -12 };
+            incoming.RenderTransform = slide;
+            incoming.Opacity = 0;
+            var story = new Storyboard();
+            var fade = new DoubleAnimation { From = 0, To = 1, Duration = TimeSpan.FromMilliseconds(180), EnableDependentAnimation = true };
+            var move = new DoubleAnimation { From = slide.X, To = 0, Duration = TimeSpan.FromMilliseconds(180), EnableDependentAnimation = true,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+            Storyboard.SetTarget(fade, incoming); Storyboard.SetTargetProperty(fade, "Opacity");
+            Storyboard.SetTarget(move, slide); Storyboard.SetTargetProperty(move, "X");
+            story.Children.Add(fade); story.Children.Add(move);
+            story.Completed += (_, _) =>
+            {
+                if (!ReferenceEquals(_sectionTransition, story)) return;
+                incoming.Opacity = 1; slide.X = 0;
+                story.Stop(); _sectionTransition = null;
+            };
+            _sectionTransition = story; story.Begin();
+        }
+    }
+
+    private void ResetSectionTransition()
+    {
+        _sectionTransition?.Stop(); _sectionTransition = null;
+        foreach (var section in new FrameworkElement[] { TaskSection, NotificationSection })
+        {
+            section.Opacity = 1;
+            if (section.RenderTransform is TranslateTransform slide) slide.X = 0;
+        }
     }
 
     /// <summary>「当前无事可做」的操作按钮整颗隐藏（没有已完成任务就没有「清空已完成」），不留一个灰着的假按钮。</summary>
@@ -252,10 +313,8 @@ public sealed partial class TasksPage : Page
             return;
         }
 
-        if (TaskCenter.Cancel(entry))
-        {
-            ShowToast(InfoBarSeverity.Warning, "已取消", $"{entry.Title} 已中止。");
-        }
+        // The row and entry already show the cancelled state; don't cover them with a second banner.
+        TaskCenter.Cancel(entry);
     }
 
     private async void EndGame_Click(object sender, RoutedEventArgs e)
@@ -301,13 +360,9 @@ public sealed partial class TasksPage : Page
 
     private static async Task ReplyInviteAsync(object sender, bool accepted)
     {
-        if (sender is not Button { Tag: string id } button) return;
+        if (sender is not Button { Tag: string id }) return;
         var note = TaskCenter.Notifications.FirstOrDefault(item => item.Id == id);
-        if (note is null || note.InviteFromUuid.Length == 0 || !note.InviteOpen) return;
-
-        button.IsEnabled = false;
-        try { await App.Online.RespondToInviteAsync(note, accepted); }
-        finally { button.IsEnabled = true; }
+        if (note is not null) await App.Online.RespondToInviteAsync(note, accepted);
     }
 
     private void MarkAllRead_Click(object sender, RoutedEventArgs e)
@@ -325,6 +380,8 @@ public sealed partial class TasksPage : Page
 
     private void Notification_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, sender); node = VisualTreeHelper.GetParent(node))
+            if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase) return;
         if (sender is Border { Tag: string id })
         {
             TaskCenter.MarkRead(TaskCenter.Notifications.FirstOrDefault(item => item.Id == id));
@@ -350,11 +407,16 @@ public sealed partial class TasksPage : Page
 
     private void TaskRow_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
+        // Buttons and expanders handle their own action; bubbling must not open the log pane.
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, sender); node = VisualTreeHelper.GetParent(node))
+            if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase or Expander) return;
         if (sender is FrameworkElement { Tag: TaskEntry entry }) OpenDetail(entry);
     }
 
     private void TaskRow_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, sender); node = VisualTreeHelper.GetParent(node))
+            if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase or Expander) return;
         if (e.Key is not (VirtualKey.Enter or VirtualKey.Space)) return;
         e.Handled = true;
         if (sender is FrameworkElement { Tag: TaskEntry entry }) OpenDetail(entry);
@@ -370,10 +432,11 @@ public sealed partial class TasksPage : Page
         }
     }
 
-    private void OpenDetail(TaskEntry entry)
+    internal void OpenDetail(TaskEntry entry)
     {
         _detailEntry = entry;
-        DetailPanel.Visibility = Visibility.Collapsed;
+        DetailPanel.Visibility = Visibility.Visible;
+        if (_drawerMode) TaskSection.Visibility = Visibility.Collapsed;
         DetailStages.Clear();
         var trace = TaskCenter.TraceFor(entry.Id);
         if (trace is not null)
@@ -388,12 +451,14 @@ public sealed partial class TasksPage : Page
     {
         _detailEntry = null;
         DetailPanel.Visibility = Visibility.Collapsed;
+        if (_drawerMode) SetSection(_showNotifications);
     }
 
     private void CloseDetail()
     {
         _detailEntry = null;
         DetailPanel.Visibility = Visibility.Collapsed;
+        if (_drawerMode) SetSection(_showNotifications);
     }
 
     /// <summary>详情面板跟着任务轨迹刷新：阶段状态、日志尾、失败诊断都从 TaskCenter 取。</summary>
@@ -422,6 +487,7 @@ public sealed partial class TasksPage : Page
         }
 
         var log = trace?.LogText ?? "";
+        if (string.IsNullOrWhiteSpace(log)) log = entry.LiveText;
         if (entry.Failure is { } failure)
         {
             var phase = string.IsNullOrWhiteSpace(failure.Stage) ? "" : $" · {failure.Stage}";
@@ -439,7 +505,10 @@ public sealed partial class TasksPage : Page
         DetailError.Text = failed
             ? $"{entry.ErrorCodeText} · {ClipText(entry.Detail, 120)}"
             : "";
+        DetailStageList.Visibility = DetailStages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         DetailOpenLogButton.IsEnabled = trace is not null && !string.IsNullOrWhiteSpace(trace.LogPath);
+        DetailOpenLogButton.Visibility = DetailOpenLogButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        DetailCopyButton.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
         DetailCopyButton.IsEnabled = failed;
     }
 
@@ -497,13 +566,8 @@ public sealed partial class TasksPage : Page
         if (!string.IsNullOrWhiteSpace(tag)) App.MainWindow?.Navigate(tag);
     }
 
-    private void ShowToast(InfoBarSeverity severity, string title, string message)
-    {
-        Toast.Severity = severity;
-        Toast.Title = title;
-        Toast.Message = message;
-        Toast.IsOpen = true;
-    }
+    private static void ShowToast(InfoBarSeverity severity, string title, string message) =>
+        TaskCenter.PostFeedback(severity, title, message, addToHistory: false);
 
     private void Home_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
         App.MainWindow.Navigate("home");
@@ -512,6 +576,9 @@ public sealed partial class TasksPage : Page
 /// <summary>任务行的类型/状态视觉：图标按任务类型（启动/下载/安装），颜色按状态（进行中蓝、完成绿、失败红）。</summary>
 public static class TaskVisuals
 {
+    public static string StatsText(string speed, string remain) => string.Join(" · ", new[] { speed, remain }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    public static string TaskMeta(string title, string status, string time) => $"{KindLabel(title)} · {status} · {time}";
+
     public static Visibility DeterminateVisibility(bool indeterminate) => indeterminate ? Visibility.Collapsed : Visibility.Visible;
 
     public static Visibility IndeterminateVisibility(bool indeterminate) => indeterminate ? Visibility.Visible : Visibility.Collapsed;
@@ -521,7 +588,7 @@ public static class TaskVisuals
         double.IsNaN(progress) ? 0 : Math.Clamp(progress, 0, 100) / 100.0;
 
     public static Visibility TaskDetailVisibility(string status, bool indeterminate) =>
-        indeterminate || status != "进行中" ? Visibility.Visible : Visibility.Collapsed;
+        status != "进行中" ? Visibility.Visible : Visibility.Collapsed;
 
     public static string IconFor(string? title)
     {
@@ -600,18 +667,28 @@ public static class TaskVisuals
 
     // ── 通知通道 ────────────────────────────────────────────────────────
 
-    public static string NotificationGlyph(string? kind) => kind switch
+    public static string NotificationGlyph(string? kind, string? title)
     {
-        "失败" => "\uE7BA",
-        "已取消" => "\uE711",
-        _ => "\uE73E",
-    };
+        if (kind == "公告") return "\uE789";
+        if (kind is "账户" or "账号" || (title?.Contains("账户", StringComparison.Ordinal) ?? false) || (title?.Contains("账号", StringComparison.Ordinal) ?? false))
+            return "\uE77B";
+        return kind switch
+        {
+            "邀请" => ((char)Symbol.AddFriend).ToString(),
+            "更新" => ((char)Symbol.Sync).ToString(),
+            "失败" => "\uE7BA",
+            "已取消" => "\uE711",
+            "已完成" => "\uE73E",
+            _ => "\uEA8F",
+        };
+    }
 
     public static Brush NotificationBrush(string? kind) => kind switch
     {
         "失败" => PagePalette.ThemeBrush("AppBadBrush"),
+        "已完成" => PagePalette.ThemeBrush("AppGoodBrush"),
         "已取消" => PagePalette.ThemeBrush("AppText3Brush"),
-        _ => PagePalette.ThemeBrush("AppGoodBrush"),
+        _ => PagePalette.ThemeBrush("AppText2Brush"),
     };
 
     public static Brush NotificationBackground(bool isRead) =>

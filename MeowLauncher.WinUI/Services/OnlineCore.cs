@@ -188,8 +188,7 @@ internal sealed class OnlineCore
         if (!known) message += "（好友列表还没读取，未确认对方是否是好友）";
         App.MainWindow?.DispatcherQueue.TryEnqueue(() =>
         {
-            var note = TaskCenter.PostInvite(title, message, from, e.RoomCode);
-            App.MainWindow?.ShowInviteToast(note);
+            TaskCenter.PostInvite(title, message, from, e.RoomCode);
         });
     }
 
@@ -204,8 +203,7 @@ internal sealed class OnlineCore
         var message = e.Accepted ? "对方已接受，可以一起玩了" : "对方这次不方便";
         App.MainWindow?.DispatcherQueue.TryEnqueue(() =>
         {
-            var note = TaskCenter.PostMessage(title, message, "邀请");
-            App.MainWindow?.ShowInviteToast(note);
+            TaskCenter.PostMessage(title, message, "邀请");
         });
     }
 

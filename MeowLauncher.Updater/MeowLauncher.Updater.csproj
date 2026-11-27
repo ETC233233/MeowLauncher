@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <UseAppHost>true</UseAppHost>
+  </PropertyGroup>
+  <Import Project="../MeowLauncher.WinUI/online.props" Condition="Exists('../MeowLauncher.WinUI/online.props')" />
+  <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+    <Compile Include="../MeowLauncher.WinUI/Services/PortableUpdate.cs" Link="PortableUpdate.cs" />
+    <Compile Include="../MeowLauncher.WinUI/Services/UpdateLogic.cs" Link="UpdateLogic.cs" />
+    <Compile Include="../MeowLauncher.WinUI/Services/MeowVersion.cs" Link="MeowVersion.cs" />
+    <Compile Include="../MeowLauncher.WinUI/Services/ComponentManifest.cs" Link="ComponentManifest.cs" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>MeowConfigKeys</_Parameter1><_Parameter2>$(MeowConfigKeys)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

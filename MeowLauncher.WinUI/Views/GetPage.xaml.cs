@@ -174,9 +174,6 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
                 }
             }
             if (installed > 0) await main.RefreshShellAsync(force: true);
-            ShowPackNotice(installed == files.Count ? InfoBarSeverity.Success
-                : installed == 0 ? InfoBarSeverity.Error : InfoBarSeverity.Warning,
-                installed == 0 ? "整合包导入失败" : $"已导入 {installed} / {files.Count} 个整合包", error);
         }
         catch (Exception ex)
         {
@@ -189,13 +186,8 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
         }
     }
 
-    private void ShowPackNotice(InfoBarSeverity severity, string title, string message)
-    {
-        PackImportNotice.Severity = severity;
-        PackImportNotice.Title = title;
-        PackImportNotice.Message = message;
-        PackImportNotice.IsOpen = true;
-    }
+    private static void ShowPackNotice(InfoBarSeverity severity, string title, string message) =>
+        TaskCenter.PostFeedback(severity, title, message);
 
     // 「获取」只是个壳：本页过滤和 Ctrl+K 都转给里面的 DownloadPage / OnlinePage。
     public void ApplySearch(string query)
@@ -315,10 +307,10 @@ public sealed partial class GetPage : Page, IPageSearchFilter, ISubPageHost
     }
 #endif
 
-    public async Task OpenProjectAsync(MeowLauncher.WinUI.Models.ModrinthProject project, string instance)
+    public async Task OpenProjectAsync(MeowLauncher.WinUI.Models.ModrinthProject project, string instance, string root)
     {
         for (var i = 0; i < 50 && InnerFrame.Content is not OnlinePage; i++) await Task.Delay(100);
-        if (InnerFrame.Content is OnlinePage o) await o.OpenProjectAsync(project, instance);
+        if (InnerFrame.Content is OnlinePage o) await o.OpenProjectAsync(project, instance, root);
     }
 
     private void Tab_Click(object sender, RoutedEventArgs e)

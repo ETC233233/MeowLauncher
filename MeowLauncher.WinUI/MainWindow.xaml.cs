@@ -56,7 +56,6 @@ public sealed partial class MainWindow : Window
     public Snapshot? Snapshot { get; private set; }
     public string CurrentSection { get; private set; } = "home";
     public bool IsDarkTheme => _dark;
-    private int _lastNotificationCount;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FLASHWINFO
@@ -76,32 +75,6 @@ public sealed partial class MainWindow : Window
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    /// <summary>任务完成时如果窗口不在前台，闪一下任务栏图标（设置页「任务完成时在启动器里提醒」）。</summary>
-    private void MaybeFlashOnTaskDone(bool taskFinished = false)
-    {
-        var count = TaskCenter.Notifications.Count;
-        var added = count > _lastNotificationCount;
-        _lastNotificationCount = count;
-        if ((!added && !taskFinished) || !_preferences.NotifyTaskDone) return;
-        try
-        {
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            if (GetForegroundWindow() == hwnd) return;
-            // 不再弹 Windows 系统通知：它不会自动消失、也不显眼。通知统一显示在右上角的灵动岛里，
-            // 窗口不在前台时只闪任务栏，切回来就能在岛里看到。（Services/Toasts.cs 保留，暂不使用。）
-            var info = new FLASHWINFO
-            {
-                cbSize = (uint)Marshal.SizeOf(typeof(FLASHWINFO)),
-                hwnd = hwnd,
-                dwFlags = 0x00000002 | 0x0000000C, // FLASHW_TRAY | FLASHW_TIMERNOFG
-                uCount = 3,
-                dwTimeout = 0,
-            };
-            FlashWindowEx(ref info);
-        }
-        catch { }
-    }
 
     /// <summary>设置页「显示任务药丸」开关。</summary>
     public void SetTaskIslandVisible(bool visible) =>
@@ -521,19 +494,44 @@ public sealed partial class MainWindow : Window
                         TaskCenter.PostMessage("版本提示", r.Message, "提示");
                     }
                 });
+                if (r.State == UpdateState.Available && r.Latest?.Package is not null && LauncherUpdater.Supported)
+                {
+                    DispatcherQueue.TryEnqueue(async () =>
+                    {
+                        if (!_preferences.AutoDownloadUpdate && !_preferences.AutoInstallUpdate) return;
+                        await LauncherUpdater.PrepareAsync(r.Latest);
+                        if (_preferences.AutoInstallUpdate && GameSessions.Running.Count == 0 && TaskCenter.ActiveCount == 0)
+                            await LauncherUpdater.InstallAsync();
+                    });
+                }
             }
             catch { /* 没网等：静默，设置页里手动检查能看到原因 */ }
         }
 
-        private void ShowVersionNoticeOnce()
+        private bool _startupNoticesShown;
+
+        private void ShowStartupNotices()
         {
+            if (_startupNoticesShown || StartupMask.Visibility == Visibility.Visible
+                || OnboardingHost.Visibility == Visibility.Visible || OnboardingSketch.Visibility == Visibility.Visible)
+                return;
+            _startupNoticesShown = true;
             var cur = BuildInfo.Current;
-            var key = cur.NoticeKey;
-            if (key.Length == 0 || string.Equals(_preferences.VersionNoticeShown, key, StringComparison.Ordinal)) return;
-            _preferences.VersionNoticeShown = key;
-            AppPreferencesStore.Save(_preferences);
-            DispatcherQueue.TryEnqueue(() =>
-                TaskCenter.PostMessage(cur.IsReview ? "当前是开发版本" : "您正在使用预发行版本", cur.NoticeText, "提示"));
+            if (cur.NoticeKey.Length > 0)
+            {
+                // Reissue once for builds whose previous notice was covered by the startup mask.
+                var key = cur.NoticeKey + ":popup";
+                if (!string.Equals(_preferences.VersionNoticeShown, key, StringComparison.Ordinal))
+                {
+                    TaskCenter.PostFeedback(InfoBarSeverity.Informational,
+                        cur.IsReview ? "当前是开发版本" : "您正在使用预发行版本", cur.NoticeText);
+                    _preferences.VersionNoticeShown = key;
+                    AppPreferencesStore.Save(_preferences);
+                }
+            }
+            if (!NetworkAvailability.CanStartRequest)
+                TaskCenter.PostFeedback(InfoBarSeverity.Warning, "当前处于离线状态", NetworkAvailability.OfflineMessage);
+            StartAnnouncementRefresh();
         }
 
         private void StartPresence()
@@ -555,13 +553,17 @@ public sealed partial class MainWindow : Window
 
             // 侧栏的「联机」入口只在联机开着时出现；关掉时如果正停在房间页，退回主页
             OnlineActive = settings.Ok && settings.OnlineActive;
+            if (settings.Ok && _preferences.ShareLauncherPresence is null)
+            {
+                _preferences.ShareLauncherPresence = settings.ShareOnline;
+                AppPreferencesStore.Save(_preferences);
+            }
+            RefreshPresenceHeartbeat();
             NavRoom.Visibility = settings.Ok && settings.OnlineActive ? Visibility.Visible : Visibility.Collapsed;
             if (NavRoom.Visibility == Visibility.Collapsed && CurrentSection == "room") Navigate("home", recordHistory: false, clearHistory: true);
 
             if (settings.Ok && settings.OnlineActive)
             {
-                if (!_presenceTimer.IsEnabled) _presenceTimer.Start();
-                await PresenceTickAsync();
                 // 联机组件装过就加载并启动；没装过就不启动（首次进「联机」页时下载）
                 if (OnlineComponent.Ready || (OnlineComponent.ReadInstalled() is not null && OnlineComponent.TryLoad()))
                 {
@@ -570,22 +572,53 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                _presenceTimer.Stop();
                 App.Online.Stop();
             }
         }
 
         private async Task PresenceTickAsync()
         {
-            if (_presenceBusy) return;
+            if (_presenceBusy || !ShareLauncherPresence) return;
             _presenceBusy = true;
             try
             {
-                var report = await App.Backend.ReportPresenceAsync("ONLINE");
-                if (report.Skipped == "online-disabled") _presenceTimer.Stop();
+                await App.Backend.ReportPresenceAsync("ONLINE");
             }
             catch { /* 没登录正版账号、网络不通等：静默，下一轮再试 */ }
             finally { _presenceBusy = false; }
+        }
+
+        private string _presenceAccountKey = "";
+        private bool _onboardingMicrosoftVerified;
+        internal bool ShareLauncherPresence => _preferences.ShareLauncherPresence == true;
+        internal bool IsForeground => GetForegroundWindow() == WindowHandle;
+
+        private void RefreshPresenceHeartbeat()
+        {
+            var account = Snapshot?.Account;
+            var key = _presenceHooked && ShareLauncherPresence && account?.Type == "microsoft" ? account.Key : "";
+            if (key == _presenceAccountKey) return;
+            _presenceAccountKey = key;
+            if (key.Length == 0) { _presenceTimer.Stop(); return; }
+            _presenceTimer.Start();
+            _ = PresenceTickAsync();
+        }
+
+        internal bool SetLauncherPresenceSharing(bool enabled)
+        {
+            var previous = _preferences.ShareLauncherPresence;
+            if (previous == enabled) return true;
+            _preferences.ShareLauncherPresence = enabled;
+            AppPreferencesStore.Save(_preferences);
+            if (AppPreferencesStore.Load().ShareLauncherPresence != enabled)
+            {
+                _preferences.ShareLauncherPresence = previous;
+                return false;
+            }
+            RefreshPresenceHeartbeat();
+            if (previous == true && !enabled && Snapshot?.Account?.Type == "microsoft")
+                _ = App.Backend.ReportPresenceAsync("OFFLINE");
+            return true;
         }
 
         private void StopPresence()
@@ -624,6 +657,8 @@ public sealed partial class MainWindow : Window
 
         NetworkProxy.Apply(_preferences);
         InitializeComponent();
+        InitializeActivityInteractions();
+        InitializeNotifications();
         InstallScaleHost();
         AppVersionText.Text = BuildInfo.Current.Short;       // Review 01113-7829 / 1.0.0-01113-7829 / 1.0.0
         SyncThemeColor();
@@ -644,9 +679,6 @@ public sealed partial class MainWindow : Window
         // 侧栏任务入口：底部一行与悬浮面板都跟任务中心实时对齐，不需要重拉快照。
         TaskCenter.Changed += (_, _) => UpdateTaskDock();
         TaskCenter.NotificationsChanged += (_, _) => UpdateTaskDock();
-        _lastNotificationCount = TaskCenter.Notifications.Count;
-        TaskCenter.NotificationsChanged += (_, _) => MaybeFlashOnTaskDone();
-        TaskCenter.TaskFinished += _ => MaybeFlashOnTaskDone(taskFinished: true);
         UpdateTaskDock();
 
         // 四组导航（玩 / 获取 / 实例 / 我的）。「下载版本 + 在线资源」合并进「获取」，
@@ -696,6 +728,7 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         ApplyTitleBarHeight();   // 最小化/最大化/关闭撑满我们的 48 高标题栏
         TaskIsland.LayoutUpdated += (_, _) => UpdateIslandPassthrough();
+        TaskIsland.SizeChanged += (_, _) => UpdateSearchLayout();
         Title = "MeowLauncher";
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -819,6 +852,7 @@ public sealed partial class MainWindow : Window
         StartupMask.Opacity = 0;
         await Task.Delay(400);
         StartupMask.Visibility = Visibility.Collapsed;
+        ShowStartupNotices();
         await ImportStartupPacksAsync();
     }
 
@@ -857,7 +891,7 @@ public sealed partial class MainWindow : Window
             if (!System.IO.File.Exists(System.IO.Path.Combine(folder, "oobe.html")))
             {
                 App.Trace("Onboarding: oobe.html missing");
-                CloseOnboardingWindow();
+                CloseOnboarding();
                 return;
             }
 
@@ -882,7 +916,7 @@ public sealed partial class MainWindow : Window
             if (core is null)
             {
                 App.Trace("Onboarding: CoreWebView2 未就绪（WebView2 运行时或用户数据目录不可用）");
-                CloseOnboardingWindow();
+                CloseOnboarding();
                 ShowOnboardingFailure(new InvalidOperationException("WebView2 初始化未完成"));
                 return;
             }
@@ -919,15 +953,16 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            CloseOnboardingWindow();
+            CloseOnboarding();
             App.Trace("ShowOnboarding: " + ex);
             ShowOnboardingFailure(ex);
         }
         finally { _onboardingOpening = false; }
     }
 
-    private void CloseOnboardingWindow()
+    private void CloseOnboarding()
     {
+        _onboardingMicrosoftVerified = false;
         var web = _onboardingWeb;
         _onboardingWeb = null;
         _onboardingLogin?.Cancel();
@@ -1168,11 +1203,19 @@ public sealed partial class MainWindow : Window
                 throw new InvalidOperationException("账户信息读取失败，请重新登录。");
             _preferences.OnboardAccountKind = account.Type;
             AppPreferencesStore.Save(_preferences);
+            _onboardingMicrosoftVerified = account.Type == "microsoft";
+            var sharePresence = _preferences.ShareLauncherPresence;
+            if (_onboardingMicrosoftVerified && sharePresence is null)
+            {
+                var state = await App.Backend.GetDevSettingsAsync();
+                sharePresence = state.Ok && state.ShareOnline;
+            }
             var profile = new
             {
                 name = account.Name, kind = account.Type, typeDisplay = account.TypeDisplay,
                 uuid = Guid.TryParse(account.Uuid, out var uuid) ? uuid.ToString("D") : account.Uuid,
                 variant = account.Variant,
+                sharePresence = sharePresence == true,
                 head = await OnboardingHeadAsync(account),
                 skin = await OnboardingImageAsync(account.SkinPath),
                 cape = await OnboardingImageAsync(account.CapePath),
@@ -1217,6 +1260,7 @@ public sealed partial class MainWindow : Window
                         if (_onboardingLoginTask is { IsCompleted: false } || _onboardingFinishing) break;
                         var kind = root.TryGetProperty("kind", out var kindValue) ? kindValue.GetString() : "";
                         if (kind is not ("microsoft" or "offline")) break;
+                        _onboardingMicrosoftVerified = false;
                         var name = root.TryGetProperty("name", out var nameValue) ? nameValue.GetString() ?? "" : "";
                         var slim = root.TryGetProperty("slim", out var slimValue) && slimValue.ValueKind == System.Text.Json.JsonValueKind.True;
                         _onboardingLoginTask = LoginOnboardingAsync(kind, name.Trim(), slim);
@@ -1235,8 +1279,17 @@ public sealed partial class MainWindow : Window
                         break;
                     }
                     case "account-cancel":
+                        _onboardingMicrosoftVerified = false;
                         _onboardingLogin?.Cancel();
                         if (_onboardingLoginTask is { } login) await login;
+                        break;
+                    case "presence-sharing":
+                        if (_onboardingMicrosoftVerified && root.TryGetProperty("value", out var shareValue)
+                            && shareValue.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                        {
+                            var ok = SetLauncherPresenceSharing(shareValue.GetBoolean());
+                            await PushOnboardingAsync(new { type = "presence-sharing", ok, value = ShareLauncherPresence });
+                        }
                         break;
                     case "theme":
                     {
@@ -1391,7 +1444,7 @@ public sealed partial class MainWindow : Window
             OnboardingSketch.Opacity = 1;
             Activate();                             // 主界面先顶到前面
             await Task.Delay(80);
-            CloseOnboardingWindow();                // 原窗口内的引导层退场
+            CloseOnboarding();                // 原窗口内的引导层退场
             await InitializeShellAsync();
             await ImportStartupPacksAsync();
             if (ContentFrame.Content is SettingsPage settings) settings.RefreshPreferences();
@@ -1410,6 +1463,7 @@ public sealed partial class MainWindow : Window
             await Task.Delay(520);
             OnboardingSketch.Visibility = Visibility.Collapsed;
             OnboardingSketch.Opacity = 1;
+            ShowStartupNotices();
             App.Trace("Onboarding: finished");
         }
         catch (Exception ex)
@@ -1544,7 +1598,7 @@ public sealed partial class MainWindow : Window
         if (ContentFrame.Content is null)
             Navigate("home", recordHistory: false, clearHistory: true);
         StartPresence();
-        ShowVersionNoticeOnce();
+        LauncherUpdater.ReportPreviousResult();
         _ = StartupUpdateCheckAsync();
         _ = StartupDevVerdictAsync();
         _ = ShowPythonMissingAsync();
@@ -1571,6 +1625,7 @@ public sealed partial class MainWindow : Window
         App.Backend.SnapshotArrived -= Backend_SnapshotArrived;
         App.Backend.SnapshotArrived += Backend_SnapshotArrived;
         await RefreshShellAsync();
+        if (Snapshot is not null) LauncherUpdater.ReportHealthy();
         _ = SettleShellAccountAsync();
     }
 
@@ -1667,6 +1722,7 @@ public sealed partial class MainWindow : Window
         var account = snapshot.Account;
         var settled = account is not null || snapshot.Versions.Count > 0 || snapshot.Current is not null;
         Snapshot = snapshot;
+        RefreshPresenceHeartbeat();
 
         // 后端偶发返回「没有账户」的空快照时，不能把已经显示出来的账户盖回「未登录」。
         if (account is null && _shellAccountSettled)
@@ -1713,16 +1769,19 @@ public sealed partial class MainWindow : Window
         var available = Math.Max(0, RootGrid.ActualWidth);
         if (available <= 0) return;
 
-        // 搜索栏靠左（品牌区右边），灵动岛紧挨在它右边，展开时向右撑开、占满到窗口按钮前的空位。
+        // 搜索栏居中；灵动岛右端固定在窗口按钮前，状态变化时向左伸缩。
         var narrow = available < 1000;
         SearchTriggerHint.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
-        _searchHostBaseWidth = narrow ? 42 : (available >= 1280 ? 320 : 280);
-        // 搜索框在整个窗口里水平居中；窗口太窄放不下时退到品牌区右边（300）
-        var searchLeft = Math.Max(300.0, (available - _searchHostBaseWidth) / 2);
+        var preferredSearchWidth = narrow ? 42 : (available >= 1280 ? 320 : 280);
+        var islandWidth = TaskIsland?.ActualWidth > 0 ? TaskIsland.ActualWidth : 132;
+        var islandLeft = available - 152 - islandWidth;
+        // Keep a 12px gap as the island grows; retain the preferred search position when possible.
+        var searchLeft = Math.Max(300.0, Math.Min((available - preferredSearchWidth) / 2, islandLeft - 12 - 42));
+        _searchHostBaseWidth = Math.Max(42, Math.Min(preferredSearchWidth, islandLeft - 12 - searchLeft));
         SearchHost.HorizontalAlignment = HorizontalAlignment.Left;
         SearchHost.Margin = new Thickness(searchLeft, 0, 0, 0);
         if (!_spotlightOpen) SearchHost.Width = _searchHostBaseWidth;
-        if (TaskIsland is not null) TaskIsland.Margin = new Thickness(searchLeft + _searchHostBaseWidth + 12, 6, 0, 0);
+        if (TaskIsland is not null) TaskIsland.Margin = new Thickness(0, 6, 152, 0);
     }
 
     /// <summary>各页搜索按钮共用：打开顶栏搜索并做放大聚焦动画（宽 320→560、180ms ease-out，输入框发光一圈）。</summary>
@@ -1947,17 +2006,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // ---- 好友邀请弹窗 ----
-    private DispatcherQueueTimer? _inviteToastTimer;
-    private TaskNotification? _inviteToastNote;
-
-    /// <summary>收到邀请 / 回复时在右上角弹出提示；窗口不在前台时任务栏图标闪烁。必须在界面线程调用。</summary>
-    public void ShowInviteToast(TaskNotification note)
-    {
-        // 通知现在由右上角的灵动岛自己展开（TaskIsland 订阅了 NotificationsChanged）；这里只负责窗口不在前台时闪任务栏。
-        FlashTaskbarIfBackground();
-    }
-
     private void FlashTaskbarIfBackground()
     {
         try
@@ -1975,130 +2023,6 @@ public sealed partial class MainWindow : Window
             FlashWindowEx(ref info);
         }
         catch { }
-    }
-
-    /// <summary>旧的右上角邀请弹窗（已被灵动岛取代，保留代码备查，不再调用）。</summary>
-    private void ShowInviteToastLegacy(TaskNotification note)
-    {
-        if (InviteToast is null) return;
-        _inviteToastNote = note;
-        InviteToastTitle.Text = note.Title;
-        InviteToastBody.Text = note.Message;
-        InviteToastButtons.Visibility = note.InviteOpen ? Visibility.Visible : Visibility.Collapsed;
-        InviteToastAccept.IsEnabled = InviteToastDecline.IsEnabled = true;
-        PlayInviteToastIn();
-        RestartInviteToastTimer(note.InviteOpen ? 30 : 8);
-
-        try
-        {
-            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            if (GetForegroundWindow() != hwnd)
-            {
-                var fi = new FLASHWINFO { cbSize = (uint)Marshal.SizeOf<FLASHWINFO>(), hwnd = hwnd, dwFlags = 0x0000000F /* FLASHW_ALL | FLASHW_TIMERNOFG */, uCount = 5, dwTimeout = 0 };
-                FlashWindowEx(ref fi);
-            }
-        }
-        catch { /* 闪烁失败不影响弹窗 */ }
-    }
-
-    private void RestartInviteToastTimer(int seconds)
-    {
-        _inviteToastTimer ??= DispatcherQueue.CreateTimer();
-        _inviteToastTimer.Stop();
-        _inviteToastTimer.Interval = TimeSpan.FromSeconds(seconds);
-        _inviteToastTimer.IsRepeating = false;
-        _inviteToastTimer.Tick -= InviteToastTimer_Tick;
-        _inviteToastTimer.Tick += InviteToastTimer_Tick;
-        _inviteToastTimer.Start();
-    }
-
-    private Storyboard? _inviteToastStory;
-
-    /// <summary>滑入 + 淡入（260 ms，先快后慢）。同一个 Storyboard 里每个属性只打一条动画。</summary>
-    private void PlayInviteToastIn()
-    {
-        _inviteToastStory?.Stop();
-        InviteToast.Opacity = 0;
-        InviteToastShift.X = 48;
-        InviteToast.Visibility = Visibility.Visible;
-
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var slide = new DoubleAnimation { From = 48, To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(260)), EasingFunction = ease };
-        Storyboard.SetTarget(slide, InviteToastShift);
-        Storyboard.SetTargetProperty(slide, "X");
-        var fade = new DoubleAnimation { From = 0, To = 1, Duration = new Duration(TimeSpan.FromMilliseconds(200)) };
-        Storyboard.SetTarget(fade, InviteToast);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-
-        var story = new Storyboard();
-        story.Children.Add(slide);
-        story.Children.Add(fade);
-        story.Completed += (_, _) => { InviteToast.Opacity = 1; InviteToastShift.X = 0; };
-        _inviteToastStory = story;
-        story.Begin();
-    }
-
-    /// <summary>淡出 + 往右滑出（180 ms），结束后再 Collapsed，不让它挡住后面的点击。</summary>
-    private void HideInviteToast()
-    {
-        if (InviteToast is null || InviteToast.Visibility != Visibility.Visible) return;
-        _inviteToastStory?.Stop();
-
-        var slide = new DoubleAnimation { From = InviteToastShift.X, To = 36, Duration = new Duration(TimeSpan.FromMilliseconds(180)), EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } };
-        Storyboard.SetTarget(slide, InviteToastShift);
-        Storyboard.SetTargetProperty(slide, "X");
-        var fade = new DoubleAnimation { From = InviteToast.Opacity, To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(160)) };
-        Storyboard.SetTarget(fade, InviteToast);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-
-        var story = new Storyboard();
-        story.Children.Add(slide);
-        story.Children.Add(fade);
-        story.Completed += (_, _) =>
-        {
-            if (!ReferenceEquals(_inviteToastStory, story)) return;      // 中途又弹了新的，别把它收掉
-            InviteToast.Visibility = Visibility.Collapsed;
-            InviteToast.Opacity = 1;
-            InviteToastShift.X = 0;
-        };
-        _inviteToastStory = story;
-        story.Begin();
-    }
-
-    private void InviteToastTimer_Tick(DispatcherQueueTimer sender, object args)
-    {
-        sender.Stop();
-        HideInviteToast();
-    }
-
-    private void InviteToastClose_Click(object sender, RoutedEventArgs e)
-    {
-        _inviteToastTimer?.Stop();
-        HideInviteToast();
-    }
-
-    private async void InviteToastAccept_Click(object sender, RoutedEventArgs e) => await RespondFromToastAsync(true);
-
-    private async void InviteToastDecline_Click(object sender, RoutedEventArgs e) => await RespondFromToastAsync(false);
-
-    private async Task RespondFromToastAsync(bool accepted)
-    {
-        var note = _inviteToastNote;
-        if (note is null) return;
-        InviteToastAccept.IsEnabled = InviteToastDecline.IsEnabled = false;
-        _inviteToastTimer?.Stop();
-        var done = await App.Online.RespondToInviteAsync(note, accepted);
-        InviteToastBody.Text = note.ResultText.Length > 0 ? note.ResultText : note.Message;
-        if (done)
-        {
-            InviteToastButtons.Visibility = Visibility.Collapsed;
-            RestartInviteToastTimer(3);
-        }
-        else
-        {
-            InviteToastAccept.IsEnabled = InviteToastDecline.IsEnabled = true;   // 网络问题：留着按钮重试
-            RestartInviteToastTimer(30);
-        }
     }
 
     private DispatcherQueueTimer? _crashToastTimer;
@@ -2162,6 +2086,10 @@ public sealed partial class MainWindow : Window
 
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == Windows.System.VirtualKey.Escape && IsActivityCenterOpen)
+        {
+            CloseActivityCenter(); e.Handled = true; return;
+        }
         if (e.Key == Windows.System.VirtualKey.F6)
         {
             // F6 在「侧栏 ↔ 内容区」之间循环焦点，纯键盘用户不用一路 Tab。
@@ -2785,18 +2713,55 @@ public sealed partial class MainWindow : Window
 					L("dsearch applied: " + (p.Length > 1 ? p[1] : ""));
 				}
 				break;
-			case "dtasks":
-				// dtasks：把任务胶囊显示出来并展开浮层（截图/调试动画用）
-				TaskDock.Visibility = Visibility.Visible;
-				UpdateTaskDock();
-				await Task.Delay(120);
-				TaskFlyout.ShowAt(TaskDock);
-				L("dtasks opened");
-				break;
-			case "dtaskdemo":
+			case "disland":
+                TaskIsland.Open();
+                break;
+            case "dresourcetarget":
+                // Layout-only fixture: uses the production chooser, never downloads or installs.
+                await OnlineDetailPage.ChooseDownloadTargetAsync(RootGrid.XamlRoot,
+                    new Models.ModrinthProject { Title = "下载目标预览", ProjectType = "mod" },
+                    new Services.OnlineFileInfo("preview", "预览文件", "1.0", "1.17.1", "Fabric", "preview.jar"),
+                    p.Length > 1 && p[1] == "empty" ? [] : new List<Models.VersionInfo>
+                    {
+                        new() { Id = "Fabric 1.17.1", BaseVersion = "1.17.1", Loader = "fabric", Root = @"C:\Games\.minecraft" },
+                        new() { Id = "26.3", BaseVersion = "26.3", Loader = "vanilla", Root = @"C:\Games\.minecraft" },
+                    });
+                break;
+            case "dnotificationdemo":
+                if (p.Length > 1 && p[1] == "announcement")
+                {
+                    PlayNotificationPreview("announcement");
+                    break;
+                }
+                TaskCenter.PostMessage("启动器更新", "有新版本可用。你可以在设置中查看更新内容。", "更新");
+                TaskCenter.PostMessage("账户提醒：重新确认你的 Microsoft 账户状态", "请在账户页面查看状态。此条为布局预览通知，不会执行登录或更改账户。", "消息");
+                OpenNotificationCenter();
+                break;
+            case "dcloseactivity":
+                CloseActivityCenter(false);
+                break;
+            case "dislandlong":
+                if (_islandDemoTask is { IsActive: true } longDemo)
+                {
+                    longDemo.Title = "安装 26.3-NeoForge_26.3.0.34";
+                    TaskCenter.Progress(longDemo, 58.4, "正在下载游戏资源");
+                }
+                break;
+            case "dislandfinish":
+                if (_islandDemoTask is { IsActive: true } demoTask) TaskCenter.Complete(demoTask, "安装完成");
+                break;
+            case "dnotifications":
+                OpenNotificationCenter();
+                break;
+            case "dtasks":
+                OpenTaskCenter();
+                L("dtasks opened activity drawer");
+                break;
+            case "dtaskdemo":
 				// dtaskdemo：塞几条假任务进任务中心（只用于截图看样式）
 				{
-					var t1 = TaskCenter.Add("26.1.2", "正在准备…", "download", "\uE896");
+					var t1 = TaskCenter.Add("安装 26.1.2", "正在准备…", "download", "\uE896", new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Icons/loaders/vanilla.png")));
+                    _islandDemoTask = t1;
 					TaskCenter.BuildSteps(t1, new[] { "下载依赖库", "下载游戏主文件", "下载资源文件", "写入实例配置" });
 					TaskCenter.Step(t1, 0, 2, 100, "115/115");
 					TaskCenter.Step(t1, 1, 1, 62, "23.4 MB / 38.1 MB");
@@ -2804,13 +2769,13 @@ public sealed partial class MainWindow : Window
 					TaskCenter.Progress(t1, 58.4, "正在下载游戏主文件 23.4 MB / 38.1 MB");
 					t1.SetLive("Downloading library from https://bmclapi2.bangbang93.com/maven/…");
 
-					var t2 = TaskCenter.Add("1.20.1-forge-47.4.29", "安装完成", "download", "\uE896");
+					var t2 = TaskCenter.Add("安装 1.20.1-forge-47.4.29", "安装完成", "download", "\uE896", new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Icons/loaders/forge.png")));
 					TaskCenter.BuildSteps(t2, new[] { "下载依赖库", "下载游戏主文件", "下载资源文件", "下载 Forge 安装文件", "安装加载器", "写入实例配置" });
 					for (var i = 0; i < 6; i++) TaskCenter.Step(t2, i, 2, 100, "");
 					TaskCenter.Progress(t2, 100, "安装完成");
 					TaskCenter.Complete(t2, "安装完成");
 
-					var t3 = TaskCenter.Add("1.21.11-neoforge-21.11.48", "连接被重置（ECONNRESET）", "download", "\uE896");
+					var t3 = TaskCenter.Add("安装 1.21.11-neoforge-21.11.48", "连接被重置（ECONNRESET）", "download", "\uE896", new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Icons/loaders/neoforge.png")));
 					TaskCenter.BuildSteps(t3, new[] { "下载依赖库", "下载游戏主文件", "下载资源文件", "写入实例配置" });
 					TaskCenter.Step(t3, 0, 2, 100, "");
 					TaskCenter.Step(t3, 1, 3, 0, "连接被重置");
@@ -2928,14 +2893,14 @@ public sealed partial class MainWindow : Window
 		Navigate("online");
 	}
 
-	public async void OpenOnlineProject(Models.ModrinthProject project, string instance)
+	public async void OpenOnlineProject(Models.ModrinthProject project, string instance, string root)
 	{
 		Navigate("download");
 		for (var i = 0; i < 30 && ContentFrame?.Content is not GetPage; i++) await Task.Delay(100);
 		if (ContentFrame?.Content is GetPage gp)
 		{
 			gp.ShowTab("online", "");
-			await gp.OpenProjectAsync(project, instance);
+			await gp.OpenProjectAsync(project, instance, root);
 		}
 	}
 
@@ -2948,6 +2913,8 @@ public sealed partial class MainWindow : Window
 	public void Navigate(string tag, bool recordHistory = true, bool clearHistory = false)
 	{
         if (OnboardingHost.Visibility == Visibility.Visible) return;
+        if (string.Equals(tag, "tasks", StringComparison.Ordinal)) { OpenTaskCenter(); return; }
+        CloseActivityCenter(false);
 		// 初始化尚未完成时不进入导航；后续统一使用已确认有效的页面容器。
 		if (ContentFrame is not { } frame) return;
 		// 已经在设置页、也没有要定位的分区：什么都不用做。连续点「设置」时每点一次都会新建一页并重新读一批后端数据。
@@ -3051,7 +3018,7 @@ public sealed partial class MainWindow : Window
 			}
 			break;
 		case "tasks":
-			frame.Navigate(typeof(TasksPage), null, infoOverride);
+			OpenTaskCenter();
 			break;
 		case "logs":
 			frame.Navigate(typeof(LogsPage), text2, infoOverride);

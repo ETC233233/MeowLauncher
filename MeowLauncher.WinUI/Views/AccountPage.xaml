@@ -614,43 +614,54 @@
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       HorizontalContentAlignment="Stretch">
             <StackPanel HorizontalAlignment="Stretch" Spacing="12">
-                <Border Style="{StaticResource WidgetCardStyle}" CornerRadius="6">
-                    <StackPanel Spacing="12">
-                        <Grid>
-                            <StackPanel Spacing="3">
-                                <TextBlock x:Name="FriendsSummary" Text="好友"
-                                           FontSize="{StaticResource FontSizeTitle}" FontWeight="SemiBold"
-                                           Foreground="{ThemeResource AppTextBrush}" />
-                                <TextBlock x:Name="FriendsPresenceHint" Visibility="Collapsed"
-                                           FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap"
-                                           Foreground="{ThemeResource AppText3Brush}" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="8"
-                                        HorizontalAlignment="Right" VerticalAlignment="Top">
-                                <ProgressRing x:Name="FriendsLoadingRing" Width="18" Height="18"
-                                              IsActive="False" Visibility="Collapsed"
-                                              AutomationProperties.Name="正在读取好友列表" />
-                                <Button x:Name="FriendsRefreshButton" Content="刷新"
-                                        Style="{StaticResource PillButtonStyle}"
-                                        AutomationProperties.Name="刷新好友列表"
-                                        Click="RefreshFriends_Click" />
-                            </StackPanel>
-                        </Grid>
-
-                    </StackPanel>
-                </Border>
-
-                <Grid Margin="4,4,0,0">
-                    <TextBlock Text="好友" Style="{StaticResource SectionLabelStyle}" />
-                    <TextBlock x:Name="FriendsUpdatedAt" HorizontalAlignment="Right" FontSize="12" Foreground="{ThemeResource AppText3Brush}" />
-                </Grid>
-                <Border Style="{StaticResource WidgetCardStyle}" CornerRadius="6">
+                <StackPanel Spacing="6">
+                    <Grid ColumnSpacing="12" Margin="4,0,0,0" MinHeight="32">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="好友列表" VerticalAlignment="Center" Style="{StaticResource SectionLabelStyle}" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock x:Name="FriendsUpdatedAt" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource AppText3Brush}" />
+                            <ProgressRing x:Name="FriendsLoadingRing" Width="16" Height="16"
+                                          IsActive="False" Visibility="Collapsed" AutomationProperties.Name="正在读取好友列表" />
+                            <Button x:Name="FriendsRefreshButton" Height="32" CornerRadius="6" Padding="10,0"
+                                    AutomationProperties.Name="刷新好友列表" Click="RefreshFriends_Click">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="12" />
+                                    <TextBlock Text="刷新" FontSize="12" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="FriendsPresenceHint" Visibility="Collapsed" Margin="4,0"
+                               Style="{StaticResource RowHintStyle}" AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock x:Name="FriendsListStatus" Visibility="Collapsed" Margin="4,0"
+                               Style="{StaticResource RowHintStyle}" AutomationProperties.LiveSetting="Polite" />
+                </StackPanel>
+                <Border x:Name="FriendListCard" Style="{StaticResource WidgetCardStyle}" CornerRadius="6" Padding="16,6"
+                        Visibility="Collapsed">
                     <StackPanel>
                         <StackPanel x:Name="FriendList" Spacing="0" />
                         <controls:EmptyState x:Name="FriendEmpty" Glyph="&#xE716;"
                                              Title="还没有好友" Hint="在游戏里或下方输入玩家名添加好友。"
                                              Margin="0,16" Visibility="Collapsed" />
                     </StackPanel>
+                </Border>
+                <Border Style="{StaticResource WidgetCardStyle}" CornerRadius="6" Padding="16,12">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="3" VerticalAlignment="Center">
+                            <TextBlock Text="在线状态显示" Style="{StaticResource RowTitleStyle}" />
+                            <TextBlock Text="用 MeowLauncher 的好友将能看到您正在使用启动器" Style="{StaticResource RowHintStyle}" />
+                        </StackPanel>
+                        <ToggleSwitch x:Name="LauncherPresenceSwitch" Grid.Column="1" Width="56" MinWidth="0" Margin="0,0,-12,0"
+                                      HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent=""
+                                      AutomationProperties.Name="在线状态显示" Toggled="LauncherPresence_Toggled" />
+                    </Grid>
                 </Border>
 
                 <!-- 好友申请：标题常驻；没有任何待处理请求时显示「暂无待处理的好友请求」 -->
@@ -702,8 +713,5 @@
             </StackPanel>
         </ScrollViewer>
 
-        <InfoBar x:Name="Toast" Grid.Row="1" IsOpen="False" Severity="Informational"
-                 VerticalAlignment="Bottom" HorizontalAlignment="Right" Width="380"
-                 Margin="0,0,8,8" IsClosable="True" />
     </Grid>
 </Page>

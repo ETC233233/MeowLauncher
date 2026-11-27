@@ -233,6 +233,9 @@ public static class OnlineComponent
     /// </summary>
     public static async Task<(bool Ok, string Message)> InstallAsync(ComponentOffer offer, IProgress<(double Fraction, string Text)>? progress, CancellationToken ct = default)
     {
+        if (!NetworkAvailability.CanStartRequest
+            && !offer.Urls.Any(url => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsLoopback))
+            return (false, NetworkAvailability.OfflineMessage);
         if (!await Gate.WaitAsync(0, ct)) return (false, "正在安装中。");
         _installCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         ct = _installCts.Token;

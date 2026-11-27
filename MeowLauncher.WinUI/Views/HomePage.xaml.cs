@@ -90,7 +90,6 @@ public sealed partial class HomePage : Page
     private readonly DispatcherTimer _clockTimer = new();
     private Window? _hookedWindow;
     private DateTime _lastResume = DateTime.MinValue;
-    private readonly DispatcherTimer _toastTimer = new();
     private readonly TranslateTransform _dragTransform = new();
 
     private Snapshot? _snapshot;
@@ -196,8 +195,6 @@ public sealed partial class HomePage : Page
 
         _clockTimer.Interval = TimeSpan.FromSeconds(1);
         _clockTimer.Tick += (_, _) => UpdateClock();
-        _toastTimer.Interval = TimeSpan.FromSeconds(4);
-        _toastTimer.Tick += (_, _) => CloseToast();
         Loaded += HomePage_Loaded;
         Unloaded += HomePage_Unloaded;
         InstanceSelection.Changed += InstanceSelection_Changed;
@@ -1057,7 +1054,6 @@ public sealed partial class HomePage : Page
                 if (!switched)
                 {
                     TaskCenter.Fail(task, switchMessage);
-                    ShowToast(InfoBarSeverity.Warning, "切换失败", switchMessage);
                     return;
                 }
             }
@@ -1066,7 +1062,6 @@ public sealed partial class HomePage : Page
             {
                 if (TaskCenter.IsCancelled(task.Id)) return;
                 TaskCenter.Fail(task, "实例文件自动补全未完成。");
-                ShowToast(InfoBarSeverity.Error, "启动未完成", "实例文件自动补全未完成。");
                 return;
             }
 
@@ -1085,14 +1080,12 @@ public sealed partial class HomePage : Page
             else if (!string.IsNullOrWhiteSpace(result.Message))
             {
                 TaskCenter.Fail(task, result.Message, result.Failure);
-                ShowToast(InfoBarSeverity.Error, "启动失败", result.Message);
             }
             _ = GameSessions.RefreshAsync();
         }
         catch (Exception ex)
         {
-            TaskCenter.Fail(task, ex.Message);
-            ShowToast(InfoBarSeverity.Error, "启动失败", Diagnostics.FriendlyMessage(ex));
+            TaskCenter.Fail(task, Diagnostics.FriendlyMessage(ex));
         }
         finally
         {
@@ -1165,7 +1158,6 @@ public sealed partial class HomePage : Page
     private void HomePage_Unloaded(object sender, RoutedEventArgs e)
     {
         _clockTimer.Stop();
-        _toastTimer.Stop();
         GameSessions.Changed -= GameSessions_Changed;
         InstanceSelection.Changed -= InstanceSelection_Changed;
         UnhookWindowLifecycle();
@@ -2973,12 +2965,6 @@ public sealed partial class HomePage : Page
         return Task.CompletedTask;
     }
 
-    private void ShowLaunchFailure(string message, string versionId, FailureInfo failure)
-    {
-        ShowToast(InfoBarSeverity.Error, $"启动失败 · {failure.Code}", message, "复制诊断",
-            () => Diagnostics.Copy(Diagnostics.BuildReport(failure, "启动游戏", message, versionId)), 20);
-    }
-
     // ---------- 系统媒体 ----------
 
     private async Task InitializeMediaAsync()
@@ -3286,47 +3272,8 @@ public sealed partial class HomePage : Page
         }
     }
 
-    // ---------- Toast ----------
-
-    private void CloseToast()
-    {
-        Toast.IsOpen = false;
-        _toastTimer.Stop();
-    }
-
-    private void ShowToast(InfoBarSeverity severity, string title, string message,
-        string? actionText = null, Action? action = null, int seconds = 4)
-    {
-        Toast.Severity = severity;
-        Toast.Title = title;
-        Toast.Message = message;
-        if (action is not null)
-        {
-            var label = actionText ?? "查看";
-            var btn = new Button
-            {
-                Content = label,
-                Height = 28,
-                Padding = new Thickness(12, 0, 12, 0),
-                CornerRadius = new CornerRadius(14),
-                FontSize = 11.5,
-                BorderThickness = new Thickness(0),
-                Background = ResBrush("AppChipBrush", Color.FromArgb(255, 138, 138, 138)),
-                Foreground = ResBrush("AppTextBrush", Color.FromArgb(255, 255, 255, 255)),
-            };
-            AutomationProperties.SetName(btn, label);
-            btn.Click += (_, _) => action();
-            Toast.ActionButton = btn;
-        }
-        else
-        {
-            Toast.ActionButton = null;
-        }
-        Toast.IsOpen = true;
-        _toastTimer.Stop();
-        _toastTimer.Interval = TimeSpan.FromSeconds(seconds);
-        _toastTimer.Start();
-    }
+    private static void ShowToast(InfoBarSeverity severity, string title, string message) =>
+        TaskCenter.PostFeedback(severity, title, message);
 
     // ---------- 工具 ----------
 

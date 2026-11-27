@@ -959,71 +959,94 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- 开发者测试（子菜单页）：通过开发者认证后才会出现这个分类标签；
-                         先打开「开发者测试功能」总开关，联机功能的开关才会在里面出现。第一版发布不带联机。 -->
+                    <!-- 开发者认证解锁分类，总开关控制下面的测试功能。 -->
                     <StackPanel Spacing="12" x:Name="DevCard" Visibility="Collapsed">
                         <StackPanel Spacing="4">
-
+                            <TextBlock Text="实验功能" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
                             <Border Style="{StaticResource SettingsRowCardStyle}">
-                                <Grid ColumnSpacing="14" MinHeight="34">
+                                <Grid ColumnSpacing="20" MinHeight="44">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="156" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="启用开发者测试" Style="{StaticResource RowLabelStyle}" />
-                                    <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="DevFeaturesSwitch" Grid.Column="2" Toggled="DevFeaturesSwitch_Toggled" />
+                                    <StackPanel Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Text="启用开发者测试" Style="{StaticResource RowLabelStyle}" />
+                                        <TextBlock Text="开启后可以使用界面预览和实验性功能。" Style="{StaticResource GroupDescStyle}" />
+                                    </StackPanel>
+                                    <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="DevFeaturesSwitch" Grid.Column="1"
+                                                  AutomationProperties.Name="启用开发者测试" Toggled="DevFeaturesSwitch_Toggled" />
                                 </Grid>
                             </Border>
-                            <TextBlock Text="仅供通过开发者认证的账号使用。这里的功能还在测试中，可能不稳定，也不会出现在正式版里。打开后，下面的实验功能才可以使用。"
-                                       Style="{StaticResource GroupDescStyle}" />
-
                         </StackPanel>
-                        <StackPanel Spacing="4">
-                            <Border x:Name="DevFeaturesPanel" Style="{StaticResource SettingsRowCardStyle}" Visibility="Collapsed">
-                                <StackPanel Spacing="10">
-                                    <Grid ColumnSpacing="14" MinHeight="34">
+                        <StackPanel x:Name="DevFeaturesPanel" Spacing="12" Visibility="Collapsed">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="界面预览" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                                <Border Style="{StaticResource SettingsRowCardStyle}">
+                                    <Grid ColumnSpacing="20" MinHeight="44">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="联机（实验性）" Style="{StaticResource RowLabelStyle}" />
-                                        <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="OnlineEnabledSwitch" Grid.Column="2" Toggled="OnlineEnabledSwitch_Toggled" />
+                                        <StackPanel Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="通知演示" Style="{StaticResource RowLabelStyle}" />
+                                            <TextBlock Text="发送模拟消息，查看右下角浮窗和按钮效果。" Style="{StaticResource GroupDescStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <ComboBox x:Name="NotificationPreviewBox" SelectedIndex="0" Width="160" MinHeight="32" VerticalAlignment="Center"
+                                                      AutomationProperties.Name="通知演示场景">
+                                                <ComboBoxItem Content="任务结果" Tag="tasks" />
+                                                <ComboBoxItem Content="页面操作" Tag="pages" />
+                                                <ComboBoxItem Content="设置与下载" Tag="settings" />
+                                                <ComboBoxItem Content="更新与邀请" Tag="updates" />
+                                                <ComboBoxItem Content="公告" Tag="announcement" />
+                                            </ComboBox>
+                                            <Button x:Name="PlayNotificationPreviewButton" Content="播放演示"
+                                                    Style="{StaticResource SettingsActionStyle}" Click="PlayNotificationPreview_Click" />
+                                        </StackPanel>
                                     </Grid>
-                                    <Grid ColumnSpacing="14" MinHeight="34">
+                                </Border>
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="联机（实验性）" Margin="0,0,0,4" Style="{StaticResource GroupTitleStyle}" />
+                                <Border Style="{StaticResource SettingsRowCardStyle}">
+                                    <Grid ColumnSpacing="20" MinHeight="44">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="156" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="向好友显示在线" Style="{StaticResource RowLabelStyle}" />
-                                        <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="ShareOnlineSwitch" Grid.Column="2" Toggled="ShareOnlineSwitch_Toggled" />
+                                        <StackPanel Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="启用联机" Style="{StaticResource RowLabelStyle}" />
+                                            <TextBlock Text="启用好友邀请和房间功能。" Style="{StaticResource GroupDescStyle}" />
+                                            <TextBlock x:Name="OnlineEnvHint" Visibility="Collapsed"
+                                                       Text="环境变量 MEOW_ONLINE 已强制启用联机，开关暂不可用。"
+                                                       Style="{StaticResource GroupDescStyle}" />
+                                        </StackPanel>
+                                        <ToggleSwitch Style="{StaticResource SettingsToggleStyle}" x:Name="OnlineEnabledSwitch" Grid.Column="1"
+                                                      AutomationProperties.Name="启用联机" Toggled="OnlineEnabledSwitch_Toggled" />
                                     </Grid>
-                                    <TextBlock Text="开启联机后，启动器会向 Mojang 好友系统上报你的在线状态（带 MeowLauncher 标记），你的好友能看到你在线；游戏运行时不会覆盖游戏里的状态。关闭后不会上报任何状态。"
-                                               Style="{StaticResource GroupDescStyle}" />
-                                    <TextBlock x:Name="OnlineEnvHint" Visibility="Collapsed"
-                                               Text="环境变量 MEOW_ONLINE 已强制启用联机（测试用），上面的开关暂时不起作用。"
-                                               Style="{StaticResource GroupDescStyle}" />
-<StackPanel x:Name="ComponentSection" Spacing="8" Visibility="Collapsed">
-    <Border Height="1" Background="{ThemeResource CardStrokeBrush}" Margin="0,4"/>
-    <Grid MinHeight="48" ColumnSpacing="20">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <StackPanel Spacing="3" VerticalAlignment="Center">
-            <TextBlock Text="联机组件" Style="{StaticResource RowLabelStyle}"/>
-            <TextBlock x:Name="ComponentStatusText" Style="{StaticResource GroupDescStyle}"/>
-        </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Button x:Name="ComponentActionButton" Content="下载" Style="{StaticResource SettingsActionStyle}" Visibility="Collapsed" Click="ComponentAction_Click"/>
-            <Button x:Name="ComponentCheckButton" Content="检查更新" Style="{StaticResource SettingsActionStyle}" Click="ComponentCheck_Click"/>
-            <Button x:Name="AboutComponentButton"  Content="源码仓库" Style="{StaticResource SettingsActionStyle}"
-                                            AutomationProperties.Name="打开联机组件源码仓库" Click="OpenRepo_Click" />
-        </StackPanel>
-    </Grid>
-    <TextBlock x:Name="ComponentNoteText" Visibility="Collapsed" Style="{StaticResource GroupDescStyle}"/>
-</StackPanel>
-                                </StackPanel>
-                            </Border>
+                                </Border>
+                                <Border x:Name="ComponentSection" Style="{StaticResource SettingsRowCardStyle}" Visibility="Collapsed">
+                                    <Grid ColumnSpacing="20" MinHeight="44">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="联机组件" Style="{StaticResource RowLabelStyle}" />
+                                            <TextBlock x:Name="ComponentStatusText" Style="{StaticResource GroupDescStyle}" />
+                                            <TextBlock x:Name="ComponentNoteText" Visibility="Collapsed" Style="{StaticResource GroupDescStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <Button x:Name="ComponentActionButton" Content="下载" Style="{StaticResource SettingsActionStyle}"
+                                                    Visibility="Collapsed" Click="ComponentAction_Click" />
+                                            <Button x:Name="ComponentCheckButton" Content="检查更新" Style="{StaticResource SettingsActionStyle}"
+                                                    Click="ComponentCheck_Click" />
+                                            <Button x:Name="AboutComponentButton" Content="源码仓库" Style="{StaticResource SettingsActionStyle}"
+                                                    AutomationProperties.Name="打开联机组件源码仓库" Click="OpenRepo_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
 
@@ -1230,8 +1253,5 @@
 
         </Grid>
 
-        <InfoBar x:Name="Toast" IsOpen="False" Severity="Informational"
-                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                 Width="360" Margin="0,0,8,8" IsClosable="True" />
     </Grid>
 </Page>

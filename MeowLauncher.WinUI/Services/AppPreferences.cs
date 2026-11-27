@@ -67,6 +67,8 @@ public sealed class AppPreferences
     /// <summary>已经弹过「测试版 / 预发行版」提示的记号（见 MeowVersion.NoticeKey），同一记号只弹一次。</summary>
     public string VersionNoticeShown { get; set; } = "";
 
+    public Dictionary<string, AnnouncementReceipt> AnnouncementReceipts { get; set; } = new(StringComparer.Ordinal);
+
     /// <summary>已经提示过「有新版本」的版本号，同一个新版本只弹一次。</summary>
     public string UpdateNoticeShown { get; set; } = "";
 
@@ -100,6 +102,7 @@ public sealed class AppPreferences
 
     /// <summary>任务完成 / 失败时弹出系统通知。</summary>
     public bool NotifyTaskDone { get; set; } = true;
+    public bool? ShareLauncherPresence { get; set; }
 
     /// <summary>任务进行中在标题栏显示药丸（TaskIsland 开关）。</summary>
     public bool ShowTaskIsland { get; set; } = true;

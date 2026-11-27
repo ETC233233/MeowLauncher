@@ -12,10 +12,12 @@ public static class SignedConfig
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static (string Payload, DateTime At)? _cache;
     private static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(5);
+    public static string? VerifiedEnvelope { get; private set; }
 
     private static HttpClient CreateHttp()
     {
-        var c = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var handler = new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(4), Proxy = NetworkProxy.Proxy };
+        var c = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         c.DefaultRequestHeaders.UserAgent.ParseAdd("MeowLauncher");
         return c;
     }
@@ -36,13 +38,51 @@ public static class SignedConfig
         try
         {
             if (!force && _cache is { } c2 && DateTime.UtcNow - c2.At < CacheFor) return (c2.Payload, "");
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(20));
-            var envelope = await Http.GetStringAsync(uri, cts.Token);
-            var payload = ComponentManifest.VerifyEnvelope(envelope);
-            if (payload is null) return (null, "云端配置验签失败或已过期，请稍后再试。");
-            _cache = (payload, DateTime.UtcNow);
-            return (payload, "");
+            if (!NetworkAvailability.CanStartRequest) return (null, NetworkAvailability.OfflineMessage);
+            // Both entries are compiled into the client: CF must not be reachable just to discover its fallback.
+            var entries = new[] { entry }.Concat(Meta("MeowConfigFallbacks").Split(';', StringSplitOptions.RemoveEmptyEntries))
+                .Where(x => Uri.TryCreate(x, UriKind.Absolute, out var u) && u.Scheme == "https")
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            using var race = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            async Task<(string? Payload, string? Envelope)> FetchOne(string address, int delay)
+            {
+                try
+                {
+                    await Task.Delay(delay, race.Token);
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(race.Token);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                    using var request = new HttpRequestMessage(HttpMethod.Get, address);
+                    request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true };
+                    using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                    response.EnsureSuccessStatusCode();
+                    await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+                    using var bytes = new MemoryStream();
+                    var buffer = new byte[8192];
+                    int read;
+                    while ((read = await stream.ReadAsync(buffer, timeout.Token)) > 0)
+                    {
+                        if (bytes.Length + read > 512 * 1024) return (null, null);
+                        bytes.Write(buffer, 0, read);
+                    }
+                    var envelope = System.Text.Encoding.UTF8.GetString(bytes.ToArray());
+                    return (ComponentManifest.VerifyEnvelope(envelope), envelope);
+                }
+                catch { return (null, null); }
+            }
+            var tasks = entries.Select((x, i) => FetchOne(x, i * 400)).ToList();
+            while (tasks.Count > 0)
+            {
+                var done = await Task.WhenAny(tasks);
+                tasks.Remove(done);
+                var result = await done;
+                if (result.Payload is null) continue;
+                race.Cancel();
+                VerifiedEnvelope = result.Envelope;
+                _cache = (result.Payload, DateTime.UtcNow);
+                return (result.Payload, "");
+            }
+            ct.ThrowIfCancellationRequested();
+            return (null, "云端配置连接失败、验签失败或已过期，请稍后再试。");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)

@@ -72,6 +72,7 @@ public static class DevVerdict
         if (Interlocked.Exchange(ref _busy, 1) == 1) return null;
         try
         {
+            if (!NetworkAvailability.CanStartRequest) return Fail(NetworkAvailability.OfflineMessage);
             var who = await App.Backend.MojangWhoAsync(forVerdict: true);
             if (!who.Ok || string.IsNullOrWhiteSpace(who.Uuid)) return Fail("取不到正版账号：" + who.Message);
             var uuid = who.Uuid.Replace("-", "").ToLowerInvariant();

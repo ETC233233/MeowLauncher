@@ -30,6 +30,7 @@ public sealed partial class DownloadDetailPage : Page
         private bool _selected;
         private bool _installed;
         private bool _failed;
+        private bool _loading;
         private string _installedNote = "";
 
         public LoaderRow(string kind, string name, string status, bool enabled)
@@ -51,7 +52,13 @@ public sealed partial class DownloadDetailPage : Page
         public Visibility StatusVisibility => _failed ? Visibility.Visible : Visibility.Collapsed;
         // 已安装的行照样能点：装同名实例会被实例名重复挡住，改个名字就能再装一个不同实例。
         public bool Enabled => _enabled;
-        public double RowOpacity => _enabled ? 1.0 : 0.55;
+        public double RowOpacity => _loading || _enabled ? 1.0 : 0.55;
+        public bool Loading
+        {
+            get => _loading;
+            set { _loading = value; Raise(nameof(Loading)); Raise(nameof(LoadingVisibility)); Raise(nameof(RowOpacity)); }
+        }
+        public Visibility LoadingVisibility => _loading ? Visibility.Visible : Visibility.Collapsed;
         public Visibility SelectedVisibility => _selected ? Visibility.Visible : Visibility.Collapsed;
         public Visibility ChevronVisibility => Visibility.Visible;
         public override string ToString() => Name;
@@ -188,7 +195,8 @@ public sealed partial class DownloadDetailPage : Page
         SetLoaderNote("");
         _loaderRows.Add(new LoaderRow("vanilla", "原版", "不带 Mod 加载器", true) { Visible = true });
         foreach (var kind in new[] { "fabric", "forge", "neoforge", "quilt" })
-            _loaderRows.Add(new LoaderRow(kind, LoaderLabel(kind), "正在查询…", false) { Visible = true });
+            _loaderRows.Add(new LoaderRow(kind, LoaderLabel(kind), "正在查询…", false)
+            { Visible = LoaderCompatibility.CanQuery(v.Id, kind), Loading = LoaderCompatibility.CanQuery(v.Id, kind) });
         RefreshLoaderList();
 
         DetailAncientNote.Visibility = v.Type is "old_beta" or "old_alpha" ? Visibility.Visible : Visibility.Collapsed;
@@ -346,7 +354,8 @@ public sealed partial class DownloadDetailPage : Page
         foreach (var row in _loaderRows.Skip(1))
         {
             row.Failed = false;
-            row.Visible = true;
+            row.Visible = LoaderCompatibility.CanQuery(v.Id, row.Kind);
+            row.Loading = row.Visible;
             row.SetBase("正在查询…", false);
         }
         RefreshLoaderList();
@@ -369,7 +378,7 @@ public sealed partial class DownloadDetailPage : Page
             return;
         }
 
-        var jobs = _loaderRows.Skip(1).Select(row => LoadKindAsync(v, row, kinds)).ToArray();
+        var jobs = _loaderRows.Skip(1).Where(row => row.Visible).Select(row => LoadKindAsync(v, row, kinds)).ToArray();
         await Task.WhenAll(jobs);
         if (_version is null || _version.Id != v.Id) return;
 
@@ -388,7 +397,12 @@ public sealed partial class DownloadDetailPage : Page
 
     private async Task LoadKindAsync(MojangVersionInfo v, LoaderRow row, Dictionary<string, LoaderKindInfo> kinds)
     {
-        var info = await App.Backend.GetLoaderKindAsync(v.Id, row.Kind);
+        if (!LoaderCompatibility.CanQuery(v.Id, row.Kind)) { row.Visible = false; row.Loading = false; return; }
+        row.Loading = true;
+        LoaderKindInfo info;
+        try { info = await App.Backend.GetLoaderKindAsync(v.Id, row.Kind); }
+        catch (Exception ex) { info = new LoaderKindInfo(false, ex.Message, Array.Empty<string>(), ""); }
+        finally { row.Loading = false; }
         if (_version is null || _version.Id != v.Id) return;
         kinds[row.Kind] = info;
         _kinds[row.Kind] = info;
@@ -400,6 +414,9 @@ public sealed partial class DownloadDetailPage : Page
     /// <summary>把单个加载器的查询结果写到它那一行。</summary>
     private void ApplyKindToRow(LoaderRow row, LoaderKindInfo? info)
     {
+        row.Loading = false;
+        if (_version is { } version && !LoaderCompatibility.CanQuery(version.Id, row.Kind))
+        { row.Visible = false; return; }
         if (info is null)
         {
             row.Failed = true;
@@ -478,6 +495,7 @@ public sealed partial class DownloadDetailPage : Page
         // 查询失败的行：点一下只重查这一个加载器。
         if (row.Failed && _version is not null)
         {
+            row.Loading = true;
             row.SetBase("正在查询…", false);
             row.Failed = false;
             _ = RetryKindAsync(_version, row);
@@ -604,8 +622,8 @@ public sealed partial class DownloadDetailPage : Page
         }
         else
         {
-            // 后端按时间升序返回，下拉里改成最新在前
-            DetailPrereqVersion.ItemsSource = versions.AsEnumerable().Reverse().ToList();
+            // 后端统一按发布日期降序；缓存命中也保持相同顺序。
+            DetailPrereqVersion.ItemsSource = versions;
             DetailPrereqVersion.SelectedIndex = 0;
             DetailPrereqVersion.IsEnabled = true;
         }

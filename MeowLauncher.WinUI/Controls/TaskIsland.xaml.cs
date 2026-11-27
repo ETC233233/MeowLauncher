@@ -1,612 +1,203 @@
+using System.ComponentModel;
 using MeowLauncher.WinUI.Models;
 using MeowLauncher.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.UI.ViewManagement;
+using Microsoft.UI.Xaml.Media.Animation;
+using Windows.Foundation;
 
 namespace MeowLauncher.WinUI.Controls;
 
-/// <summary>
-/// 任务与通知灵动岛（类 iOS 实时活动），常驻在标题栏右侧。状态机：
-///   Idle（铃铛 + 未读数）──有进行中任务──▶ Compact ──点击/悬停──▶ Expanded
-///   Compact/Expanded ──全部结束──▶ Done 或 Failed（各自停留 3.5 s / 8 s）──▶ Idle
-///   收到新通知（邀请、对方的回复等）──▶ 自动展开 6 s（邀请 30 s，要等你点接受/拒绝）──▶ 收回
-/// 展开卡片 = 进行中的任务 + 最近 4 条通知（邀请带「接受 / 拒绝」）+ 「查看全部」。
-/// 规则：悬停时暂停一切自动收起；同一条已结束任务只庆祝一次（_celebrated）；
-/// 关闭动画（系统「显示动画」关）时不做缩放/淡入。数据只读自 TaskCenter，不持有任务。
-/// 侧栏左下的 TaskDock 已收起（Collapsed），入口统一在这里。
-/// </summary>
+/// <summary>One adaptive entry: quiet when idle, instance progress while working, then a brief result.</summary>
 public sealed partial class TaskIsland : UserControl
 {
-    private enum IslandState { Hidden, Idle, Compact, Expanded, Done, Failed }
-
-    private const int IncomingInviteMs = 30000;
-    private const int IncomingNoticeMs = 6000;
-    private readonly DispatcherTimer _incomingTimer = new();
-    private DateTime _incomingUntil = DateTime.MinValue;
-    private string _lastTopNoteId = "";
-    private string _noteSignature = "";   // 哨兵值：不能等于任何真实签名（空通知列表的签名是空串）
-    private StackPanel? _taskHost;
-    private StackPanel? _noteHost;
-    private Button? _allButton;
-    private bool IncomingActive => DateTime.Now < _incomingUntil;
-
-    /// <summary>药丸本体，给主窗口算「标题栏穿透区」用（药丸在标题栏里，不穿透的话鼠标事件会被系统当成拖动窗口吃掉）。</summary>
-    public FrameworkElement PillElement => Pill;
-
-    private bool _open;
-    private Microsoft.UI.Xaml.Media.Animation.Storyboard? _openStory;
-    private double _pillWidth;          // 收起时药丸的自然宽度，收回去时的目标
-
-    private static Microsoft.UI.Xaml.Media.Animation.DoubleAnimation Anim(
-        Microsoft.UI.Xaml.Media.Animation.Storyboard sb, DependencyObject target, string path,
-        double from, double to, int ms, Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase ease, bool dependent, int beginMs = 0)
-    {
-        var a = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-        {
-            From = from, To = to, Duration = TimeSpan.FromMilliseconds(ms), EasingFunction = ease,
-            EnableDependentAnimation = dependent, BeginTime = TimeSpan.FromMilliseconds(beginMs),
-        };
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(a, target);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(a, path);
-        sb.Children.Add(a);
-        return a;
-    }
-
-    /// <summary>展开后的宽度：药丸左边固定在搜索栏右侧，向右撑开，给窗口按钮留 150 + 一点回弹余量。</summary>
-    private double ExpandedWidth()
-    {
-        var rootWidth = _root?.Size.Width ?? 1120;
-        return Math.Max(260, Math.Min(340, rootWidth - 150 - Margin.Left - 16));
-    }
-
-    /// <summary>展开：药丸自己向右、向下连续变大（宽度 + 高度 + 内容淡入），宽度带一点点回弹（先冲过一点再稳住）。</summary>
-    private void ExpandIsland()
-    {
-        if (_open) return;
-        _open = true;
-        _openStory?.Stop();
-        if (BodyHost.Visibility != Visibility.Visible && Pill.ActualWidth > 0) _pillWidth = Pill.ActualWidth;   // 完全收起时才记自然宽度
-
-        var fromW = Pill.ActualWidth > 0 ? Pill.ActualWidth : 160;
-        var fromH = BodyHost.Visibility == Visibility.Visible ? BodyHost.ActualHeight : 0;
-        var toW = ExpandedWidth();
-        Body.Width = toW - 2;
-        Body.Measure(new Windows.Foundation.Size(toW - 2, double.PositiveInfinity));
-        var toH = Body.DesiredSize.Height;
-
-        Pill.MaxWidth = 400;
-        Pill.Background = (Brush)Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];
-        BodyHost.Visibility = Visibility.Visible;
-        if (!_ui.AnimationsEnabled)
-        {
-            Pill.Width = toW; BodyHost.Height = double.NaN; Body.Opacity = 1;
-            return;
-        }
-
-        Pill.Width = fromW;
-        BodyHost.Height = fromH;
-        Body.Opacity = fromH > 0 ? Body.Opacity : 0;
-        var sb = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-        Anim(sb, Pill, "Width", fromW, toW, 360,
-            new Microsoft.UI.Xaml.Media.Animation.BackEase { Amplitude = 0.35, EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut }, true);
-        Anim(sb, BodyHost, "Height", fromH, toH, 320,
-            new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut }, true);
-        Anim(sb, Body, "Opacity", Body.Opacity, 1, 200,
-            new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut }, false, 110);
-        sb.Completed += (_, _) =>
-        {
-            if (!_open) return;
-            Pill.Width = toW; BodyHost.Height = double.NaN; Body.Opacity = 1;     // 高度交还给内容，之后列表变化会自己撑开
-        };
-        _openStory = sb;
-        sb.Begin();
-    }
-
-    /// <summary>收起：宽度、高度缩回药丸大小，内容先淡出；结束后才 Collapsed。</summary>
-    private void CollapseIsland()
-    {
-        if (!_open) return;
-        _open = false;
-        _openStory?.Stop();
-        void Reset()
-        {
-            BodyHost.Visibility = Visibility.Collapsed;
-            BodyHost.Height = 0;
-            Body.Width = double.NaN;
-            Body.Opacity = 1;
-            Pill.Width = double.NaN;
-            Pill.MaxWidth = 232;
-            Pill.Background = (Brush)Application.Current.Resources["AppChipBrush"];
-        }
-        if (!_ui.AnimationsEnabled || BodyHost.Visibility != Visibility.Visible) { Reset(); return; }
-
-        var fromW = Pill.ActualWidth;
-        var fromH = BodyHost.ActualHeight;
-        var toW = _pillWidth > 0 ? _pillWidth : 160;
-        Pill.Width = fromW;
-        BodyHost.Height = fromH;
-        var sb = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-        var ease = new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut };
-        Anim(sb, Pill, "Width", fromW, toW, 240, ease, true);
-        Anim(sb, BodyHost, "Height", fromH, 0, 240, ease, true);
-        Anim(sb, Body, "Opacity", Body.Opacity, 0, 110,
-            new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseIn }, false);
-        sb.Completed += (_, _) =>
-        {
-            if (_open || !ReferenceEquals(_openStory, sb)) return;     // 中途又展开了，别把它收掉
-            Reset();
-        };
-        _openStory = sb;
-        sb.Begin();
-    }
-
-    private const int DoneHoldMs = 3500;
-    private const int FailedHoldMs = 8000;
-    private const int CollapseDelayMs = 700;
-
-    private readonly UISettings _ui = new();
+    private enum IslandMode { Idle, Working, Result }
+    private IslandMode? _mode;
+    private Storyboard? _transition;
+    private int _transitionVersion;
+    private double _targetWidth = 132;
+    private double _workingWidth = 292;
+    private readonly TextBlock _measure = new() { FontSize = 13 };
+    private string? _arrivalId;
+    private readonly DispatcherTimer _arrivalTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private bool _hooked;
+    private TaskEntry? _primary;
+    private DateTime _holdUntil = DateTime.MinValue;
     private readonly HashSet<string> _celebrated = new();
     private readonly DispatcherTimer _holdTimer = new();
-    private readonly DispatcherTimer _collapseTimer = new() { Interval = TimeSpan.FromMilliseconds(CollapseDelayMs) };
-    private IslandState _state = IslandState.Hidden;
-    private bool _hover;
-    private bool _pinnedOpen;
-    private bool _hooked;
-    // 窗口窄于 1200 DIP 时，紧凑态只留进度环/状态图标（与居中搜索框不相撞）；展开卡片仍显示全部信息。
-    private const double NarrowBelowDip = 1200;
-    private bool _narrow;
-    private Microsoft.UI.Xaml.XamlRoot? _root;
+
+    public FrameworkElement PillElement => Pill;
+    public bool IsExpanded => App.MainWindow?.IsActivityCenterOpen == true;
 
     public TaskIsland()
     {
         InitializeComponent();
-        _holdTimer.Tick += (_, _) => { _holdTimer.Stop(); if (!_hover) Settle(); };
-        _collapseTimer.Tick += (_, _) => { _collapseTimer.Stop(); if (!_hover && !_pinnedOpen) { Refresh(); } };
-        _incomingTimer.Tick += (_, _) => { _incomingTimer.Stop(); if (!_hover && !_pinnedOpen) Refresh(); };
-        Loaded += (_, _) =>
-        {
-            if (_hooked) return;
-            _hooked = true;
-            TaskCenter.Changed += TaskCenter_Changed;
-            _lastTopNoteId = TaskCenter.Notifications.FirstOrDefault()?.Id ?? "";
-            TaskCenter.NotificationsChanged += TaskCenter_NotificationsChanged;
-            _root = XamlRoot;
-            if (_root is not null) _root.Changed += XamlRoot_Changed;
-            UpdateNarrow();
-            Refresh();
-        };
-        Unloaded += (_, _) =>
-        {
-            if (!_hooked) return;
-            _hooked = false;
-            TaskCenter.Changed -= TaskCenter_Changed;
-            TaskCenter.NotificationsChanged -= TaskCenter_NotificationsChanged;
-            if (_root is not null) _root.Changed -= XamlRoot_Changed;
-            _root = null;
-            _holdTimer.Stop();
-            _collapseTimer.Stop();
-            _incomingTimer.Stop();
-        };
+        _holdTimer.Tick += (_, _) => { _holdTimer.Stop(); Refresh(); };
+        _arrivalTimer.Tick += (_, _) => { _arrivalTimer.Stop(); _arrivalId = null; UpdateCompact(); };
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
 
-    private void XamlRoot_Changed(Microsoft.UI.Xaml.XamlRoot sender, Microsoft.UI.Xaml.XamlRootChangedEventArgs args)
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (UpdateNarrow() && Pill.Visibility == Visibility.Visible) Refresh();
-    }
-
-    private bool UpdateNarrow()
-    {
-        var narrow = (_root?.Size.Width ?? double.MaxValue) < NarrowBelowDip;
-        if (narrow == _narrow) return false;
-        _narrow = narrow;
-        return true;
-    }
-
-    private void TaskCenter_Changed(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(Refresh);
-
-    private void TaskCenter_NotificationsChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
-    {
-        var top = TaskCenter.Notifications.FirstOrDefault();
-        if (top is not null && top.Id != _lastTopNoteId)
-        {
-            _lastTopNoteId = top.Id;
-            // 任务完成 / 失败的通知由「完成 / 失败」状态展示，这里只自动展开和任务无关的通知（邀请、对方的回复等）
-            if (top.SourceTaskId.Length == 0) { ShowIncoming(top); return; }
-        }
-        Refresh();
-    });
-
-    /// <summary>有新通知：自动展开一会儿。邀请要等你回复，停得久一些。必须在界面线程调用。</summary>
-    public void ShowIncoming(TaskNotification note)
-    {
-        var ms = note.InviteOpen ? IncomingInviteMs : IncomingNoticeMs;
-        _incomingUntil = DateTime.Now.AddMilliseconds(ms);
-        _incomingTimer.Stop();
-        _incomingTimer.Interval = TimeSpan.FromMilliseconds(ms + 150);
-        _incomingTimer.Start();
+        if (_hooked) return;
+        _hooked = true;
+        foreach (var entry in TaskCenter.Entries.Where(e => !e.IsActive)) _celebrated.Add(entry.Id);
+        TaskCenter.Changed += OnChanged;
+        TaskCenter.NotificationsChanged += OnChanged;
         Refresh();
     }
 
-    /// <summary>用户展开岛时把通知记为已读（角标清零）。只在有未读时才动，避免互相触发。</summary>
-    private static void MarkSeen()
+    private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        if (TaskCenter.Notifications.Any(n => !n.IsRead)) TaskCenter.MarkAllRead();
+        if (!_hooked) return;
+        _hooked = false;
+        TaskCenter.Changed -= OnChanged;
+        TaskCenter.NotificationsChanged -= OnChanged;
+        _holdTimer.Stop(); _arrivalTimer.Stop(); _transition?.Stop(); _mode = null;
+        if (_primary is not null) _primary.PropertyChanged -= PrimaryChanged;
+        _primary = null;
     }
 
-    // ------------------------------------------------------------ 状态
+    private void OnChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(Refresh);
+    private void PrimaryChanged(object? sender, PropertyChangedEventArgs e) => DispatcherQueue.TryEnqueue(UpdateCompact);
+    public void Open() => App.MainWindow?.OpenTaskCenter();
+    public void Close() => App.MainWindow?.CloseActivityCenter();
+    internal void RestoreEntryFocus(bool notifications) => Trigger.Focus(FocusState.Programmatic);
+    internal Point ArrivalPoint(UIElement root, TaskEntry incoming)
+    {
+        var rect = Pill.TransformToVisual(root).TransformBounds(new Rect(0, 0, Pill.ActualWidth, Pill.ActualHeight));
+        var width = _primary?.IsActive == true ? _workingWidth : PreferredWidth(incoming);
+        return new Point(rect.Right - width + 25, rect.Top + 18);
+    }
+    internal void BeginArrival(string id)
+    {
+        _arrivalId = id; _arrivalTimer.Stop(); _arrivalTimer.Start(); UpdateCompact();
+    }
+    internal void FinishArrival(string id)
+    {
+        if (_arrivalId != id) return;
+        _arrivalId = null; _arrivalTimer.Stop(); UpdateCompact();
+    }
 
     private void Refresh()
     {
-        var active = TaskCenter.Entries.Where(t => t.IsActive).ToList();
-        if (active.Count > 0)
+        if (!_hooked) return;
+        if (_primary is { IsActive: false } finished && finished.Status is "已完成" or "失败" && _celebrated.Add(finished.Id))
         {
-            _holdTimer.Stop();
-            var wantExpanded = _pinnedOpen || _hover || IncomingActive;
-            Show(wantExpanded ? IslandState.Expanded : IslandState.Compact, active[0], active);
+            _holdUntil = DateTime.Now.AddMilliseconds(finished.Status == "失败" ? 6000 : 1600);
+            _holdTimer.Interval = _holdUntil - DateTime.Now;
+            _holdTimer.Stop(); _holdTimer.Start();
+        }
+        var entries = TaskCenter.Entries.Select(e => new IslandActivity(e.Id, e.IsActive, e.Status is "已完成" or "失败")).ToList();
+        var id = IslandSelection.Choose(_primary?.Id, entries, false, DateTime.Now, _holdUntil);
+        var selected = TaskCenter.Entries.FirstOrDefault(e => e.Id == id);
+        if (!ReferenceEquals(selected, _primary))
+        {
+            if (_primary is not null) _primary.PropertyChanged -= PrimaryChanged;
+            _primary = selected;
+            if (_primary?.IsActive == true) _workingWidth = 292;
+            _holdUntil = DateTime.MinValue;
+            if (_primary is not null) _primary.PropertyChanged += PrimaryChanged;
+        }
+        UpdateCompact();
+    }
+
+    private void UpdateCompact()
+    {
+        if (!_hooked) return;
+        var primary = _primary;
+        var active = primary?.IsActive == true;
+        var failed = primary?.Status == "失败";
+        var mode = primary is null ? IslandMode.Idle : active ? IslandMode.Working : IslandMode.Result;
+        // Keep the outgoing labels intact until their fade-out finishes.
+        if (primary is not null)
+        {
+            StateIcon.Glyph = active ? "\uE896" : failed ? "\uE783" : "\uE73E";
+            StateIcon.Foreground = (Brush)Application.Current.Resources[failed ? "AppBadBrush" : active ? "AppText2Brush" : "AppAccentBrush"];
+            PrimaryIcon.Source = primary.TargetIcon;
+            PrimaryIcon.Visibility = active && PrimaryIcon.Source is not null ? Visibility.Visible : Visibility.Collapsed;
+            PrimaryIcon.Opacity = primary.Id == _arrivalId ? 0 : 1;
+            StateIcon.Visibility = PrimaryIcon.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+            TitleText.Text = Summary(primary);
+            PercentText.Text = active && !primary!.IsIndeterminate ? $"{primary.Progress:0.#}%" : "";
+            PercentText.Visibility = PercentText.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        var unread = TaskCenter.UnreadCount;
+        UnreadDot.Visibility = unread > 0 ? Visibility.Visible : Visibility.Collapsed;
+        CompactTrack.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        CompactIndeterminate.Visibility = active && primary!.IsIndeterminate ? Visibility.Visible : Visibility.Collapsed;
+        CompactFill.Visibility = active && !primary!.IsIndeterminate ? Visibility.Visible : Visibility.Collapsed;
+        CompactScale.ScaleX = Math.Clamp(primary?.Progress ?? 0, 0, 100) / 100;
+        AutomationProperties.SetName(Trigger, mode == IslandMode.Idle
+            ? unread > 0 ? $"任务与通知，{unread} 条未读" : "任务与通知"
+            : $"任务与通知，{TitleText.Text} {PercentText.Text}，{unread} 条未读");
+        if (active) _workingWidth = Math.Max(_workingWidth, PreferredWidth(primary!));
+        var width = mode switch { IslandMode.Working => _workingWidth, IslandMode.Result => PreferredWidth(primary!), _ => 132 };
+        SetMode(mode, width);
+    }
+
+    private static string Summary(TaskEntry entry)
+    {
+        var phase = entry.IsActive
+            ? entry.Steps.FirstOrDefault(s => s.SpinnerVisibility == Visibility.Visible)?.Title ?? entry.Detail
+            : entry.Status;
+        if (string.IsNullOrWhiteSpace(phase)) phase = "正在准备…";
+        return $"{Views.TaskVisuals.DisplayTitle(entry.Title)} · {phase}";
+    }
+
+    private double PreferredWidth(TaskEntry entry)
+    {
+        _measure.Text = Summary(entry);
+        _measure.Measure(new Size(double.PositiveInfinity, 36));
+        // Reserve space for the icon, gaps, padding and a stable percentage width.
+        return entry.IsActive ? Math.Clamp(Math.Ceiling(_measure.DesiredSize.Width + 116), 292, 336)
+            : Math.Clamp(Math.Ceiling(_measure.DesiredSize.Width + 61), 184, 248);
+    }
+
+    private void SetMode(IslandMode mode, double width)
+    {
+        if (_mode == mode && Math.Abs(_targetWidth - width) < .5) return;
+        _targetWidth = width;
+        var first = _mode is null;
+        _mode = mode;
+        var version = ++_transitionVersion;
+        var fromWidth = Pill.ActualWidth > 0 ? Pill.ActualWidth : Pill.Width;
+        var idleOpacity = IdleSurface.Opacity;
+        var workOpacity = WorkSurface.Opacity;
+        _transition?.Stop();
+        var idle = mode == IslandMode.Idle;
+        Pill.Width = fromWidth;
+        IdleSurface.Opacity = idleOpacity; WorkSurface.Opacity = workOpacity;
+        IdleSurface.Visibility = WorkSurface.Visibility = Visibility.Visible;
+        if (first || !Motion.Enabled)
+        {
+            Pill.Width = width; IdleSurface.Opacity = idle ? 1 : 0; WorkSurface.Opacity = idle ? 0 : 1;
+            IdleSurface.Visibility = idle ? Visibility.Visible : Visibility.Collapsed;
+            WorkSurface.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
             return;
         }
-
-        // 没有进行中任务：找最近一条还没庆祝过的结束任务
-        var finished = TaskCenter.Entries.FirstOrDefault(t => !t.IsActive && (t.Status == "已完成" || t.Status == "失败") && !_celebrated.Contains(t.Id));
-        if (finished is not null && (_state != IslandState.Hidden || DateTime.Now - ParseTime(finished) < TimeSpan.FromSeconds(30)))
+        var story = new Storyboard();
+        void Animate(DependencyObject target, string property, double from, double to, int duration, int delay = 0)
         {
-            _celebrated.Add(finished.Id);
-            var failed = finished.Status == "失败";
-            Show(failed ? IslandState.Failed : IslandState.Done, finished, []);
-            _holdTimer.Interval = TimeSpan.FromMilliseconds(failed ? FailedHoldMs : DoneHoldMs);
-            _holdTimer.Stop();
-            _holdTimer.Start();
-            return;
+            var animation = new DoubleAnimation { From = from, To = to, BeginTime = TimeSpan.FromMilliseconds(delay), Duration = TimeSpan.FromMilliseconds(duration),
+                EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+            Storyboard.SetTarget(animation, target); Storyboard.SetTargetProperty(animation, property); story.Children.Add(animation);
         }
-
-        if (_state is IslandState.Done or IslandState.Failed) return;   // 还在停留期，等计时器
-        ShowIdle();
+        Animate(Pill, "Width", fromWidth, width, 360);
+        Animate(IdleSurface, "Opacity", idleOpacity, idle ? 1 : 0, idle ? 180 : 100, idle ? 100 : 0);
+        Animate(WorkSurface, "Opacity", workOpacity, idle ? 0 : 1, idle ? 100 : 180, idle ? 0 : 80);
+        story.Completed += (_, _) =>
+        {
+            if (version != _transitionVersion) return;
+            Pill.Width = width;
+            IdleSurface.Visibility = idle ? Visibility.Visible : Visibility.Collapsed;
+            WorkSurface.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
+        };
+        _transition = story; story.Begin();
     }
 
-    /// <summary>没有任务：药丸一直在，显示铃铛和未读数；展开（悬停 / 点击 / 有新通知）时给出通知列表。</summary>
-    private void ShowIdle()
-    {
-        var expanded = _pinnedOpen || _hover || IncomingActive;
-        Show(expanded ? IslandState.Expanded : IslandState.Idle, null, []);
-    }
-
-    private void Settle()
-    {
-        if (_hover) return;
-        _pinnedOpen = false;
-        Refresh();
-        if (_state is IslandState.Done or IslandState.Failed) ShowIdle();
-    }
-
-    private static DateTime ParseTime(TaskEntry entry)
-        => DateTime.TryParse(entry.TimeText, out var t) ? DateTime.Today + t.TimeOfDay : DateTime.MinValue;
-
-    // ------------------------------------------------------------ 绘制
-
-    private void Show(IslandState state, TaskEntry? primary, List<TaskEntry> active)
-    {
-        var wasHidden = Pill.Visibility != Visibility.Visible;
-        _state = state;
-        Pill.Visibility = Visibility.Visible;
-
-        var idle = primary is null;                       // 没有任务：铃铛 + 未读数
-        var expanded = state == IslandState.Expanded;
-        var showCompactProgress = !idle && state == IslandState.Compact;
-        var unread = TaskCenter.Notifications.Count(n => !n.IsRead);
-        Ring.Visibility = showCompactProgress ? Visibility.Visible : Visibility.Collapsed;
-        Ring.IsActive = showCompactProgress;
-        StateIcon.Visibility = expanded || showCompactProgress ? Visibility.Collapsed : Visibility.Visible;
-        if (idle)
-        {
-            StateIcon.Glyph = "\uE7ED";
-            StateIcon.Foreground = (Brush)Application.Current.Resources[unread > 0 ? "TintTasksBrush" : "AppText2Brush"];
-        }
-        else if (!expanded && !showCompactProgress)
-        {
-            var failed = state == IslandState.Failed;
-            StateIcon.Glyph = failed ? "\uE783" : "\uE73E";
-            StateIcon.Foreground = (Brush)Application.Current.Resources[failed ? "AppWarnBrush" : "AppAccentBrush"];
-        }
-
-        Grid.SetColumn(TitleText, expanded ? 0 : 1);
-        Grid.SetColumnSpan(TitleText, expanded ? 4 : 1);
-        TitleText.Text = expanded ? "任务与通知" : idle
-            ? (unread > 0 ? $"{unread} 条未读" : "任务与通知")
-            : state switch
-            {
-                IslandState.Done => $"{primary!.Title} · 已完成",
-                IslandState.Failed => $"{primary!.Title} · 失败",
-                _ => primary!.Title,
-            };
-        var showPercent = showCompactProgress && !primary!.IsIndeterminate;
-        PercentText.Text = showPercent ? $"{Math.Round(primary!.Progress)}%" : "";
-        PercentText.Visibility = showPercent ? Visibility.Visible : Visibility.Collapsed;
-        Bar.Visibility = showCompactProgress ? Visibility.Visible : Visibility.Collapsed;
-        var barIdle = showCompactProgress && primary!.IsIndeterminate;
-        BarIndeterminate.Visibility = barIdle ? Visibility.Visible : Visibility.Collapsed;
-        BarFill.Visibility = showCompactProgress && !barIdle ? Visibility.Visible : Visibility.Collapsed;
-        if (showPercent) BarScale.ScaleX = Math.Clamp(primary!.Progress, 0, 100) / 100.0;
-
-        var more = active.Count - 1;
-        MoreChip.Visibility = !expanded && more > 0 ? Visibility.Visible : Visibility.Collapsed;
-        MoreText.Text = $"+{more}";
-
-        if (expanded)
-        {
-            BuildBody(active);
-            ExpandIsland();
-        }
-        else
-        {
-            CollapseIsland();
-        }
-        CompactRow.Visibility = Visibility.Visible;
-        // 悬停提示只在构造时设置一次，不在这里动：提示框正开着时去改 / 清掉它会抛 0x8000FFFF（灾难性故障）。
-        AutomationProperties.SetName(Pill, TitleText.Text);
-
-        if (wasHidden) AnimateIn();
-    }
-
-    private void Hide()
-    {
-        if (Pill.Visibility != Visibility.Visible) { _state = IslandState.Hidden; return; }
-        _state = IslandState.Hidden;
-        Ring.IsActive = false;
-        CollapseIsland();
-        Pill.Visibility = Visibility.Collapsed;
-    }
-
-    private void AnimateIn()
-    {
-        if (!_ui.AnimationsEnabled) { PillScale.ScaleX = PillScale.ScaleY = 1; Pill.Opacity = 1; return; }
-        PillScale.ScaleX = PillScale.ScaleY = 0.86;
-        Pill.Opacity = 0;
-        var sb = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-        void Add(DependencyObject target, string path, double from, double to)
-        {
-            var a = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-            {
-                From = from, To = to, Duration = TimeSpan.FromMilliseconds(240), EnableDependentAnimation = true,
-                EasingFunction = new Microsoft.UI.Xaml.Media.Animation.CubicEase { EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut },
-            };
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(a, target);
-            Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(a, path);
-            sb.Children.Add(a);
-        }
-        Add(PillScale, "ScaleX", 0.86, 1);
-        Add(PillScale, "ScaleY", 0.86, 1);
-        Add(Pill, "Opacity", 0, 1);
-        sb.Begin();
-    }
-
-    private void BuildBody(List<TaskEntry> active)
-    {
-        // Body 里固定三块：任务区（每次重建）、通知区（内容变了才重建，免得进度刷新时把正在点的按钮换掉）、查看全部
-        if (_taskHost is null || _noteHost is null || _allButton is null || Body.Children.Count != 3)
-        {
-            Body.Children.Clear();
-            _taskHost = new StackPanel { Spacing = 8 };
-            _noteHost = new StackPanel { Spacing = 8 };
-            _allButton = new Button
-            {
-                Content = "查看全部", Height = 30, HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Center, FontSize = 11.5,
-            };
-            _allButton.Click += (_, _) => App.MainWindow?.Navigate("tasks");
-            Body.Children.Add(_taskHost);
-            Body.Children.Add(_noteHost);
-            Body.Children.Add(_allButton);
-            _noteSignature = "";
-        }
-
-        BuildTasks(active);
-        BuildNotes(active.Count > 0);
-    }
-
-    private void BuildTasks(List<TaskEntry> active)
-    {
-        _taskHost!.Children.Clear();
-        foreach (var entry in active.Take(3))
-        {
-            var row = new Grid { ColumnSpacing = 10 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            if (entry.TargetIcon is { } icon)
-                row.Children.Add(new Image { Source = icon, Width = 24, Height = 24, VerticalAlignment = VerticalAlignment.Top });
-
-            var text = new StackPanel { Spacing = 3 };
-            text.Children.Add(new TextBlock
-            {
-                Text = entry.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = (Brush)Application.Current.Resources["AppTextBrush"], TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-            text.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(entry.Detail) ? entry.Status : entry.Detail, FontSize = 11.5,
-                Foreground = (Brush)Application.Current.Resources["AppText3Brush"], TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-            // 自绘条：展开体每次刷新都会重建这些行，内置 ProgressBar 会从 0 重播动画，看着就是「抽抽」
-            var bar = new Grid { Height = 3 };
-            bar.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(1.5),
-                Background = (Brush)Application.Current.Resources["AppChipBrush"],
-            });
-            bar.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(1.5),
-                Background = (Brush)Application.Current.Resources["TintTasksBrush"],
-                RenderTransformOrigin = new Windows.Foundation.Point(0, 0.5),
-                RenderTransform = new ScaleTransform
-                {
-                    ScaleX = entry.IsIndeterminate ? 0 : Math.Clamp(entry.Progress, 0, 100) / 100.0,
-                },
-            });
-            if (entry.IsIndeterminate)
-                bar.Children.Add(new ProgressBar
-                {
-                    IsIndeterminate = true, Height = 3, Minimum = 0, Maximum = 100,
-                    Foreground = (Brush)Application.Current.Resources["TintTasksBrush"],
-                    Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                });
-            text.Children.Add(bar);
-            Grid.SetColumn(text, 1);
-            row.Children.Add(text);
-
-            if (TaskCenter.CanCancel(entry))
-            {
-                var cancel = new Button
-                {
-                    Content = new FontIcon { Glyph = "\uE711", FontSize = 11 }, Width = 28, Height = 28, Padding = new Thickness(0),
-                    VerticalAlignment = VerticalAlignment.Center, Tag = entry,
-                };
-                ToolTipService.SetToolTip(cancel, "取消");
-                AutomationProperties.SetName(cancel, $"取消 {entry.Title}");
-                cancel.Click += (s, e) => { if (((FrameworkElement)s).Tag is TaskEntry t) TaskCenter.Cancel(t); };
-                Grid.SetColumn(cancel, 2);
-                row.Children.Add(cancel);
-            }
-            _taskHost.Children.Add(row);
-        }
-    }
-
-    /// <summary>最近 4 条通知。邀请没回复时带「接受 / 拒绝」，回复后变成结果文字。</summary>
-    private void BuildNotes(bool hasTasks)
-    {
-        var notes = TaskCenter.Notifications.Take(4).ToList();
-        var signature = string.Join("|", notes.Select(n => $"{n.Id}:{n.InviteOpen}:{n.ResultText}")) + (hasTasks ? "+t" : "");
-        if (signature == _noteSignature) return;
-        _noteSignature = signature;
-
-        _noteHost!.Children.Clear();
-        if (notes.Count == 0)
-        {
-            if (!hasTasks)
-            {
-                _noteHost.Children.Add(new TextBlock
-                {
-                    Text = "没有进行中的任务，也没有通知", FontSize = 12,
-                    Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
-                });
-            }
-            return;
-        }
-
-        if (hasTasks)
-        {
-            _noteHost.Children.Add(new TextBlock
-            {
-                Text = "通知", FontSize = 11.5, Margin = new Thickness(0, 4, 0, 0),
-                Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
-            });
-        }
-
-        foreach (var note in notes)
-        {
-            var card = new StackPanel { Spacing = 4 };
-            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            head.Children.Add(new TextBlock
-            {
-                Text = note.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = (Brush)Application.Current.Resources["AppTextBrush"],
-                TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 250,
-            });
-            head.Children.Add(new TextBlock
-            {
-                Text = note.TimeText, FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
-                Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
-            });
-            card.Children.Add(head);
-            if (!string.IsNullOrWhiteSpace(note.Message))
-            {
-                card.Children.Add(new TextBlock
-                {
-                    Text = note.Message, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, MaxLines = 2,
-                    Foreground = (Brush)Application.Current.Resources["AppText3Brush"],
-                });
-            }
-
-            if (note.InviteOpen)
-            {
-                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2, 0, 0) };
-                var accept = new Button { Content = "接受", Height = 30, Padding = new Thickness(16, 0, 16, 0), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
-                var decline = new Button { Content = "拒绝", Height = 30, Padding = new Thickness(16, 0, 16, 0) };
-                async void Respond(bool ok)
-                {
-                    accept.IsEnabled = decline.IsEnabled = false;
-                    try { await App.Online.RespondToInviteAsync(note, ok); }
-                    finally { _noteSignature = ""; Refresh(); }
-                }
-                accept.Click += (_, _) => Respond(true);
-                decline.Click += (_, _) => Respond(false);
-                buttons.Children.Add(accept);
-                buttons.Children.Add(decline);
-                card.Children.Add(buttons);
-            }
-            else if (note.ResultText.Length > 0)
-            {
-                card.Children.Add(new TextBlock
-                {
-                    Text = note.ResultText, FontSize = 11.5,
-                    Foreground = (Brush)Application.Current.Resources["AppText2Brush"],
-                });
-            }
-
-            var wrap = new Border
-            {
-                Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(10), Child = card,
-                Background = (Brush)Application.Current.Resources["AppChipBrush"],
-            };
-            _noteHost.Children.Add(wrap);
-        }
-    }
-
-    // ------------------------------------------------------------ 交互
-
-    private void Pill_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        _hover = true;
-        _collapseTimer.Stop();
-        _holdTimer.Stop();
-        if (_state is IslandState.Compact or IslandState.Idle) { Refresh(); MarkSeen(); }      // 悬停即展开
-    }
-
-    private void Pill_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        _hover = false;
-        if (_state is IslandState.Done or IslandState.Failed)
-        {
-            _holdTimer.Interval = TimeSpan.FromMilliseconds(1200);
-            _holdTimer.Start();
-            return;
-        }
-        _collapseTimer.Stop();
-        _collapseTimer.Start();                            // 离开 700 ms 后收起，不会一晃就缩
-    }
-
-    private void Pill_Tapped(object sender, TappedRoutedEventArgs e)
-    {
-        if (e.OriginalSource is FrameworkElement { } src && IsInsideButton(src)) return;   // 取消/查看全部自己处理
-        if (_state is IslandState.Done or IslandState.Failed)
-        {
-            var tag = TaskCenter.Entries.FirstOrDefault(t => !t.IsActive)?.PageTag;
-            if (!string.IsNullOrWhiteSpace(tag)) App.MainWindow?.Navigate(tag);
-            return;
-        }
-        _pinnedOpen = !_pinnedOpen && _state is IslandState.Compact or IslandState.Idle;
-        Refresh();
-        if (_pinnedOpen) MarkSeen();
-    }
-
-    private static bool IsInsideButton(DependencyObject node)
-    {
-        for (var n = node; n is not null; n = VisualTreeHelper.GetParent(n))
-            if (n is Button) return true;
-        return false;
-    }
+    private void Trigger_Click(object sender, RoutedEventArgs e) => App.MainWindow?.ToggleUnifiedActivityCenter(_primary is not null);
 }

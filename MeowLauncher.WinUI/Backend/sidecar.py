@@ -645,7 +645,7 @@ def _dev_features_on() -> bool:
 
 def _online_enabled() -> bool:
     """联机功能是否真正生效 = 已认证 且 开发者测试功能已打开 且 联机开关已打开。
-    三层缺一层都不会向 Mojang 上报任何在线状态。环境变量 MEOW_ONLINE=1 是测试用的强制启用。"""
+    房间与邀请使用这个开关。环境变量 MEOW_ONLINE=1 是测试用的强制启用。"""
     if _env_on("MEOW_ONLINE"):
         return True
     if not _dev_features_on():
@@ -657,11 +657,14 @@ def _online_enabled() -> bool:
 
 
 def _share_online() -> bool:
-    """settings4.json 的 shareOnline 为 false 时不向好友显示在线（联机开启后默认开）。"""
+    """启动器显式选择优先；老配置只沿用已经生效的分享状态。"""
+    choice = os.environ.get("MEOW_SHARE_LAUNCHER_PRESENCE")
+    if choice in ("0", "1"):
+        return choice == "1"
     try:
-        return load_settings().get("shareOnline", True) is not False
+        return _online_enabled() and load_settings().get("shareOnline", True) is not False
     except Exception:
-        return True
+        return False
 
 
 def dev_settings() -> dict:
@@ -678,7 +681,7 @@ def dev_settings() -> dict:
     }
 
 
-def set_dev_settings(dev_features: bool, online: bool, share: bool) -> dict:
+def set_dev_settings(dev_features: bool, online: bool, share: bool | None = None) -> dict:
     """保存开关，并强制三层关系：没认证 → 开发者功能关；开发者功能关 → 联机关。"""
     st = load_settings()
     if not _dev_unlocked():
@@ -687,7 +690,8 @@ def set_dev_settings(dev_features: bool, online: bool, share: bool) -> dict:
         online = False
     st["devFeatures"] = bool(dev_features)
     st["onlineEnabled"] = bool(online)
-    st["shareOnline"] = bool(share)
+    if share is not None:
+        st["shareOnline"] = bool(share)
     save_settings(st)
     return dev_settings()
 
@@ -861,20 +865,16 @@ def mojang_proof(server_id: str, for_verdict: bool = False) -> dict:
 
 def presence_report(status: str) -> dict:
     """单独上报在线状态（心跳 / 退出）。游戏在运行或用户关了「显示在线」时不动手，原因放在 skipped 里。"""
-    if not _online_enabled():
-        return {"ok": True, "skipped": "online-disabled", "error": "", "meowOnline": 0}
-    token = _mc_access_token()
-    if not token:
-        return {"ok": False, "skipped": "", "error": _mc_not_logged_message(), "meowOnline": 0}
     st = str(status or "").upper()
     if st not in ("ONLINE", "OFFLINE"):
         return {"ok": False, "skipped": "", "error": "状态只能是 ONLINE 或 OFFLINE。", "meowOnline": 0}
-    if not _online_enabled():
-        return {"ok": True, "skipped": "online-disabled", "error": "", "meowOnline": 0}
-    if _game_running():
-        return {"ok": True, "skipped": "game-running", "error": "", "meowOnline": 0}
     if st == "ONLINE" and not _share_online():
         return {"ok": True, "skipped": "disabled", "error": "", "meowOnline": 0}
+    if _game_running():
+        return {"ok": True, "skipped": "game-running", "error": "", "meowOnline": 0}
+    token = _mc_access_token()
+    if not token:
+        return {"ok": False, "skipped": "", "error": _mc_not_logged_message(), "meowOnline": 0}
     try:
         mod = _friends_module()
         r = mod.presence(token, "ONLINE", PRESENCE_MARKER) if st == "ONLINE" else mod.presence(token, "OFFLINE")
@@ -968,9 +968,7 @@ def _friends_payload(profile_mod, token: str) -> dict:
     # 好友在线状态只能靠 POST /presence 拿（同时上报自己）。游戏在运行或关了「显示在线」就不上报，
     # 这时拿不到在线信息，界面会提示。
     skipped = ""
-    if not _online_enabled():
-        skipped = "online-disabled"
-    elif _game_running():
+    if _game_running():
         skipped = "game-running"
     elif not _share_online():
         skipped = "disabled"
@@ -3609,7 +3607,7 @@ def install_java(major: int, emit=None) -> dict:
         return {"ok": False, "message": f"下载 Java {major} 失败：{exc}"}
 
 
-def launch_version(vid: str, emit=None, *, java_once: str = "") -> dict:
+def launch_version(vid: str, emit=None, *, java_once: str = "", offline: bool = False) -> dict:
     """启动实例：走 --progress 时逐行吐阶段事件（`序号|短标题|说明`）与日志尾（`› 文本`）。"""
     def stage(index: int, detail: str) -> None:
         if emit is None:
@@ -3638,6 +3636,9 @@ def launch_version(vid: str, emit=None, *, java_once: str = "") -> dict:
     if not acc or not (acc.get("name") or acc.get("uuid")):
         return {"ok": False, "message": "还没有登录 Minecraft 账号，请先在账户页添加账户。"}
     if str(acc.get("type") or "").lower() == "microsoft":
+        if offline:
+            return {"ok": False, "errorCode": "AUTH-NETWORK",
+                    "message": "当前处于离线状态，Microsoft 账户需要联网进行正版验证。可以切换到离线账户启动本地实例。"}
         from ml2 import session
         stage(0, "正在验证 Minecraft 正版会话…")
         try:
@@ -3838,7 +3839,7 @@ def read_logs(file_name: str = "", limit: int = 400) -> dict:
             "lines": tail, "total": len(lines), "truncated": len(lines) > len(tail)}
 
 
-def list_mojang_versions(force: bool = False) -> dict:
+def list_mojang_versions(force: bool = False, *, cache_only: bool = False) -> dict:
     root = Path(os.getcwd())
     sys.path.insert(0, str(root))
     from ml2 import net
@@ -3846,7 +3847,7 @@ def list_mojang_versions(force: bool = False) -> dict:
     mc = game_dir(st)
     installed = {str(v.get("id") or "") for v in scan_versions(mc, st)}
     rows = []
-    for item in net.mojang_versions(force=force):
+    for item in net.mojang_versions(force=force, cache_only=cache_only):
         kind = str(item.get("type") or "")
         # old_beta / old_alpha 也要放行：下载页的「远古」分段靠它们，不放行就永远是空的。
         if kind not in ("release", "snapshot", "old_beta", "old_alpha"):
@@ -3882,6 +3883,8 @@ def loader_versions(mc_version: str, kind: str) -> dict:
     root = Path(os.getcwd())
     sys.path.insert(0, str(root))
     from ml2 import loaders
+    if not loaders.can_query_loader(mc_version, kind):
+        return {"ok": True, "versions": [], "recommended": ""}
     # loaders.available_versions 第一次请求偶发空结果并会把空列表写进缓存，
     # 这里绕过缓存直接重试 raw，拿到结果后自己按新→旧排序。
     raw: list = []
@@ -3904,7 +3907,8 @@ def loader_versions(mc_version: str, kind: str) -> dict:
         if raw:
             break
         if worker.is_alive():
-            # 网络卡住时直接放弃，让界面走「默认最新」分支
+            # 超时属于查询失败，不能误当成“不支持”而隐藏加载器。
+            last_error = "加载器版本查询超时，请重试"
             break
         time.sleep(0.5)
     if not raw and last_error:
@@ -3963,6 +3967,9 @@ def loader_support(mc_version: str) -> dict:
 
     def _probe(kind: str) -> None:
         try:
+            if not loaders.loader_game_supported(mc_version, kind):
+                kinds[kind] = {"ok": True, "versions": [], "recommended": ""}
+                return
             if kind == "fabric":
                 rows = loaders._get_json(f"https://meta.fabricmc.net/v2/versions/loader/{mc_version}") or []
                 vs = _sorted((r.get("loader") or {}).get("version") for r in rows if isinstance(r, dict))
@@ -4074,6 +4081,9 @@ def _install_new_loader(mc: Path, base: str, kind: str, loader_version: str,
 def install_version(vid: str, loader: str = "vanilla", loader_version: str = "",
                     emit=None, with_prereq: bool = False,
                     prereq_version: str = "", custom_name: str = "", prereq_project: str = "") -> dict:
+    from ml2 import loaders
+    if loader not in ("vanilla", "原版", "") and not loaders.can_query_loader(vid, loader.lower()):
+        raise RuntimeError(f"{vid} 不支持 {loader} 加载器。")
     root = Path(os.getcwd())
     sys.path.insert(0, str(root))
     from ml2 import net
@@ -4544,7 +4554,9 @@ def _online_context(vid: str = ""):
     st = load_settings()
     mc, target, base = _mods_context(vid)
     from ml2 import net
-    meta = next((v for v in scan_versions(mc, st) if str(v.get("id") or "") == target), {})
+    meta = next((v for v in scan_versions(mc, st) if str(v.get("id") or "") == target), None)
+    if meta is None:
+        raise RuntimeError(f"在选定游戏目录中找不到实例「{target}」。请重新选择安装目标。")
     return st, net, mc, target, base, str(meta.get("baseVersion") or ""), str(meta.get("loader") or "")
 
 
@@ -5708,6 +5720,37 @@ def main(argv: list[str]) -> int:
         return result
 
     try:
+        if "--launcher-download" in argv:
+            # Launcher updates use the same connection pool, routing and segmented engine as game files.
+            from ml2 import net
+            data = decode_json_arg(argv[argv.index("--launcher-download") + 1])
+            urls = data.get("urls") or []
+            dest = Path(str(data.get("path") or ""))
+            size = int(data.get("size") or 0)
+            sha = str(data.get("sha256") or "").lower()
+            if not urls or size <= 0 or size > 2 * 1024**3 or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+                raise ValueError("更新包参数不完整")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            last = ""
+            for url in urls:
+                if urllib.parse.urlsplit(url).scheme != "https":
+                    continue
+                try:
+                    def report(done, total):
+                        if "--progress" in argv:
+                            _emit_json({"stage": f"@progress|{min(99, done * 100 / max(size, 1)):.1f}|正在下载更新包"})
+                    net._download(url, dest, report, size=size)
+                    import hashlib
+                    with dest.open("rb") as stream:
+                        if hashlib.file_digest(stream, "sha256").hexdigest() != sha:
+                            raise RuntimeError("更新包 SHA-256 校验失败")
+                    _emit_json({"ok": True, "message": "更新包已下载并校验"})
+                    return 0
+                except Exception as exc:
+                    last = f"{type(exc).__name__}: {exc}"
+                    if dest.exists():
+                        dest.replace(dest.with_name(dest.name + f".rejected-{time.time_ns()}"))
+            raise RuntimeError(last or "没有可用的更新下载地址")
         if "--version-cover" in argv:
             ci = argv.index("--version-cover")
             cover_vid = argv[ci + 1] if ci + 1 < len(argv) else ""
@@ -5779,7 +5822,8 @@ def main(argv: list[str]) -> int:
                 java_arg = argv.index("--java-once") + 1
                 if java_arg < len(argv):
                     java_once = str(decode_json_arg(argv[java_arg]).get("javaPath") or "")
-            print(json.dumps(action_result(launch_version(vid, emit_stage, java_once=java_once)),
+            print(json.dumps(action_result(launch_version(
+                vid, emit_stage, java_once=java_once, offline="--offline" in argv)),
                              ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--java-install" in argv:
@@ -5946,7 +5990,8 @@ def main(argv: list[str]) -> int:
                              separators=(",", ":")))
             return 0
         if "--mojang-versions" in argv:
-            print(json.dumps(list_mojang_versions(force="--force" in argv), ensure_ascii=False, separators=(",", ":")))
+            result = list_mojang_versions(force="--force" in argv, cache_only="--cache-only" in argv)
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
             return 0
         if "--packs" in argv:
             idx = argv.index("--packs")
@@ -6163,7 +6208,8 @@ def main(argv: list[str]) -> int:
             idx = argv.index("--dev-set")
             def _flag(i: int, default: str) -> bool:
                 return (argv[idx + i] if idx + i < len(argv) else default) in ("1", "true", "on")
-            print(json.dumps(set_dev_settings(_flag(1, "0"), _flag(2, "0"), _flag(3, "1")), ensure_ascii=False))
+            share = _flag(3, "0") if idx + 3 < len(argv) and not argv[idx + 3].startswith("--") else None
+            print(json.dumps(set_dev_settings(_flag(1, "0"), _flag(2, "0"), share), ensure_ascii=False))
             return 0
         if "--mojang-who" in argv:
             print(json.dumps(mojang_who("--verdict" in argv), ensure_ascii=False))

@@ -119,8 +119,5 @@
              第 1 行（胶囊）收起后 RowSpacing 还会占一格，这里用负边距补回。 -->
         <Frame x:Name="SubFrame" Grid.Row="2" Background="Transparent" Margin="0,-12,0,0"
                IsNavigationStackEnabled="False" Visibility="Collapsed" />
-        <InfoBar x:Name="PackImportNotice" Grid.RowSpan="3" Canvas.ZIndex="10"
-                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="400"
-                 IsClosable="True" Visibility="Visible" />
     </Grid>
 </Page>

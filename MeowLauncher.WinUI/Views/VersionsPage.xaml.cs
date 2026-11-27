@@ -23,14 +23,6 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         Error,
     }
 
-    private enum StageState
-    {
-        Pending,
-        Active,
-        Done,
-    }
-
-    private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromSeconds(4) };
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private Snapshot? _snapshot;
     private List<VersionInfo> _all = [];
@@ -89,17 +81,11 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         if (App.MainWindow is { } shell) shell.CompactChanged += (_, _) => ApplyCompact(shell.IsCompact);
         Unloaded += (_, _) =>
         {
-            _toastTimer.Stop();
             _saveTimer.Stop();
             GameSessions.Changed -= GameSessions_Changed;
         };
         GameSessions.Changed -= GameSessions_Changed;
         GameSessions.Changed += GameSessions_Changed;
-        _toastTimer.Tick += (_, _) =>
-        {
-            Toast.IsOpen = false;
-            _toastTimer.Stop();
-        };
         _saveTimer.Tick += async (_, _) =>
         {
             _saveTimer.Stop();
@@ -899,7 +885,6 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         UpdateLaunchButtonState(version.Id);
         DetailSwitch.Visibility = version.IsCurrent ? Visibility.Collapsed : Visibility.Visible;
         DetailSwitch.IsEnabled = true;
-        if (!_launching) LaunchStages.Visibility = Visibility.Collapsed;
         _ = LoadInstanceSettingsAsync(version);
     }
 
@@ -1787,122 +1772,6 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         else UpdateLaunchButtonState(_selected?.Id ?? "");
     }
 
-    private static readonly string[] StageNames =
-    [
-        "读取启动配置",
-        "检查 Java 运行时",
-        "组装启动参数",
-        "启动游戏进程",
-    ];
-
-    private void StartStages()
-    {
-        LaunchStages.Visibility = Visibility.Visible;
-        LaunchStageRing.IsActive = true;
-        LaunchStageRing.Visibility = Visibility.Visible;
-        LaunchStageTitle.Text = "正在启动…";
-        for (var i = 0; i < StageNames.Length; i++) SetStageVisual(i, StageState.Pending);
-    }
-
-    private static int StageIndexFor(string stage)
-    {
-        if (stage.Contains("已启动", StringComparison.Ordinal) || stage.Contains("记录启动时间", StringComparison.Ordinal))
-            return StageNames.Length;
-        for (var i = 0; i < StageNames.Length; i++)
-        {
-            if (stage.Contains(StageNames[i], StringComparison.Ordinal)) return i;
-        }
-        if (stage.Contains("Java", StringComparison.OrdinalIgnoreCase)) return 1;
-        if (stage.Contains("组装", StringComparison.Ordinal)) return 2;
-        return -1;
-    }
-
-    private void AdvanceStage(string stage)
-    {
-        var index = StageIndexFor(stage);
-        if (index < 0) return;
-        LaunchStageTitle.Text = stage;
-        for (var i = 0; i < StageNames.Length; i++)
-        {
-            SetStageVisual(i, i < index ? StageState.Done : i == index ? StageState.Active : StageState.Pending);
-        }
-    }
-
-    private void CompleteStages()
-    {
-        LaunchStageTitle.Text = "游戏进程已启动";
-        LaunchStageRing.IsActive = false;
-        LaunchStageRing.Visibility = Visibility.Collapsed;
-        for (var i = 0; i < StageNames.Length; i++) SetStageVisual(i, StageState.Done);
-    }
-
-    private void FailStage()
-    {
-        LaunchStageTitle.Text = "启动中断，可以查看日志再试";
-        LaunchStageRing.IsActive = false;
-        LaunchStageRing.Visibility = Visibility.Collapsed;
-    }
-
-    private void SetStageVisual(int index, StageState state)
-    {
-        var icon = index switch
-        {
-            0 => Stage1Icon,
-            1 => Stage2Icon,
-            2 => Stage3Icon,
-            _ => Stage4Icon,
-        };
-        var row = index switch
-        {
-            0 => StageRow1,
-            1 => StageRow2,
-            2 => StageRow3,
-            _ => StageRow4,
-        };
-        icon.Glyph = state switch
-        {
-            StageState.Done => "\uE73E",
-            StageState.Active => "\uE895",
-            _ => "\uE73B",
-        };
-        icon.Foreground = state switch
-        {
-            StageState.Done => BrushOf("AppGoodBrush"),
-            StageState.Active => BrushOf("TintRecentBrush"),
-            _ => BrushOf("AppText3Brush"),
-        };
-        row.Opacity = state == StageState.Pending ? 0.45 : 1;
-    }
-
-    private static Brush BrushOf(string key)
-    {
-        try
-        {
-            var resources = Application.Current?.Resources;
-            if (resources is not null)
-            {
-                if (resources.TryGetValue(key, out var direct) && direct is Brush directBrush)
-                    return directBrush;
-                // t55：ThemeDictionaries 里的画刷要走当前主题字典取
-                var theme = (App.MainWindow?.Content as FrameworkElement)?.ActualTheme
-                            ?? ElementTheme.Default;
-                var themeKey = theme == ElementTheme.Light ? "Light" : "Default";
-                if (resources.ThemeDictionaries.TryGetValue(themeKey, out var dictionary)
-                    && dictionary is ResourceDictionary themed
-                    && themed.TryGetValue(key, out var themedBrush)
-                    && themedBrush is Brush brush)
-                {
-                    return brush;
-                }
-            }
-        }
-        catch
-        {
-            // 主题资源缺失时退回默认前景色，不影响启动流程。
-        }
-        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
-    }
-
     // ------------------------------------------------------------------ 快捷入口
 
     private async void HideVersion_Click(object sender, RoutedEventArgs e)
@@ -2171,48 +2040,8 @@ public sealed partial class VersionsPage : Page, IPageSearchFilter
         }
     }
 
-    // ------------------------------------------------------------------ Toast
-
-    private void ShowToast(InfoBarSeverity severity, string title, string message,
-        string? actionText = null, Action? action = null, int seconds = 4)
-    {
-        Toast.Severity = severity;
-        Toast.Title = title;
-        Toast.Message = message;
-        if (action is null)
-        {
-            Toast.ActionButton = null;
-        }
-        else
-        {
-            var button = new Button
-            {
-                Content = actionText ?? "查看",
-                Height = 28,
-                Padding = new Thickness(12, 0, 12, 0),
-                CornerRadius = new CornerRadius(14),
-                FontSize = 11.5,
-                BorderThickness = new Thickness(0),
-                Background = BrushOf("ChipHoverBrush"),
-                Foreground = BrushOf("AppTextBrush"),
-            };
-            AutomationProperties.SetName(button, actionText ?? "查看");
-            var captured = action;
-            button.Click += (_, _) => captured();
-            Toast.ActionButton = button;
-        }
-        Toast.IsOpen = true;
-        _toastTimer.Stop();
-        _toastTimer.Interval = TimeSpan.FromSeconds(seconds);
-        _toastTimer.Start();
-    }
-
-    /// <summary>启动失败统一出口：错误码 + 可复制的诊断报告。</summary>
-    private void ShowLaunchFailure(string message, string versionId, FailureInfo failure)
-    {
-        ShowToast(InfoBarSeverity.Error, $"启动失败 · {failure.Code}", message, "复制诊断",
-            () => Diagnostics.Copy(Diagnostics.BuildReport(failure, "启动游戏", message, versionId)), 20);
-    }
+    private static void ShowToast(InfoBarSeverity severity, string title, string message) =>
+        TaskCenter.PostFeedback(severity, title, message);
 }
 
 /// <summary>列表行：名称 + 一行副信息（版本 · 加载器 · Mod 数 · 最近游玩）。</summary>

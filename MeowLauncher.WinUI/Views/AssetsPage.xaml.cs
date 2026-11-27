@@ -401,13 +401,8 @@ public sealed partial class AssetsPage : Page, IPageSearchFilter
         }
     }
 
-    private void ShowToast(InfoBarSeverity severity, string title, string message)
-    {
-        Toast.Title = title;
-        Toast.Message = ClipText(message);
-        Toast.Severity = severity;
-        Toast.IsOpen = true;
-    }
+    private static void ShowToast(InfoBarSeverity severity, string title, string message) =>
+        TaskCenter.PostFeedback(severity, title, message);
 
     /// <summary>存档行「导入数据包」：选本地 .zip/.jar，逐个装进这个存档的 datapacks；重名的跳过并说明。</summary>
     private async void ImportDatapack_Click(object sender, RoutedEventArgs e)

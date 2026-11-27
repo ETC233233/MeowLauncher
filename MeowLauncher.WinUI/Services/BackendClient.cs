@@ -9,6 +9,7 @@ namespace MeowLauncher.WinUI.Services;
 
 public sealed partial class BackendClient
 {
+    private readonly SemaphoreSlim _presenceGate = new(1);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -180,6 +181,7 @@ public sealed partial class BackendClient
         }
 
         var arguments = $"--launch \"{versionId}\"" + (progress is null ? "" : " --progress");
+        if (!NetworkAvailability.CanStartRequest) arguments += " --offline";
         if (javaOnce is not null)
             arguments += " --java-once " + Convert.ToBase64String(
                 JsonSerializer.SerializeToUtf8Bytes(new { javaPath = javaOnce }));
@@ -189,9 +191,9 @@ public sealed partial class BackendClient
         return ParseActionResult(result);
     }
 
-    public async Task<ModsResult?> GetModsAsync(string versionId)
+    public async Task<ModsResult?> GetModsAsync(string versionId, string gameRoot = "")
     {
-        var result = await RunAsync($"--mods \"{versionId}\"", TimeSpan.FromSeconds(45));
+        var result = await RunAsync($"--mods \"{versionId}\"", TimeSpan.FromSeconds(45), gameDir: gameRoot);
         if (!result.Success)
         {
             return new ModsResult { Ok = false, Message = result.Error };
@@ -214,9 +216,9 @@ public sealed partial class BackendClient
     }
 
     /// <summary>检查某个实例里已启用 Mod 的更新；Ok=false 时 Message 是失败原因。</summary>
-    public async Task<ModUpdatesResult> CheckModUpdatesAsync(string versionId)
+    public async Task<ModUpdatesResult> CheckModUpdatesAsync(string versionId, string gameRoot = "")
     {
-        var result = await RunAsync($"--check-mod-updates \"{versionId}\"", TimeSpan.FromSeconds(90));
+        var result = await RunAsync($"--check-mod-updates \"{versionId}\"", TimeSpan.FromSeconds(90), gameDir: gameRoot);
         if (!result.Success)
             return new ModUpdatesResult(false, string.IsNullOrWhiteSpace(result.Error) ? "后端没有响应。" : result.Error, 0, new List<ModUpdate>());
         try
@@ -240,18 +242,19 @@ public sealed partial class BackendClient
         }
     }
 
-    public async Task<BackendResult> UpdateModAsync(string versionId, ModUpdate update)
+    public async Task<BackendResult> UpdateModAsync(string versionId, ModUpdate update, string gameRoot = "")
     {
         var result = await RunAsync(
             $"--update-mod \"{update.File}\" \"{update.Download}\" \"{update.Filename}\" \"{versionId}\"",
-            TimeSpan.FromMinutes(5));
+            TimeSpan.FromMinutes(5), gameDir: gameRoot);
         return ParseActionResult(result);
     }
 
     /// <summary>把误放在 mods 里的资源包 / 光影包移到实例对应文件夹（kind = resourcepack / shaderpack）。</summary>
-    public async Task<BackendResult> MoveMisplacedAsync(string file, string versionId, string kind)
+    public async Task<BackendResult> MoveMisplacedAsync(string file, string versionId, string kind, string gameRoot = "")
     {
-        var result = await RunAsync($"--move-misplaced \"{file}\" \"{versionId}\" {kind}", TimeSpan.FromSeconds(20));
+        var result = await RunAsync($"--move-misplaced \"{file}\" \"{versionId}\" {kind}", TimeSpan.FromSeconds(20),
+            gameDir: gameRoot);
         return ParseActionResult(result);
     }
 
@@ -317,7 +320,14 @@ public sealed partial class BackendClient
 
     public async Task<FriendsResult> GetFriendsAsync()
     {
-        var result = await RunAsync("--friends", TimeSpan.FromSeconds(60));
+        await _presenceGate.WaitAsync().ConfigureAwait(false);
+        try { return await GetFriendsCoreAsync().ConfigureAwait(false); }
+        finally { _presenceGate.Release(); }
+    }
+
+    private async Task<FriendsResult> GetFriendsCoreAsync()
+    {
+        var result = await RunAsync("--friends", TimeSpan.FromSeconds(60)).ConfigureAwait(false);
         if (!result.Success)
         {
             return new FriendsResult { Ok = false, Message = result.Error };
@@ -360,9 +370,9 @@ public sealed partial class BackendClient
         catch (JsonException) { return new DevSettings(); }
     }
 
-    public async Task<DevSettings> SetDevSettingsAsync(bool devFeatures, bool online, bool share)
+    public async Task<DevSettings> SetDevSettingsAsync(bool devFeatures, bool online)
     {
-        var result = await RunAsync($"--dev-set {(devFeatures ? 1 : 0)} {(online ? 1 : 0)} {(share ? 1 : 0)}", TimeSpan.FromSeconds(15));
+        var result = await RunAsync($"--dev-set {(devFeatures ? 1 : 0)} {(online ? 1 : 0)}", TimeSpan.FromSeconds(15));
         if (!result.Success) return new DevSettings { Ok = false };
         try { return JsonSerializer.Deserialize<DevSettings>(result.Output.Trim(), JsonOptions) ?? new DevSettings(); }
         catch (JsonException) { return new DevSettings(); }
@@ -400,7 +410,14 @@ public sealed partial class BackendClient
     /// <summary>单独上报在线状态：ONLINE 用于心跳，OFFLINE 用于退出。游戏在运行或关了「显示在线」时后端会跳过（Skipped 里有原因）。</summary>
     public async Task<PresenceReport> ReportPresenceAsync(string status, TimeSpan? timeout = null)
     {
-        var result = await RunAsync($"--presence {status}", timeout ?? TimeSpan.FromSeconds(30));
+        await _presenceGate.WaitAsync().ConfigureAwait(false);
+        try { return await ReportPresenceCoreAsync(status, timeout).ConfigureAwait(false); }
+        finally { _presenceGate.Release(); }
+    }
+
+    private async Task<PresenceReport> ReportPresenceCoreAsync(string status, TimeSpan? timeout)
+    {
+        var result = await RunAsync($"--presence {status}", timeout ?? TimeSpan.FromSeconds(30)).ConfigureAwait(false);
         if (!result.Success) return new PresenceReport { Ok = false, Error = result.Error };
         try
         {
@@ -744,7 +761,9 @@ public sealed partial class BackendClient
 
     public async Task<MojangVersionsResult?> GetMojangVersionsAsync(bool force = false)
     {
-        var result = await RunAsync(force ? "--mojang-versions --force" : "--mojang-versions", TimeSpan.FromSeconds(45));
+        var offline = !NetworkAvailability.CanStartRequest;
+        var args = offline ? "--mojang-versions --cache-only" : force ? "--mojang-versions --force" : "--mojang-versions";
+        var result = await RunAsync(args, TimeSpan.FromSeconds(45));
         if (!result.Success)
         {
             return new MojangVersionsResult { Ok = false, Message = result.Error };
@@ -752,7 +771,12 @@ public sealed partial class BackendClient
 
         try
         {
-            return JsonSerializer.Deserialize<MojangVersionsResult>(result.Output.Trim(), JsonOptions);
+            var versions = JsonSerializer.Deserialize<MojangVersionsResult>(result.Output.Trim(), JsonOptions);
+            if (offline && versions is { Versions.Count: > 0 })
+                versions.Message = "当前处于离线状态，显示上次保存的版本清单。";
+            else if (offline)
+                return new MojangVersionsResult { Ok = false, Message = NetworkAvailability.OfflineMessage };
+            return versions;
         }
         catch (JsonException ex)
         {
@@ -793,7 +817,7 @@ public sealed partial class BackendClient
     }
 
     public async Task<BackendResult> InstallOnlineAsync(string source, string projectId, string versionId, string kind = "mod",
-        IProgress<string>? progress = null, string? taskId = null, string[]? skipDependencies = null)
+        IProgress<string>? progress = null, string? taskId = null, string[]? skipDependencies = null, string gameRoot = "")
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(projectId))
         {
@@ -801,12 +825,13 @@ public sealed partial class BackendClient
         }
 
         var pack = kind == "modpack";
+        var root = gameRoot.Length > 0 ? gameRoot : pack ? DefaultPackRoot() : "";
         var result = await RunAsync(
             $"--install-online {source} {projectId} \"{versionId}\" {kind}"
             + (progress is null ? "" : " --progress")
             + (skipDependencies is { Length: > 0 } ? " --skip-dependencies=" + string.Join(",", skipDependencies) : ""),
-            TimeSpan.FromMinutes(pack ? 45 : 10), progress is null ? null : progress.Report, pack ? DefaultPackRoot() : "", taskId);
-        return pack ? await SelectInstalledInstanceAsync(ParseActionResult(result), DefaultPackRoot()) : ParseActionResult(result);
+            TimeSpan.FromMinutes(pack ? 45 : 10), progress is null ? null : progress.Report, root, taskId);
+        return pack ? await SelectInstalledInstanceAsync(ParseActionResult(result), root) : ParseActionResult(result);
     }
 
     public async Task<BackendResult> DownloadOnlineFileAsync(string source, string projectId,
@@ -1315,6 +1340,7 @@ public sealed partial class BackendClient
         if (string.IsNullOrWhiteSpace(mcVersion) || string.IsNullOrWhiteSpace(kind))
             return Array.Empty<string>();
 
+        if (!LoaderCompatibility.CanQuery(mcVersion, kind)) return Array.Empty<string>();
         var result = await RunAsync($"--loader-versions \"{mcVersion}\" {kind}", TimeSpan.FromSeconds(75));
         if (!result.Success) return Array.Empty<string>();
         try
@@ -1359,6 +1385,7 @@ public sealed partial class BackendClient
     {
         if (string.IsNullOrWhiteSpace(mcVersion) || string.IsNullOrWhiteSpace(kind))
             return new LoaderKindInfo(false, "没有指定版本。", Array.Empty<string>(), "");
+        if (!LoaderCompatibility.CanQuery(mcVersion, kind)) return new LoaderKindInfo(true, "", Array.Empty<string>(), "");
         var result = await RunAsync($"--loader-versions \"{mcVersion}\" {kind}", TimeSpan.FromSeconds(20));
         if (!result.Success)
             return new LoaderKindInfo(false, string.IsNullOrWhiteSpace(result.Error) ? "后台没有响应。" : result.Error,
@@ -1591,9 +1618,9 @@ public sealed partial class BackendClient
     }
 
     /// <summary>--mod-project：按文件 sha1 去 Modrinth 查这个 jar 属于哪个项目（只读）。查不到 Ok=false。</summary>
-    public async Task<ModProjectLookup> GetModProjectAsync(string versionId, string file)
+    public async Task<ModProjectLookup> GetModProjectAsync(string versionId, string file, string gameRoot = "")
     {
-        var result = await RunAsync($"--mod-project \"{versionId}\" \"{file}\"", TimeSpan.FromSeconds(30));
+        var result = await RunAsync($"--mod-project \"{versionId}\" \"{file}\"", TimeSpan.FromSeconds(30), gameDir: gameRoot);
         var text = (result.Output ?? "").Trim();
         if (text.Length == 0) return new ModProjectLookup(false, result.Error ?? "后台无响应", "", "", "", "");
         try
@@ -1722,6 +1749,19 @@ public sealed partial class BackendClient
         // Legacy instance operations also inherit the selected instance root. Global configuration,
         // directory scans and new installations retain their explicit/default directory semantics.
         var operation = arguments.Split(' ', 2)[0];
+        if ((operation is
+            "--ms-start" or "--ms-poll" or "--friends" or "--friend-action" or "--presence"
+            or "--dependency-info"
+            or "--mc-profile" or "--account-perms" or "--set-account-perm" or "--mc-name-check"
+            or "--mc-rename" or "--mc-cape" or "--mc-skin-variant" or "--mc-reset-skin" or "--mc-upload-skin"
+            or "--mojang-join" or "--mojang-proof" or "--online-files" or "--project" or "--mod-project"
+            or "--install-online" or "--install-online-file" or "--install-online-datapack" or "--download-online-file"
+            or "--import-modpack" or "--check-mod-updates" or "--update-mod"
+            or "--install-version" or "--repair-version" or "--change-version" or "--add-loader"
+            or "--loader-support" or "--loader-versions" or "--fabric-api-versions"
+            or "--java-install" or "--launcher-download" or "--refresh-version-names")
+            && !NetworkAvailability.CanStartRequest)
+            return Task.FromResult(new RunResult(false, "", NetworkAvailability.OfflineMessage));
         if (operation == "--snapshot")
             gameDir = GameDirectoryResolver.Resolve(App.MainWindow?.Preferences ?? AppPreferencesStore.Load()).FirstOrDefault() ?? gameDir;
         if (string.IsNullOrWhiteSpace(gameDir) && operation is
@@ -1775,10 +1815,16 @@ public sealed partial class BackendClient
         {
             psi.Environment[kv.Key] = kv.Value;
         }
-        psi.Environment["MEOW_MC_DIRS"] = JsonSerializer.Serialize(
-            GameDirectoryResolver.Resolve(App.MainWindow?.Preferences ?? AppPreferencesStore.Load()));
+        var preferences = App.MainWindow?.Preferences ?? AppPreferencesStore.Load();
+        psi.Environment["MEOW_MC_DIRS"] = JsonSerializer.Serialize(GameDirectoryResolver.Resolve(preferences));
+        if (preferences.ShareLauncherPresence is { } share)
+            psi.Environment["MEOW_SHARE_LAUNCHER_PRESENCE"] = share ? "1" : "0";
+        else
+            psi.Environment.Remove("MEOW_SHARE_LAUNCHER_PRESENCE");
         psi.Environment["MEOW_HTTP_USER_AGENT"] = McimClient.UserAgent;
         psi.Environment["MEOW_MCIM_ORDER"] = McimClient.PreferOfficial ? "official" : "mirror";
+        psi.Environment["MEOW_CF_SOURCE"] = (App.MainWindow?.Preferences.CurseForgeSource ?? 0) switch
+        { 1 => "cfmi", 2 => "official", _ => "mcim" };
 
         foreach (var arg in SplitArguments(arguments))
         {

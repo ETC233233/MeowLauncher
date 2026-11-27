@@ -41,6 +41,11 @@
 
   <!-- 组件清单入口和验签公钥（公钥不是密钥）写进启动器自己的程序集元数据 -->
   <ItemGroup>
+    <ProjectReference Include="..\MeowLauncher.Updater\MeowLauncher.Updater.csproj" ReferenceOutputAssembly="false" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>MeowConfigFallbacks</_Parameter1>
+      <_Parameter2>$(MeowConfigFallbacks)</_Parameter2>
+    </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>MeowConfigEntry</_Parameter1>
       <_Parameter2>$(MeowConfigEntry)</_Parameter2>
@@ -82,6 +87,21 @@
   <!-- 发布时 MeowLauncher.WinUI.pri 不会被自动带上，缺了启动即崩；发布后从构建输出补拷。 -->
   <Target Name="CopyAppPriToPublish" AfterTargets="Publish">
     <Copy SourceFiles="$(TargetDir)MeowLauncher.WinUI.pri" DestinationFolder="$(PublishDir)" Condition="Exists('$(TargetDir)MeowLauncher.WinUI.pri')" />
+  </Target>
+
+  <Target Name="CopyPortableUpdater" AfterTargets="Build">
+    <ItemGroup>
+      <_UpdaterFiles Include="..\MeowLauncher.Updater\bin\x64\$(Configuration)\net8.0\win-x64\MeowLauncher.Updater.*" Exclude="**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_UpdaterFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishPortableUpdater" AfterTargets="Publish">
+    <MSBuild Projects="..\MeowLauncher.Updater\MeowLauncher.Updater.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);Platform=x64;RuntimeIdentifier=win-x64;SelfContained=$(SelfContained);PublishDir=$(MSBuildProjectDirectory)/../MeowLauncher.Updater/obj/publish-$(Configuration)/" />
+    <ItemGroup>
+      <_PublishedUpdater Include="..\MeowLauncher.Updater\obj\publish-$(Configuration)\MeowLauncher.Updater.*" Exclude="**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PublishedUpdater)" DestinationFolder="$(PublishDir)" />
   </Target>
 
 

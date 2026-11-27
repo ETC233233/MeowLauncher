@@ -51,17 +51,6 @@ def system_java_root(major: int, vendor: str = "zulu") -> Path:
     return Path(base) / label / f"zulu-{int(major)}"
 
 
-def _can_write(path: Path) -> bool:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".meow-write-test"
-        probe.write_text("1", encoding="utf-8")
-        probe.unlink()
-        return True
-    except Exception:
-        return False
-
-
 def _extract_elevated(zip_path: Path, target: Path) -> bool:
     """提权（弹一次 UAC）把 zip 解到 Program Files，成功返回 True。"""
     if os.name != "nt":

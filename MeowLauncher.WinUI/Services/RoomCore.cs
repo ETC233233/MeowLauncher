@@ -130,6 +130,7 @@ internal sealed class RoomCore : IDisposable
     public async Task<bool> OpenAsync(int port)
     {
         if (Phase != RoomPhase.Hosting) { Say("先创建房间再开放。"); return false; }
+        if (!NetworkAvailability.CanStartRequest) { Say(NetworkAvailability.OfflineMessage); return false; }
         if (!McPortScanner.IsListening(port))
         {
             Say($"端口 {port} 现在没有在监听，先在游戏里点「对局域网开放」。");
@@ -221,6 +222,7 @@ internal sealed class RoomCore : IDisposable
     private bool CanStart(out string why)
     {
         why = "";
+        if (!NetworkAvailability.CanStartRequest) { why = NetworkAvailability.OfflineMessage; return false; }
         if (InRoom && Phase != RoomPhase.Creating && Phase != RoomPhase.Joining) { why = "你已经在一个房间里了，先关闭或离开它。"; return false; }
         if (Phase is RoomPhase.Creating or RoomPhase.Joining) { why = "正在处理，请稍等。"; return false; }
         if (!App.Online.IsLoggedIn) { why = "联机账号还没登录好，稍等几秒再试。"; return false; }

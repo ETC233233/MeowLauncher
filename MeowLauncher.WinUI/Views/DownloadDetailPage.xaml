@@ -137,9 +137,12 @@
                                         CornerRadius="{StaticResource CardCornerRadius}"
                                         Visibility="{Binding SelectedVisibility}" />
                                 <StackPanel Padding="4" VerticalAlignment="Center" Spacing="6">
-                                    <Viewbox MaxWidth="52" MaxHeight="52" HorizontalAlignment="Center">
+                                    <Grid Width="52" Height="52" HorizontalAlignment="Center">
                                         <Image Source="{Binding Icon}" Stretch="Uniform" />
-                                    </Viewbox>
+                                        <ProgressRing Width="32" Height="32" IsActive="{Binding Loading}"
+                                                      Visibility="{Binding LoadingVisibility}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Grid>
                                     <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{ThemeResource AppTextBrush}"
                                                HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />

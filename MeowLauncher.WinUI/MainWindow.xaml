@@ -1,4 +1,4 @@
-﻿<Window
+<Window
     x:Class="MeowLauncher.WinUI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -390,8 +390,8 @@
              放在 48 高的标题栏那一格里，展开的卡片会被那一格裁掉。左边的 TitleBarRoot 之上、弹窗之下。 -->
         <controls:TaskIsland x:Name="TaskIsland" AutomationProperties.Name="任务与通知灵动岛"
                              Grid.RowSpan="2" Grid.ColumnSpan="2"
-                             VerticalAlignment="Top" HorizontalAlignment="Left"
-                             Margin="676,6,0,0" Canvas.ZIndex="40" />
+                             VerticalAlignment="Top" HorizontalAlignment="Right"
+                             Margin="0,6,152,0" Canvas.ZIndex="40" />
 
         <!-- 冷启动遮罩：盖住标题栏以下的整个窗口，直到本机数据（实例 / 账户）读完；读完淡出 -->
         <Grid x:Name="StartupMask" Grid.RowSpan="2" Grid.ColumnSpan="2" Canvas.ZIndex="60"
@@ -408,9 +408,6 @@
                 </Border>
             </Grid>
         </Grid>
-
-        <!-- 新手引导已改成独立窗口（Views/OnboardingWindow），不再盖住主界面；
-             这里只剩「进入启动器」之后的手绘线稿转场。 -->
 
         <!-- 进入启动器的过渡：先铺一层灰色骨架占位，真实数据就绪后骨架渐隐、露出真界面 -->
         <Grid x:Name="ShellSkeleton" Grid.RowSpan="2" Grid.ColumnSpan="2" Canvas.ZIndex="62"
@@ -555,6 +552,8 @@
         </Grid>
 
         <!-- 出错提示：XAML 未处理异常时浮在内容区顶部，8 秒自动收起；不遮挡操作、不推动布局。 -->
+        <Canvas x:Name="NotificationLayer" Grid.Row="1" Grid.ColumnSpan="2" Canvas.ZIndex="52" />
+
         <Border x:Name="CrashToast" Grid.RowSpan="2" Grid.ColumnSpan="2" HorizontalAlignment="Center" VerticalAlignment="Top"
                 Margin="0,56,0,0" MaxWidth="560" Padding="16,12"
                 CornerRadius="{StaticResource CardCornerRadius}"
@@ -577,42 +576,5 @@
             </Grid>
         </Border>
 
-        <!-- 好友邀请弹窗：收到邀请 / 对方回复时浮在内容区右上角，邀请 30 秒、回复 8 秒自动收起；邀请带「接受 / 拒绝」。 -->
-        <Border x:Name="InviteToast" Grid.RowSpan="2" Grid.ColumnSpan="2" HorizontalAlignment="Right" VerticalAlignment="Top"
-                Margin="0,56,20,0" Width="380" Padding="16,14"
-                CornerRadius="{StaticResource CardCornerRadius}"
-                Background="{ThemeResource AppPanelBrush}"
-                BorderBrush="{ThemeResource TintTasksBrush}" BorderThickness="2"
-                Visibility="Collapsed" Canvas.ZIndex="31">
-            <Border.RenderTransform>
-                <TranslateTransform x:Name="InviteToastShift" X="0" />
-            </Border.RenderTransform>
-            <StackPanel Spacing="10">
-                <Grid ColumnSpacing="10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <FontIcon Glyph="&#xE716;" FontSize="20" Foreground="{ThemeResource TintTasksBrush}"
-                              VerticalAlignment="Top" />
-                    <StackPanel Grid.Column="1" Spacing="3">
-                        <TextBlock x:Name="InviteToastTitle" FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource AppTextBrush}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="InviteToastBody" FontSize="{StaticResource FontSizeSmall}" TextWrapping="Wrap"
-                                   Foreground="{ThemeResource AppText3Brush}" />
-                    </StackPanel>
-                    <Button Grid.Column="2" Content="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                            FontSize="11" Width="28" Height="28" Padding="0" Background="Transparent" BorderThickness="0"
-                            VerticalAlignment="Top" AutomationProperties.Name="关闭提示" Click="InviteToastClose_Click" />
-                </Grid>
-                <StackPanel x:Name="InviteToastButtons" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                    <Button x:Name="InviteToastAccept" Content="接受" Height="34" Padding="18,0"
-                            Style="{StaticResource AccentButtonStyle}" Click="InviteToastAccept_Click" />
-                    <Button x:Name="InviteToastDecline" Content="拒绝" Height="34" Padding="18,0"
-                            Click="InviteToastDecline_Click" />
-                </StackPanel>
-            </StackPanel>
-        </Border>
     </Grid>
 </Window>

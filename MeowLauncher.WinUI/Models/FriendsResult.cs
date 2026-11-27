@@ -28,7 +28,7 @@ public sealed class FriendsResult
     public bool Empty { get; set; }
     public string PresenceError { get; set; } = "";
 
-    /// <summary>没有上报在线状态的原因："online-disabled"（联机功能没开）、"game-running"（游戏在运行，避免覆盖）、"disabled"（关了显示在线）、空串=正常上报。</summary>
+    /// <summary>没有查询在线状态的原因：游戏运行中或关闭了在线状态显示。</summary>
     public string PresenceSkipped { get; set; } = "";
 }
 
@@ -80,7 +80,7 @@ public sealed class DevSettings
     /// <summary>联机功能开关（用户在子页里的选择）。</summary>
     public bool OnlineEnabled { get; set; }
 
-    public bool ShareOnline { get; set; } = true;
+    public bool ShareOnline { get; set; }
 
     /// <summary>联机功能此刻是否真正生效（三层都开 / 环境变量强制启用）。</summary>
     public bool OnlineActive { get; set; }

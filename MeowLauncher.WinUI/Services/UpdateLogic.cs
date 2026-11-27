@@ -6,7 +6,11 @@ namespace MeowLauncher.WinUI.Services;
 public sealed record LauncherRelease(string Version, string Url, string Notes, string Date)
 {
     public MeowVersion? Parsed => MeowVersion.Parse(Version);
+    // Only ParseLauncher (the verified configuration path) attaches an installable package.
+    public LauncherPackage? Package { get; init; }
 }
+
+public sealed record LauncherPackage(string Format, string Platform, long Size, string Sha256, string[] Urls);
 
 public enum UpdateState
 {
@@ -79,7 +83,26 @@ public static class UpdateLogic
         if (parsed is null || parsed.IsReview) return null;
         var url = S("url");
         if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme != Uri.UriSchemeHttps) url = "";
-        return new LauncherRelease(version, url, S("notes"), S("date"));
+        return new LauncherRelease(version, url, S("notes"), S("date")) { Package = ParsePackage(e) };
+    }
+
+    private static LauncherPackage? ParsePackage(JsonElement release)
+    {
+        try
+        {
+            if (!release.TryGetProperty("package", out var p)) return null;
+            var format = p.GetProperty("format").GetString();
+            var platform = p.GetProperty("platform").GetString();
+            var size = p.GetProperty("size").GetInt64();
+            var hash = p.GetProperty("sha256").GetString() ?? "";
+            var urls = p.GetProperty("urls").EnumerateArray().Select(x => x.GetString() ?? "")
+                .Where(x => Uri.TryCreate(x, UriKind.Absolute, out var u) && u.Scheme == "https" && u.UserInfo.Length == 0)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            if (format != "portable-v1" || platform != "win-x64" || size is <= 0 or > 2L * 1024 * 1024 * 1024
+                || hash.Length != 64 || !hash.All(Uri.IsHexDigit) || urls.Length == 0) return null;
+            return new LauncherPackage(format, platform, size, hash.ToLowerInvariant(), urls);
+        }
+        catch { return null; }
     }
 
     /// <summary>
