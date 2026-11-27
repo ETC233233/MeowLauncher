@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>MeowLauncher.WinUI</AssemblyName><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><Platforms>x64</Platforms><RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>false</SelfContained></PropertyGroup>
+</Project>

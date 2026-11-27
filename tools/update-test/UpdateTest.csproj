@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../MeowLauncher.WinUI/Services/PortableUpdate.cs" Link="PortableUpdate.cs" />
+    <Compile Include="../../MeowLauncher.WinUI/Services/UpdateLogic.cs" Link="UpdateLogic.cs" />
+    <Compile Include="../../MeowLauncher.WinUI/Services/MeowVersion.cs" Link="MeowVersion.cs" />
+    <Compile Include="../../MeowLauncher.WinUI/Services/UrlAccel.cs" Link="UrlAccel.cs" />
+  </ItemGroup>
+</Project>

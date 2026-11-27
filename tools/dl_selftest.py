@@ -203,7 +203,9 @@ T("persistent block failure reports error and preserves destination",
 
 stats.update(interrupted=0)
 dest = tmp / "big-mirror.bin"
-with patch.object(net, "_mirrored", return_value=f"{base}/big"):
+with (patch.dict(net._SRC_PREF, {"meta": "official"}),
+      patch.object(net, "_probe_rate_cached", return_value=1.0),
+      patch.object(net, "_mirrored", return_value=f"{base}/big")):
     net._download(f"{base}/big-broken", dest, size=len(BIG), force_segments=True)
 T("official source retries before the installer falls back to mirror",
   stats["interrupted"] == 2 and dest.read_bytes() == BIG)
