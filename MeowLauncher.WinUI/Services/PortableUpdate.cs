@@ -12,9 +12,40 @@ public sealed record PortableUpdatePlan(string Target, string Archive, string En
 public static class PortableUpdate
 {
     public const string ManifestName = "meow-update.json";
+    public const string UpdaterName = "MeowLauncher.Updater.exe";
     private static readonly string[] Required = ["MeowLauncher.WinUI.exe", "MeowLauncher.WinUI.dll",
-        "MeowLauncher.WinUI.pri", "Backend/sidecar.py", "MeowLauncher.Updater.exe", "MeowLauncher.Updater.dll"];
+        "MeowLauncher.WinUI.pri", "Backend/sidecar.py", UpdaterName, "MeowLauncher.Updater.dll"];
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    public static bool SupportsInPlaceUpdate(string root)
+    {
+        if (!File.Exists(Path.Combine(root, ManifestName)) || !File.Exists(Path.Combine(root, UpdaterName)))
+            return false;
+
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (IsUnderDirectory(root, programFiles) || IsUnderDirectory(root, programFilesX86)) return false;
+
+        try
+        {
+            // A previous portable copy can leave its manifest and helper in an Inno Setup installation.
+            return !Directory.EnumerateFiles(root, "unins*.dat")
+                .Any(log => File.Exists(Path.ChangeExtension(log, ".exe")));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsUnderDirectory(string path, string directory)
+    {
+        if (directory.Length == 0) return false;
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        return fullPath.Equals(root, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
 
     public static string SafePath(string root, string relative)
     {

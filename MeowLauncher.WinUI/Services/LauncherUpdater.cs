@@ -13,8 +13,7 @@ public static class LauncherUpdater
     public static LauncherRelease? Prepared { get; private set; }
     private static string _archive = "";
     public static event Action? Changed;
-    public static bool Supported => File.Exists(Path.Combine(AppContext.BaseDirectory, PortableUpdate.ManifestName))
-        && File.Exists(Path.Combine(AppContext.BaseDirectory, "MeowLauncher.Updater.exe"));
+    public static bool Supported => PortableUpdate.SupportsInPlaceUpdate(AppContext.BaseDirectory);
     private static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MeowLauncher", "updates");
 
     private static void State(string text) { Message = text; Changed?.Invoke(); }
@@ -84,7 +83,11 @@ public static class LauncherUpdater
             await PortableUpdate.VerifyAsync(_archive, package);
             // Check permissions while the launcher can still report an error; no automatic elevation.
             var probe = Path.Combine(AppContext.BaseDirectory, "MeowLauncher.update-write-" + Guid.NewGuid().ToString("N"));
-            await File.WriteAllTextAsync(probe, "update permission check");
+            try { await File.WriteAllTextAsync(probe, "update permission check"); }
+            catch (UnauthorizedAccessException)
+            {
+                throw new IOException("当前目录不可写。请从发行页下载对应版本，或将便携版放在有写入权限的目录。");
+            }
             var work = Path.Combine(Root, Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(work);
             File.Move(probe, Path.Combine(work, "write-check"));
@@ -95,7 +98,7 @@ public static class LauncherUpdater
             {
                 var name = Path.GetFileName(file);
                 if (Path.GetExtension(name).ToLowerInvariant() is ".dll" or ".json" or ".dat" or ".bin"
-                    || name == "MeowLauncher.Updater.exe") File.Copy(file, Path.Combine(helper, name));
+                    || name == PortableUpdate.UpdaterName) File.Copy(file, Path.Combine(helper, name));
             }
             var envelope = Path.Combine(work, "envelope.json");
             await File.WriteAllTextAsync(envelope, SignedConfig.VerifiedEnvelope);
@@ -104,7 +107,7 @@ public static class LauncherUpdater
                 release.Version, release == beta ? "beta" : "stable", current.Id, current.StartTime.ToUniversalTime().Ticks, Guid.NewGuid().ToString("N"));
             var planPath = Path.Combine(work, "plan.json");
             await File.WriteAllTextAsync(planPath, JsonSerializer.Serialize(plan));
-            var start = new ProcessStartInfo(Path.Combine(helper, "MeowLauncher.Updater.exe"))
+            var start = new ProcessStartInfo(Path.Combine(helper, PortableUpdate.UpdaterName))
             { WorkingDirectory = helper, UseShellExecute = false, CreateNoWindow = true };
             start.ArgumentList.Add(planPath);
             using var updater = Process.Start(start) ?? throw new IOException("无法启动更新程序。");

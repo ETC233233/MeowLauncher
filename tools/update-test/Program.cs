@@ -26,6 +26,16 @@ string NewTarget(string name)
     File.WriteAllText(Path.Combine(target, "app.json"), "account/preferences");
     return target;
 }
+var portableTarget = NewTarget("portable-layout");
+Check(PortableUpdate.SupportsInPlaceUpdate(portableTarget), "portable layout supports in-place updates");
+var installerTarget = NewTarget("mixed-inno-layout");
+File.WriteAllText(Path.Combine(installerTarget, "unins001.exe"), "uninstaller");
+File.WriteAllText(Path.Combine(installerTarget, "unins001.dat"), "uninstall log");
+Check(!PortableUpdate.SupportsInPlaceUpdate(installerTarget), "installer with leftover portable files uses the release page");
+File.WriteAllText(Path.Combine(portableTarget, "unins001.dat"), "stray log");
+Check(PortableUpdate.SupportsInPlaceUpdate(portableTarget), "stray uninstall log does not disable portable updates");
+Check(!PortableUpdate.SupportsInPlaceUpdate(root), "directory without a portable manifest is not updatable");
+
 string Zip(string name, string? evil = null)
 {
     var file = Path.Combine(root, name + ".zip");

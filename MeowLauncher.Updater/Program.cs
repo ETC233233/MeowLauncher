@@ -22,6 +22,8 @@ try
         if (parent.StartTime.ToUniversalTime().Ticks != plan.ParentStarted
             || !string.Equals(Path.GetDirectoryName(parent.MainModule!.FileName), Path.TrimEndingDirectorySeparator(plan.Target), StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("更新目标与启动器进程不符。");
+        if (!PortableUpdate.SupportsInPlaceUpdate(plan.Target))
+            throw new IOException("当前安装目录不支持原地更新，请通过发行页下载新版。");
         // Validate/extract before announcing readiness, so the launcher can stay open on failure.
         var next = PortableUpdate.Extract(plan.Archive, Path.Combine(work, "expanded"), plan.Version);
         if (File.Exists(Path.Combine(work, "abort"))) throw new OperationCanceledException("更新已取消。");
